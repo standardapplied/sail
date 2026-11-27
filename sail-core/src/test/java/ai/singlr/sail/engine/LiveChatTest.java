@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.LoginOutcome;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -32,9 +33,17 @@ class LiveChatTest {
   private static final HarnessChat CLAUDE_CODE = Harnesses.of("claude-code").chat().orElseThrow();
 
   private static final String HERE =
-      "in this workspace from now on, kept in its folder (.claude/settings.local.json).";
+      "also when another command such as xargs or timeout runs it, with anything that command"
+          + " adds, or after a setting such as LANG=C, from now on, for every Claude Code chat and"
+          + " terminal in this workspace (kept in the workspace's .claude/settings.local.json).";
 
-  private static final String SESSION = "for this session only.";
+  private static final String FOLDER =
+      "Let it work in the folder `/home/dev/workspace`, for this session only.";
+
+  private static final String EDITS_FREELY =
+      "Switch this chat to Edits freely: Edits files and runs common file commands such as mkdir,"
+          + " touch, rm, rmdir, mv, cp and sed in the folders it works in, without asking, and asks"
+          + " before anything else. It stays for the rest of this chat.";
 
   private static Detail written(String path, String text) {
     return new Detail.Edit(
@@ -181,9 +190,7 @@ class LiveChatTest {
                 new Detail.Command("date > stamp.txt", false),
                 List.of(
                     new ChatItem.Always(
-                        List.of(
-                            "Allow this exact command: `date > stamp.txt`, " + HERE,
-                            "Let it work in the folder /home/dev/workspace, " + SESSION))),
+                        List.of("Allow this exact command: `date > stamp.txt`, " + HERE, FOLDER))),
                 false)),
         shown("02b-relay-stdio", 16));
     assertEquals(
@@ -195,7 +202,7 @@ class LiveChatTest {
                 "notes.txt",
                 null,
                 written("/home/dev/workspace/notes.txt", "hi\n"),
-                List.of(new ChatItem.Always(List.of("Switch to Edits freely, " + SESSION))),
+                List.of(new ChatItem.Always(List.of(EDITS_FREELY))),
                 false)),
         shown("02b-relay-stdio", 44));
     var reasoned = (ChatItem.Permission) shown("04d-interrupt-while-tool-runs", 20).getFirst();
@@ -218,50 +225,50 @@ class LiveChatTest {
         "with no description it is named by the tool, and with no suggestion never always");
   }
 
-  /** Every "always" Claude Code 2.1.332 offered in the S0 probe, in the words a person reads. */
+  /**
+   * Every "always" Claude Code 2.1.332 offered in the S0 probe, in the words a person reads: none
+   * for a compound command, a rule Claude Code matches one command at a time, so it may never
+   * match again (03b:91's {@code &&}, and 04d:20's {@code ;}, which is inside quotes but read as
+   * written).
+   */
   @Test
   void everyRecordedAlwaysIsSaidInPlainWords() {
-    var folder = "Let it work in the folder /home/dev/workspace, " + SESSION;
+    var recorded = new LinkedHashMap<String, List<List<String>>>();
+    for (var line :
+        List.of(
+            "02b-relay-stdio:16",
+            "02b-relay-stdio:44",
+            "02b-relay-stdio:72",
+            "02b-relay-stdio:99",
+            "02d-relay-stdio-allow-without-input:17",
+            "03b-plan-exit-plan-mode:91",
+            "04a-cancel-request-by-interrupt:16",
+            "04b-set-permission-mode-and-background-task:132",
+            "04d-interrupt-while-tool-runs:20")) {
+      var at = line.split(":");
+      recorded.put(line, always(at[0], Integer.parseInt(at[1])));
+    }
+
     assertEquals(
         List.of(
-            List.of("Allow this exact command: `date > stamp.txt`, " + HERE, folder),
-            List.of("Switch to Edits freely, " + SESSION),
-            List.of("Allow any command that starts with `echo original`, " + HERE, folder),
+            List.of(List.of("Allow this exact command: `date > stamp.txt`, " + HERE, FOLDER)),
+            List.of(List.of(EDITS_FREELY)),
+            List.of(List.of("Allow any command that starts with `echo original`, " + HERE, FOLDER)),
             List.of(
-                "Allow this exact command: `touch always.txt`, " + HERE,
-                folder,
-                "Switch to Edits freely, " + SESSION),
-            List.of("Allow this exact command: `date > stamp4.txt`, " + HERE, folder),
-            List.of(
-                "Allow this exact command: `printf 'hi\\n' > /home/dev/workspace/hello.txt && cat"
-                    + " /home/dev/workspace/hello.txt`, "
-                    + HERE,
-                folder),
-            List.of("Allow this exact command: `date > c.txt`, " + HERE, folder),
-            List.of("Switch to Edits freely, " + SESSION),
-            List.of(
-                "Allow this exact command: `python3 -c \"import time; time.sleep(25);"
-                    + " print('slept')\"`, "
-                    + HERE)),
-        List.of(
-                always("02b-relay-stdio", 16),
-                always("02b-relay-stdio", 44),
-                always("02b-relay-stdio", 72),
-                always("02b-relay-stdio", 99),
-                always("02d-relay-stdio-allow-without-input", 17),
-                always("03b-plan-exit-plan-mode", 91),
-                always("04a-cancel-request-by-interrupt", 16),
-                always("04b-set-permission-mode-and-background-task", 132),
-                always("04d-interrupt-while-tool-runs", 20))
-            .stream()
-            .map(ChatItem.Always::words)
-            .toList());
+                List.of(
+                    "Allow this exact command: `touch always.txt`, " + HERE, FOLDER, EDITS_FREELY)),
+            List.of(List.of("Allow this exact command: `date > stamp4.txt`, " + HERE, FOLDER)),
+            List.of(),
+            List.of(List.of("Allow this exact command: `date > c.txt`, " + HERE, FOLDER)),
+            List.of(List.of(EDITS_FREELY)),
+            List.of()),
+        List.copyOf(recorded.values()),
+        recorded.keySet().toString());
   }
 
-  private static ChatItem.Always always(String recording, int line) {
-    var offered = ((ChatItem.Permission) shown(recording, line).getFirst()).always();
-    assertEquals(1, offered.size(), recording + ":" + line);
-    return offered.getFirst();
+  private static List<List<String>> always(String recording, int line) {
+    return ((ChatItem.Permission) shown(recording, line).getFirst())
+        .always().stream().map(ChatItem.Always::words).toList();
   }
 
   @Test

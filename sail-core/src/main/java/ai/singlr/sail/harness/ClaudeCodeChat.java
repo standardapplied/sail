@@ -50,7 +50,7 @@ final class ClaudeCodeChat implements HarnessChat {
     return modes().stream()
         .filter(offered -> offered.name().equals(mode))
         .findFirst()
-        .map(offered -> offered.args().isBlank() ? List.<String>of() : split(offered.args()))
+        .map(offered -> split(offered.args()))
         .orElseGet(() -> List.of("--permission-mode", mode));
   }
 
@@ -59,12 +59,14 @@ final class ClaudeCodeChat implements HarnessChat {
   }
 
   /**
-   * Claude Code's own permission modes that were recorded working in a chat: its {@code default},
-   * which a start with no mode is in, first. A workspace's settings may name another default, so
-   * the mode a chat is in is the one Claude Code says ({@code init}, {@code status}). In plan mode
-   * the recorded turns ran on a model other than the one {@code --model} named, until the plan was
+   * Claude Code's own permission modes that were recorded working in a chat: its {@code default}
+   * first, named at the start as {@code manual}, the name its {@code --help} lists for it (it lists
+   * no {@code default}), so a workspace's own default never overrides the person's choice. The mode
+   * a chat is in is the one Claude Code says ({@code init}, {@code status}). In plan mode the
+   * recorded turns ran on a model other than the one {@code --model} named, until the plan was
    * approved. Never asks ({@code bypassPermissions}) is not offered: it was never recorded at a
-   * chat's start or as a switch.
+   * chat's start or as a switch. What Edits freely runs without asking is from Claude Code's
+   * permission-modes documentation, not a recording.
    */
   @Override
   public List<Harness.Mode> modes() {
@@ -73,13 +75,13 @@ final class ClaudeCodeChat implements HarnessChat {
             "default",
             "Asks first",
             "Asks before edits, shell commands and network actions.",
-            "",
+            " --permission-mode manual",
             false),
         ClaudeCode.permissionMode(
             "acceptEdits",
             "Edits freely",
-            "Makes file edits and common filesystem commands without asking, and asks before the"
-                + " rest.",
+            "Edits files and runs common file commands such as mkdir, touch, rm, rmdir, mv, cp and"
+                + " sed in the folders it works in, without asking, and asks before anything else.",
             false),
         ClaudeCode.permissionMode(
             "plan",
