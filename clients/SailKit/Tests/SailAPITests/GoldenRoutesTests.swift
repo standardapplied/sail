@@ -143,6 +143,8 @@ func answer<Response>(
         switch result {
         case .success:
             #expect((200 ..< 300).contains(exchange.status))
+        case .failure(.signIn(.ended)):
+            #expect(["refusal-missing-bearer-token", "refusal-invalid-bearer-token"].contains(name), "\(name) ended the session")
         case let .failure(.refused(refusal)):
             #expect(exchange.status >= 400)
             let named = "refusal-" + refusal.code.rawValue.replacingOccurrences(of: "_", with: "-")

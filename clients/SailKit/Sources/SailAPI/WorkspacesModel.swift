@@ -621,39 +621,31 @@ public struct WorkspacesModel: Sendable {
     /// The build of project `name`'s template answered: started or joined, its card drawn from the
     /// answer; refused, said on its card in the server's words and what to do; not answered, its
     /// template read to learn whether it started, said on its card only if none did. A session found
-    /// ended is said on none: it is handed to the check that says it, as a read's is.
-    @discardableResult
-    public mutating func built(_ name: String, _ answer: Result<TemplateStatus, SailError>) -> AfterRead? {
+    /// ended is said on none: the welcome says it, as for a read.
+    public mutating func built(_ name: String, _ answer: Result<TemplateStatus, SailError>) {
         buildsAsked.remove(name)
         switch answer {
         case .success:
             buildSaid[name] = nil
             buildUnanswered.remove(name)
             templateRead(name, answer)
-        case let .failure(error) where AccountRefusal.ends(error):
+        case .failure(.signIn):
             buildSaid[name] = nil
             buildUnanswered.remove(name)
-            return .sessionEnded
         case let .failure(error):
             buildSaid[name] = lines(error)
             if case .refused = error { buildUnanswered.remove(name) } else { buildUnanswered.insert(name) }
         }
-        return nil
-    }
-
-    /// What a template read or a build asks of the page beyond its card: the projects listed again,
-    /// since the project is gone; or the session's end handed to the check that says it.
-    public enum AfterRead: Equatable, Sendable {
-        case listProjects, sessionEnded
     }
 
     /// Takes project `name`'s template as read: its card is drawn from it, and its pill and New
     /// Workspace follow its state at once. A read that got no answer keeps the card as read before,
-    /// saying so; one the server refused says its words on the card and stops the reads, and says
-    /// what else follows.
+    /// saying so; one the server refused says its words on the card and stops the reads, as one that
+    /// found the session ended does, saying nothing. Whether the projects are to be listed again:
+    /// the project is gone.
     @discardableResult
-    public mutating func templateRead(_ name: String, _ answer: Result<TemplateStatus, SailError>) -> AfterRead? {
-        guard let index = projects?.firstIndex(where: { $0.name == name }), let project = projects?[index] else { return nil }
+    public mutating func templateRead(_ name: String, _ answer: Result<TemplateStatus, SailError>) -> Bool {
+        guard let index = projects?.firstIndex(where: { $0.name == name }), let project = projects?[index] else { return false }
         switch answer {
         case let .success(status):
             templates[name] = status
@@ -663,19 +655,19 @@ public struct WorkspacesModel: Sendable {
             buildUnanswered.remove(name)
             if [.known(.building), .known(.ready)].contains(status.state) { buildSaid[name] = nil }
             projects?[index] = ProjectSummary(name: name, containerStatus: project.containerStatus, template: status.state)
-            return nil
-        case let .failure(error) where AccountRefusal.ends(error):
+            return false
+        case .failure(.signIn):
             templateMissed[name] = nil
             templateRefused[name] = []
-            return .sessionEnded
+            return false
         case let .failure(.refused(refusal)):
             templateMissed[name] = nil
             templateRefused[name] = lines(.refused(refusal))
-            return refusal.code == .known(.projectNotInCatalog) ? .listProjects : nil
+            return refusal.code == .known(.projectNotInCatalog)
         case let .failure(error):
             templateMissed[name] = error.said(at: person.controlPlane)
             templateRefused[name] = nil
-            return nil
+            return false
         }
     }
 

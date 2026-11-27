@@ -56,7 +56,9 @@ public struct AccountRefusal: Error, Equatable, Sendable {
 
     public init(_ error: SailError, at plane: ControlPlane, step: Step) {
         guard case let .refused(refusal) = error else {
-            if case let .unreachable(text) = error {
+            if error == .signIn(.ended) {
+                self.init(.ended, at: plane)
+            } else if case let .unreachable(text) = error {
                 self.init(.unreachable, at: plane, system: text)
             } else if case let .unexpected(_, status) = error, (300 ..< 400).contains(status) {
                 self.init(.redirected, at: plane, system: error.description)
@@ -78,12 +80,6 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         }
     }
 
-    /// Whether `error`, the answer to a call asked with the session, says that session has ended.
-    public static func ends(_ error: SailError) -> Bool {
-        guard case let .refused(refusal) = error else { return false }
-        return reason(refusal, step: .asking) == .ended
-    }
-
     static let originRefused = "Registration origin not allowed: "
 
     /// What to check when an address answered, but not as Sail's control plane answers.
@@ -92,7 +88,6 @@ public struct AccountRefusal: Error, Equatable, Sendable {
     private static func reason(_ refusal: Refusal, step: Step) -> Reason {
         switch (refusal.code, step) {
         case (.known(.passkeyNotConfigured), _): .passkeysNotConfigured
-        case (.known(.invalidBearerToken), .asking), (.known(.missingBearerToken), .asking): .ended
         case (.known(.forbidden), .enrolling): .ticketRefused
         case (.known(.authenticationFailed), .signingIn): .notAccepted
         case (.known(.invalidRequest), .enrolling) where refusal.message.hasPrefix(originRefused):

@@ -181,9 +181,9 @@ public struct Account: Sendable {
     }
 
     /// The API as the person signed in at `plane`, with the session the vault holds there; nil with
-    /// none held.
-    public func client(at plane: ControlPlane) throws(AccountRefusal) -> SailClient? {
-        try held(at: plane).map { SailClient(transport: connect(plane), token: $0.sessionToken) }
+    /// none held. `ended` is told each time a call finds that session ended.
+    public func client(at plane: ControlPlane, ended: @escaping @Sendable () -> Void = {}) throws(AccountRefusal) -> SailClient? {
+        try held(at: plane).map { SailClient(transport: connect(plane), token: $0.sessionToken, ended: ended) }
     }
 
     /// The session the vault holds for `plane`; one it could not read is said as gone.

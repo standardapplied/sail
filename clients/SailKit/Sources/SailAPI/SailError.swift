@@ -13,8 +13,9 @@ public enum SailError: Error, Equatable, Sendable {
     case notAnEventStream(route: String, contentType: String?)
     /// The request cannot be sent as it was written: why.
     case unsendable(String)
-    /// Nothing was asked: the call needs a sign-in this client does not hold now. This client's own
-    /// condition, never an answer of the server's.
+    /// The call needs a sign-in this client does not hold now: none or another person's, and then
+    /// nothing was asked, or the one it was asked with, which the server says has ended. Said in
+    /// Sail's words, never the server's.
     case signIn(SignIn)
 }
 
@@ -24,12 +25,16 @@ public enum SignIn: Equatable, Sendable {
     case signedOut
     /// Someone other than `owner`, whose call it is, is signed in.
     case another(owner: String, signedIn: String)
+    /// The server says the session the call was asked with has ended.
+    case ended
 
-    /// What a person reads: what is so, then what they can do.
+    /// What a person reads: what is so, then what they can do. An ended sign-in is said in the
+    /// welcome's words: what the runner holds is still there once they sign in again.
     public var lines: [String] {
         switch self {
         case .signedOut: ["You are signed out of the control plane.", "Sign in to reach the runner."]
         case let .another(owner, signedIn): ["This terminal is \(owner)'s, and \(signedIn) is signed in.", "Sign in as \(owner) to reach it."]
+        case .ended: ["Your sign-in ended.", "Your sessions on the runner kept running.", "Sign in again with your passkey."]
         }
     }
 }
