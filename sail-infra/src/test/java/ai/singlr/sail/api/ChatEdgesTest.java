@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -205,6 +206,65 @@ class ChatEdgesTest {
             ApiException.class,
             () -> as("sam", () -> bench.host.send(session, "look", List.of("red.png"))));
 
+    assertEquals(
+        List.of("container_error", "Attachment red.png could not be read in workspace try."),
+        List.of(refused.code(), refused.reason()));
+  }
+
+  /** I10: what is no path in the workspace is refused before anything reaches it. */
+  @Test
+  void anAttachmentThatIsNoPathIsRefusedBeforeTheWorkspaceIsAsked() {
+    var session = bench.samsChat();
+    var asked = bench.incus.invocations().size();
+
+    var refused =
+        Stream.of(" ", "a\0b.png", "a".repeat(4097) + ".png")
+            .map(
+                path ->
+                    assertThrows(
+                            IllegalArgumentException.class,
+                            () -> as("sam", () -> bench.host.send(session, "look", List.of(path))))
+                        .getMessage())
+            .distinct()
+            .toList();
+
+    assertEquals(List.of("An attachment is a path in the workspace."), refused);
+    assertEquals(
+        List.of(),
+        bench.incus.invocations().subList(asked, bench.incus.invocations().size()).stream()
+            .filter(command -> command.contains("sail-files"))
+            .toList());
+  }
+
+  /** A read of an attachment cut short by an interrupt keeps the interrupt and says so. */
+  @Test
+  void anAttachmentsReadInterruptedKeepsTheInterrupt() {
+    ShellExec interrupted =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) throws InterruptedException {
+            throw new InterruptedException("stopping");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout)
+              throws InterruptedException {
+            throw new InterruptedException("stopping");
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var chat = bench.store.find(bench.samsChat()).orElseThrow();
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () -> new ChatAttachments(interrupted).images(chat, List.of("red.png")));
+
+    assertTrue(Thread.interrupted(), "the interrupt is kept");
     assertEquals(
         List.of("container_error", "Attachment red.png could not be read in workspace try."),
         List.of(refused.code(), refused.reason()));

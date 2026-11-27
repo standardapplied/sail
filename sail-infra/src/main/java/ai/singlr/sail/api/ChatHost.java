@@ -163,8 +163,7 @@ public final class ChatHost implements AutoCloseable {
     ChatAttachments.requireFew(paths);
     var chat = yours(session);
     synchronized (lock(session)) {
-      chat = store.find(session).orElseThrow(() -> unknown(session));
-      if (chat.ended()) {
+      if (store.find(session).map(ChatStore.Chat::ended).orElse(true)) {
         throw ended(chat);
       }
       var images = attachments.images(chat, paths);
