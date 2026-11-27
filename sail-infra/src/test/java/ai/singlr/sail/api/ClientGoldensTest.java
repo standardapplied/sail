@@ -975,7 +975,8 @@ class ClientGoldensTest {
               .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]")
               .onOk("incus snapshot list harbor--tmpl --format json", TestWorkspaces.V1)
               .onOk("incus list --format json", "[" + TEMPLATE + "]")
-              .onOk("sail-left", "changes app\n");
+              .onOk("sail-left", "changes app\n")
+              .onOk("ticks() {", "gone");
       chats.onStart(fake -> fake.onClose(fake::exitsIfRunning));
       this.operations =
           OperationsFactory.create(

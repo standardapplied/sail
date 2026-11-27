@@ -140,11 +140,11 @@ final class ChatLaunch {
   /**
    * Starts the process for {@code chat}, as its opener: admitted and signed in as a pty agent start
    * is, its workspace entered (started when stopped), resuming the conversation the harness last
-   * named, in the mode it last said. A process started for it before that is not known gone is
-   * halted first ({@link #halted}), and refused while it is not proved gone: one conversation, one
-   * process. {@code launched} is told {@code true} as the process is about to start, and {@code
-   * false} when it then did not; nothing after the start can fail it, so a process that started is
-   * always held.
+   * named, in the mode it last said. Whatever process its pid file names is halted first ({@link
+   * #halted}), however the last one's client ended, and the start refused while it is not proved
+   * gone: one conversation, one process. {@code launched} is told {@code true} as the process is
+   * about to start, and {@code false} when it then did not, or that {@code true} failed; nothing
+   * after the start can fail it, so a process that started is always held.
    */
   Started start(ChatStore.Chat chat, Consumer<Boolean> launched) {
     var harness = Harnesses.of(chat.harness());
@@ -161,7 +161,7 @@ final class ChatLaunch {
                     new PtyMessage.Agent(chat.harness(), chat.mode(), chat.inside()),
                     person));
     act(() -> doors.enterWorkspace(project, workspace, person));
-    if (chat.launched() && !halted(chat)) {
+    if (!halted(chat)) {
       throw new ApiException(
           ErrorCode.AGENT_ALREADY_RUNNING,
           harness.displayName()

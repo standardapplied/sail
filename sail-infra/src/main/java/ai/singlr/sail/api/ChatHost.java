@@ -28,12 +28,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * is, through the same doors ({@link HostPty#admitAgent}, {@link HostPty#handOver}), and every
  * route to it is its opener's alone, decided as entering its workspace is. At most one process
  * holds a chat's conversation: only a message, or one left waiting, starts one, under the chat's
- * lock, and a process started before that is not known gone is halted first and must be proved
- * gone. It ends after the project's {@code max_idle} with no turn open, and the next message
- * resumes the conversation by id, in the mode in force; a message left waiting when a process ends,
- * or when sail restarts, is delivered by the next. A request the agent makes is logged and held;
- * nothing here answers one, so after {@link ChatTiming#requestBound} its turn is stopped, said in
- * plain words.
+ * lock, and whatever process the chat's pid file names is halted first and must be proved gone. It
+ * ends after the project's {@code max_idle} with no turn open, and the next message resumes the
+ * conversation by id, in the mode in force; a message left waiting when a process ends, or when
+ * sail restarts, is delivered by the next. A request the agent makes is logged and held; nothing
+ * here answers one, so after {@link ChatTiming#requestBound} its turn is stopped, said in plain
+ * words.
  */
 public final class ChatHost implements AutoCloseable {
 
@@ -228,12 +228,17 @@ public final class ChatHost implements AutoCloseable {
       if (ended(session)) {
         throw ended(chat);
       }
-      var process = live.get(session);
-      if (process == null || process.end().over()) {
-        process = startProcess(store.find(session).orElseThrow());
-      }
-      return process.send(text, ended(chat));
+      return holder(store.find(session).orElseThrow()).send(text, ended(chat));
     }
+  }
+
+  /**
+   * The process that holds {@code chat}'s conversation, started when none of this host's does: the
+   * one way a process is started for a chat. Called under the chat's lock.
+   */
+  private ChatProcess holder(ChatStore.Chat chat) {
+    var held = live.get(chat.id());
+    return held != null && !held.end().over() ? held : startProcess(chat);
   }
 
   private boolean ended(String session) {
@@ -390,13 +395,21 @@ public final class ChatHost implements AutoCloseable {
 
   /**
    * Starts the process that holds {@code chat}'s conversation, and reads it: a turn a process
-   * before it left open, proved gone in the start, is cut first. Called under the chat's lock.
+   * before it left open, proved gone in the start, is cut first, before the process starts, so
+   * nothing between its start and its holding can fail. Called under the chat's lock.
    */
   private ChatProcess startProcess(ChatStore.Chat chat) {
     var session = chat.id();
-    var started = launch.start(chat, launched -> store.launched(session, launched));
     var log = log(session);
-    log.cut(RESTARTED);
+    var started =
+        launch.start(
+            chat,
+            launched -> {
+              if (launched) {
+                log.cut(RESTARTED);
+              }
+              store.launched(session, launched);
+            });
     var process =
         new ChatProcess(
             session,
@@ -442,19 +455,19 @@ public final class ChatHost implements AutoCloseable {
   }
 
   /**
-   * Delivers chat {@code session}'s messages left waiting, when it is open, has any, and no process
-   * of this host holds it (one that does hands them as each turn ends): a process is started for it
-   * as its opener, admitted as any start is, and handed the oldest, the rest as each turn ends. One
+   * Delivers chat {@code session}'s messages left waiting, when it is open and has any, by the
+   * process that holds it ({@link #holder}), started for it as its opener when none does, admitted
+   * as any start is: it is handed the oldest when no turn is open, the rest as each turn ends. One
    * that is refused now is said in the refusal's words, and its messages keep waiting. Called under
    * the chat's lock.
    */
   private void resumeQueued(String session) {
     var chat = store.find(session).filter(found -> !found.ended()).orElse(null);
-    if (chat == null || live.containsKey(session) || store.unhanded(session, MESSAGE).isEmpty()) {
+    if (chat == null || store.unhanded(session, MESSAGE).isEmpty()) {
       return;
     }
     try {
-      launch.asOpener(chat, () -> startProcess(chat)).resume();
+      launch.asOpener(chat, () -> holder(chat)).resume();
     } catch (ApiException | IllegalArgumentException refused) {
       log(session)
           .log(
