@@ -716,6 +716,7 @@ public final class SchemaManager {
               inside INTEGER NOT NULL,
               conversation TEXT,
               turn_open INTEGER NOT NULL DEFAULT 0,
+              launched INTEGER NOT NULL DEFAULT 0,
               handed INTEGER NOT NULL DEFAULT 0,
               created_at INTEGER NOT NULL,
               ended_at INTEGER
@@ -731,6 +732,7 @@ public final class SchemaManager {
               at INTEGER NOT NULL,
               PRIMARY KEY (session, seq)
           ) WITHOUT ROWID""",
+          "CREATE INDEX idx_chat_items_kind ON chat_items(session, kind, seq)",
           """
           CREATE TABLE session_usage (
               session_id TEXT PRIMARY KEY,

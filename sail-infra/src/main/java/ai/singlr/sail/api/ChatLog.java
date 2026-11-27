@@ -9,7 +9,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ChatWire;
-import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.store.ChatStore;
 import java.time.Instant;
@@ -20,10 +19,11 @@ import java.util.Objects;
 
 /**
  * One chat's log, as its host writes it: each entry, an agent's {@link ChatItem} or Sail's own
- * ({@link ChatWire.Own}), appended in order and a waiting reader woken; the text of one block
- * gathered for a {@link LiveMembers#DELTA_WINDOW} into one entry; and what a turn left open read
- * back from the log ({@link #open}), so a turn's end and a cut turn close exactly that, whether its
- * process is still here or a restart took it.
+ * ({@link ChatWire.Own}), appended in order and its chat's waiting readers woken; the text of one
+ * block gathered for a {@link LiveMembers#DELTA_WINDOW} into one entry; and what a turn left open
+ * read back from the log ({@link #open}), so a turn's end and a cut turn close exactly that,
+ * whether its process is still here or a restart took it. A turn's end and a cut are each logged
+ * whole or not at all, with the turn closed in the same write: a crash never logs one twice.
  */
 final class ChatLog {
 
@@ -77,8 +77,13 @@ final class ChatLog {
     wire.put("seq", item.seq());
     wire.put("at", DateTimeUtils.format(item.at()));
     wire.put(ChatWire.TYPE, item.kind());
-    wire.putAll(YamlUtil.parseJsonLine(item.payload(), LiveStream.MAX_LINE_CHARS));
+    wire.putAll(fields(item));
     return wire;
+  }
+
+  /** What {@code item} says, read within the bound every item is logged within. */
+  static Map<String, Object> fields(ChatStore.Item item) {
+    return YamlUtil.parseJsonLine(item.payload(), ChatStore.MAX_PAYLOAD_CHARS);
   }
 
   /**
@@ -171,7 +176,7 @@ final class ChatLog {
     var rows = new LinkedHashMap<String, String>();
     var requests = new LinkedHashMap<String, Instant>();
     for (var item : store.since(session, TURN_ENDED, OPENING)) {
-      var fields = YamlUtil.parseJsonLine(item.payload(), LiveStream.MAX_LINE_CHARS);
+      var fields = fields(item);
       var id = (String) fields.get("id");
       if (item.kind().equals(TOOL)) {
         rows.put(id, (String) fields.get("under"));
@@ -186,27 +191,46 @@ final class ChatLog {
     return new Open(rows, requests);
   }
 
-  /** Closes each tool row the open turn left with no result as one whose result was not read. */
-  synchronized void closeRows() {
+  /**
+   * Logs the end of the open turn, {@code ended}, after closing what it left open: each tool row
+   * with no result as unread, and each request the harness neither had answered nor withdrew,
+   * withdrawn, since nothing can answer it once its turn is over.
+   */
+  synchronized void turnEnded(ChatItem.TurnEnded ended) {
     flush();
-    open()
-        .rows()
-        .forEach((id, under) -> append(new ChatItem.ToolDone(under, id, UNREAD, false, false)));
+    store.together(
+        () -> {
+          closeOpen();
+          append(ended);
+          turn(false);
+        });
   }
 
   /**
-   * Cuts the open turn, whose process is gone: Sail says {@code why} (none when null), each row
-   * with no result is closed as unread, each request withdrawn, since it died with the process, and
-   * the turn ends interrupted.
+   * Cuts the open turn, whose process is gone, once: Sail says {@code why} (none when null), each
+   * row with no result is closed as unread, each request withdrawn, since it died with the process,
+   * and the turn ends interrupted. A turn already closed is left as it is.
    */
   synchronized void cut(String why) {
     flush();
-    if (why != null) {
-      append(new ChatWire.Told(why));
-    }
-    closeRows();
-    open().requests().keySet().forEach(id -> append(new ChatItem.Withdrawn(id)));
-    append(new ChatItem.Interrupted());
-    turn(false);
+    store.together(
+        () -> {
+          if (!store.find(session).map(ChatStore.Chat::turnOpen).orElse(false)) {
+            return;
+          }
+          if (why != null) {
+            append(new ChatWire.Told(why));
+          }
+          closeOpen();
+          append(new ChatItem.Interrupted());
+          turn(false);
+        });
+  }
+
+  private void closeOpen() {
+    var open = open();
+    open.rows()
+        .forEach((id, under) -> append(new ChatItem.ToolDone(under, id, UNREAD, false, false)));
+    open.requests().keySet().forEach(id -> append(new ChatItem.Withdrawn(id)));
   }
 }

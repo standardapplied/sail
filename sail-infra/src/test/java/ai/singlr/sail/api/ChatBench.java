@@ -34,9 +34,10 @@ import java.util.function.Supplier;
  * A box where sam and tom each have a running workspace of acme ({@code try}, {@code tom}), sam
  * with a stored Claude Code key and tom with none, ada an admin; its chats held by a {@link
  * ChatHost} over the real pty door of the box ({@link HostLanes.Pty}) and Incus scripted, whose
- * processes stand in ({@link FakeAgentProcess}) and are fed what Claude Code wrote in the S0 probe
- * ({@link Recorded}), on a clock the test moves. A read's wait lets its bound pass at once unless a
- * test asks it to wait for an item.
+ * processes stand in ({@link FakeAgentProcess}), found inside their workspace by their pid file
+ * ({@link FakeContainer}), and are fed what Claude Code wrote in the S0 probe ({@link Recorded}),
+ * on a clock the test moves. A read's wait lets its bound pass at once unless a test asks it to
+ * wait for an item.
  */
 final class ChatBench implements AutoCloseable {
 
@@ -53,7 +54,11 @@ final class ChatBench implements AutoCloseable {
   final ChatStore store;
   final ScriptedShellExecutor incus;
   final HostLanes.Pty door;
-  final FakeAgentProcess processes = new FakeAgentProcess(new FakeContainer("acme"));
+
+  /** The workspaces' insides, where a chat's process is found by its pid file and signalled. */
+  final FakeContainer container = new FakeContainer("acme");
+
+  final FakeAgentProcess processes = new FakeAgentProcess(container);
   final ManualClock clock = new ManualClock(START, Duration.ofDays(40));
   final ChatHost host;
   final String samId;
@@ -125,6 +130,7 @@ final class ChatBench implements AutoCloseable {
             ProjectReader.ofCatalog(new ProjectStore(db)),
             handle -> WorkspaceOwner.onThisBox(fdes, handle, "ada"),
             incus);
+    container.holds("try");
     processes.onStart(fake -> fake.onClose(fake::exitsIfRunning));
     host = restarted();
   }
@@ -138,26 +144,36 @@ final class ChatBench implements AutoCloseable {
   ChatHost restarted(ProcessEnd.Grace grace) {
     return new ChatHost(
         store,
-        new ChatLaunch(door, fdes, ProjectReader.ofCatalog(new ProjectStore(db)), processes),
-        new ChatTiming(
-            clock::instant,
-            window -> {
-              if (!windowsWait) {
-                throw new InterruptedException("the window is the next line's to close");
-              }
-              windows.acquire();
-            },
-            (arrivals, within) -> {
-              if (readsWait) {
-                held.release();
-                arrivals.wait();
-              } else {
-                clock.advance(within);
-              }
-            },
-            Duration.ofSeconds(25),
-            Duration.ofMinutes(5),
-            grace));
+        new ChatLaunch(
+            door, fdes, ProjectReader.ofCatalog(new ProjectStore(db)), processes, container),
+        timing(grace));
+  }
+
+  /** The time a host of this box's chats reads, each step of an end waiting {@link #GRACE}. */
+  ChatTiming timing() {
+    return timing(new ProcessEnd.Grace(GRACE, GRACE, GRACE, GRACE));
+  }
+
+  private ChatTiming timing(ProcessEnd.Grace grace) {
+    return new ChatTiming(
+        clock::instant,
+        window -> {
+          if (!windowsWait) {
+            throw new InterruptedException("the window is the next line's to close");
+          }
+          windows.acquire();
+        },
+        (arrivals, within) -> {
+          if (readsWait) {
+            held.release();
+            arrivals.wait();
+          } else {
+            clock.advance(within);
+          }
+        },
+        Duration.ofSeconds(25),
+        Duration.ofMinutes(5),
+        grace);
   }
 
   /** How many chats this box holds. */
@@ -212,6 +228,12 @@ final class ChatBench implements AutoCloseable {
   /** Line {@code number} of recording {@code recording}. */
   static String line(String recording, int number) {
     return Recorded.line(recording, number);
+  }
+
+  /** {@code fake} met its end and its reader is done with it: what follows its end has happened. */
+  static void over(FakeAgentProcess.Fake fake) {
+    fake.awaitEndSeen();
+    fake.settle();
   }
 
   /** Each item of {@code session}'s log as its kind. */

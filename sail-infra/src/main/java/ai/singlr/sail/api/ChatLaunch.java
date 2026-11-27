@@ -11,13 +11,17 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.engine.AgentProcess;
+import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.SessionLogin;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
@@ -25,9 +29,12 @@ import ai.singlr.sail.store.ChatStore;
 import ai.singlr.sail.store.FdeStore;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * How a chat is admitted and its process started, through the pty host's own doors ({@link
@@ -40,8 +47,6 @@ final class ChatLaunch {
 
   /** Where a chat's process runs. */
   static final String WORKSPACE = ContainerExec.DEV_WORKSPACE;
-
-  private static final String CHATS = ContainerExec.DEV_HOME + "/.sail/chats/";
 
   /**
    * A process started for a chat: its {@code handle}, the chat form it speaks ({@code form}), its
@@ -59,12 +64,24 @@ final class ChatLaunch {
   private final FdeStore fdes;
   private final ProjectReader definitions;
   private final AgentProcess processes;
+  private final ShellExec shell;
 
-  ChatLaunch(HostPty doors, FdeStore fdes, ProjectReader definitions, AgentProcess processes) {
+  /**
+   * Admits through {@code doors}, as the FDEs {@code fdes} holds, chats of the projects {@code
+   * definitions} reads, started as {@code processes}; a process left over is asked after through
+   * {@code shell}.
+   */
+  ChatLaunch(
+      HostPty doors,
+      FdeStore fdes,
+      ProjectReader definitions,
+      AgentProcess processes,
+      ShellExec shell) {
     this.doors = Objects.requireNonNull(doors, "doors");
     this.fdes = Objects.requireNonNull(fdes, "fdes");
     this.definitions = Objects.requireNonNull(definitions, "definitions");
     this.processes = Objects.requireNonNull(processes, "processes");
+    this.shell = Objects.requireNonNull(shell, "shell");
   }
 
   /**
@@ -99,11 +116,24 @@ final class ChatLaunch {
   }
 
   /**
+   * {@code work} done as {@code chat}'s opener, as a route of theirs is: no one is there to ask.
+   */
+  <T> T asOpener(ChatStore.Chat chat, Supplier<T> work) {
+    var opener =
+        fdes.byId(chat.opener())
+            .orElseThrow(() -> new IllegalStateException("Chat " + chat.id() + " has no opener."));
+    return Actor.call(
+        new Actor(opener.handle(), Role.fromAttribute(opener.role()), Actor.Lane.API), work::get);
+  }
+
+  /**
    * Starts the process for {@code chat}, as its opener: admitted and signed in as a pty agent start
    * is, its workspace entered (started when stopped), resuming the conversation the harness last
-   * named, in the mode it last said.
+   * named, in the mode it last said. A process started for it before that is not known gone is
+   * halted first ({@link #halted}), and refused while it is not proved gone: one conversation, one
+   * process. {@code launching} runs as the process is about to start.
    */
-  Started start(ChatStore.Chat chat) {
+  Started start(ChatStore.Chat chat, Runnable launching) {
     var harness = Harnesses.of(chat.harness());
     var form = form(harness);
     var person = person();
@@ -118,22 +148,32 @@ final class ChatLaunch {
                     new PtyMessage.Agent(chat.harness(), chat.mode(), chat.inside()),
                     person));
     act(() -> doors.enterWorkspace(project, workspace, person));
-    var launch = Ids.newId().toString();
-    var file = SessionLogin.file(launch);
-    var instance = project + "-" + workspace;
+    if (chat.launched() && !halted(chat)) {
+      throw new ApiException(
+          ErrorCode.AGENT_ALREADY_RUNNING,
+          harness.displayName()
+              + "'s earlier process for this chat in workspace "
+              + workspace
+              + " has not ended yet, so the message was not sent.",
+          "Send it again in a minute: Sail ends that process first.");
+    }
+    var file = SessionLogin.file(Ids.newId().toString());
+    var instance = instance(chat);
+    var unit = AgentUnit.chat(chat.id());
     act(
         () ->
             doors.handOver(
                 project, workspace, file, login.map(LaunchEnv::loginLines).orElse(""), person));
     try {
+      launching.run();
       return new Started(
           processes.start(
               instance,
               WORKSPACE,
               Map.of(),
               form.argv(new HarnessChat.Launch(chat.mode(), null, chat.conversation())),
-              CHATS + launch + "/agent.pid",
-              CHATS + launch + "/agent.log",
+              unit.pidPath(),
+              unit.logPath(),
               file),
           form,
           harness.displayName(),
@@ -147,6 +187,40 @@ final class ChatLaunch {
           "Check that the workspace is running and answers, then send the message again.",
           failed);
     }
+  }
+
+  /**
+   * Halts the process started for {@code chat} that no pipe of this sail reaches, through the pid
+   * file in the chat's own folder, as a live member's left from before a restart is; whether it is
+   * known gone. A workspace that does not answer proves nothing.
+   */
+  boolean halted(ChatStore.Chat chat) {
+    var instance = instance(chat);
+    var unit = AgentUnit.chat(chat.id());
+    return ProcessEnd.halted(
+        shell,
+        instance,
+        unit,
+        () ->
+            new AgentSession(shell).presence(instance, unit) instanceof AgentSession.Presence.Gone);
+  }
+
+  /** Removes {@code chat}'s folder in its workspace, its process gone: nothing reads it again. */
+  void forget(ChatStore.Chat chat) {
+    try {
+      shell.exec(
+          ContainerExec.asDevUser(
+              instance(chat), List.of("rm", "-rf", "--", AgentUnit.chatDir(chat.id()))));
+    } catch (IOException | TimeoutException unanswered) {
+      System.err.println(
+          "  [chat] the folder of chat " + chat.id() + " stays: " + unanswered.getMessage());
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  private static String instance(ChatStore.Chat chat) {
+    return chat.project() + "-" + chat.workspace();
   }
 
   /** The project's {@code max_idle}, which a chat's process ends after with no turn open. */

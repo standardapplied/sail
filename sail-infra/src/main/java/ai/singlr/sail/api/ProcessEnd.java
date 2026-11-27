@@ -6,14 +6,20 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.AgentProcess;
+import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ShellExec;
+import java.io.IOException;
 import java.time.Duration;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
 
 /**
  * How a process the host drives over pipes is ended, a live member's or a chat's: its stdin is
  * closed, so it finishes what it is doing and exits; it is given a first while to do that, and is
  * then interrupted and, if that does not end it either, terminated, each signal given its own while
- * ({@link Grace}).
+ * ({@link Grace}). One that no pipe of this sail reaches, left from before it started, is halted
+ * through its pid file ({@link #halted}).
  */
 final class ProcessEnd {
 
@@ -47,7 +53,30 @@ final class ProcessEnd {
     boolean settled(Duration within, boolean answering);
   }
 
+  /** What the container says of a process a halt did not prove gone. */
+  @FunctionalInterface
+  interface Gone {
+
+    /** Whether the process is known gone. */
+    boolean gone() throws IOException, InterruptedException, TimeoutException;
+  }
+
   private ProcessEnd() {}
+
+  /**
+   * Halts the process the pid file of {@code unit} names in {@code instance}, left from before this
+   * sail started ({@link AgentSession#killAgent}), and answers whether it is then known gone: the
+   * halt's own answer, else {@code gone}'s. A container that does not answer proves nothing, so
+   * whatever the process holds stays held until one does.
+   */
+  static boolean halted(ShellExec shell, String instance, AgentUnit unit, Gone gone) {
+    try {
+      return new AgentSession(shell).killAgent(instance, unit) instanceof AgentSession.Halt.Ended
+          || gone.gone();
+    } catch (Exception unanswered) {
+      return false;
+    }
+  }
 
   /**
    * Closes {@code handle}'s stdin on a thread of its own, named {@code name}: the close waits

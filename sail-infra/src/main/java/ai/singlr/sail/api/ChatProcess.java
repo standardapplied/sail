@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Ids;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ChatWire;
@@ -19,23 +18,26 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.function.Supplier;
 
 /**
  * The one process that holds a chat's conversation: what it writes is read a line at a time on a
  * thread of its own, each line's items logged ({@link ChatLog}) before anyone is shown them; the
  * person's messages handed to it one a turn, in the order they were logged, a message said while a
- * turn is open held in the log until the turn ends. A request it cannot read whole is refused at
- * once ({@link #refuseNow}), or, naming nothing to answer, its turn is stopped ({@link #stopTurn}).
- * At a turn's end the rows it left open are closed, and when the process ends, however it ends, a
- * turn it left open is cut ({@link ChatLog#cut}): its requests die with it, and a resume replays
- * none. Every field a line or a message moves is guarded by it.
+ * turn is open held in the log until the turn ends. A message is handed at least once: it is marked
+ * handed after the harness took it, so a crash between the two hands it again. A request it cannot
+ * read whole is refused at once ({@link #refuseNow}), or, naming nothing to answer, its turn is
+ * stopped ({@link #stopTurn}). At a turn's end what it left open is closed, and when the process
+ * ends, however it ends, a turn it left open is cut ({@link ChatLog#cut}): its requests die with
+ * it, and a resume replays none. However its reading stops, the process is ended. Every field a
+ * line or a message moves is guarded by it, which is also the guard a turn starts under.
  */
 final class ChatProcess {
 
   /** How long a process whose output ended is given to report its exit code. */
   private static final Duration EXIT_GRACE = Duration.ofSeconds(5);
 
-  /** What the host does for a process beside driving it. */
+  /** What the host does once a process ended. */
   @FunctionalInterface
   interface Host {
 
@@ -53,10 +55,14 @@ final class ChatProcess {
   private final Host host;
   private ChatItem.Session lastSession;
   private Instant lastActivity;
+  private Instant stopAsked;
   private boolean turnOpen;
   private boolean ending;
+  private boolean chatEnded;
   private String endReason;
+  private boolean took;
   private boolean over;
+  private boolean known;
 
   /**
    * The process {@code handle} of chat {@code session}, with {@code agent}, the harness's name as a
@@ -86,6 +92,11 @@ final class ChatProcess {
     return session;
   }
 
+  /** The harness's name as a person reads it. */
+  String agent() {
+    return agent;
+  }
+
   /** Starts reading the process, on a thread of its own. */
   void read() {
     Thread.ofVirtual().name("sail-chat-" + session).start(this::readToTheEnd);
@@ -97,8 +108,9 @@ final class ChatProcess {
       while ((line = handle.stdout().read()) != null) {
         line(line);
       }
-    } catch (IOException broken) {
-      System.err.println("  [chat] chat " + session + " stopped answering: " + broken.getMessage());
+    } catch (IOException | RuntimeException broken) {
+      System.err.println(
+          "  [chat] chat " + session + " stopped being read: " + broken.getMessage());
     } finally {
       finished();
     }
@@ -122,6 +134,7 @@ final class ChatProcess {
     for (var item : LiveChat.items(step, chat)) {
       take(item);
     }
+    notifyAll();
   }
 
   /**
@@ -157,8 +170,8 @@ final class ChatProcess {
 
   /**
    * Logs {@code item}: a turn's session only when it says something the last did not, since the
-   * harness says it whole at every turn; a turn's end after the rows it left open are closed, then
-   * the next message waiting handed on.
+   * harness says it whole at every turn; a turn's end with what it left open closed, then the next
+   * message waiting handed on.
    */
   private void take(ChatItem item) {
     if (item instanceof ChatItem.Session said) {
@@ -167,28 +180,39 @@ final class ChatProcess {
       }
       lastSession = said;
     }
-    if (item instanceof ChatItem.TurnEnded) {
-      log.closeRows();
+    if (item instanceof ChatItem.TurnEnded ended) {
+      log.turnEnded(ended);
+      turnOpen = false;
+      stopAsked = null;
+      handNext();
+      return;
     }
     log.log((Record) item);
-    if (item instanceof ChatItem.TurnEnded) {
-      turnOpen = false;
-      log.turn(false);
-      handNext();
-    }
   }
 
   /**
-   * Logs what the person said, and hands it to the process at once unless a turn is open or an
-   * earlier message still waits, as each turn's end hands the next.
+   * Logs what the person said, and hands it to the process at once unless a turn is open, the
+   * process is ending or an earlier message still waits, as each turn's end hands the next.
+   *
+   * @throws ApiException {@code ended}'s, when the person ended the chat
    */
-  synchronized ChatHost.Sent send(String text) {
+  synchronized ChatHost.Sent send(String text, Supplier<ApiException> ended) {
+    if (chatEnded) {
+      throw ended.get();
+    }
     var queued = turnOpen || ending || !log.unhanded().isEmpty();
     var seq = log.log(new ChatWire.Message(text, queued));
     if (!turnOpen && !ending) {
       handNext();
     }
     return new ChatHost.Sent(seq, queued);
+  }
+
+  /** Hands the oldest message waiting, when no turn is open: what a process started for it does. */
+  synchronized void resume() {
+    if (!turnOpen && !ending) {
+      handNext();
+    }
   }
 
   /**
@@ -200,10 +224,11 @@ final class ChatProcess {
     if (next.isEmpty()) {
       return;
     }
-    var message = YamlUtil.parseJsonLine(next.get().payload(), LiveStream.MAX_LINE_CHARS);
+    var message = ChatLog.fields(next.get());
     if (!write(LiveStream.userMessage((String) message.get("text")))) {
       return;
     }
+    took = true;
     log.handed(next.get().seq());
     if (Boolean.TRUE.equals(message.get("queued"))) {
       log.log(new ChatWire.Delivered(next.get().seq()));
@@ -224,7 +249,13 @@ final class ChatProcess {
     } catch (IOException broken) {
       Thread.ofVirtual()
           .name("sail-chat-broken-" + session)
-          .start(() -> end(timing.grace().afterInt(), null));
+          .start(
+              () ->
+                  end(
+                      timing.grace().afterInt(),
+                      agent
+                          + "'s process stopped taking what Sail wrote to it, so Sail ended it;"
+                          + " your next message starts it again."));
       return false;
     }
   }
@@ -234,55 +265,148 @@ final class ChatProcess {
     return over;
   }
 
-  /** Whether the process has sat with no turn open and nothing waiting for its idle while. */
-  synchronized boolean idle(Instant now) {
-    return !turnOpen
-        && !ending
-        && log.unhanded().isEmpty()
-        && !now.isBefore(lastActivity.plus(maxIdle));
+  /** Whether the process is known gone: over, and its exit known. */
+  synchronized boolean known() {
+    return known;
+  }
+
+  /** Whether the process was handed a message. */
+  synchronized boolean took() {
+    return took;
   }
 
   /**
-   * Whether its open turn holds a request that has waited {@code bound} unanswered at {@code now}.
+   * Ends the process, in one step with deciding it, when it has sat with no turn open and nothing
+   * waiting for its idle while at {@code now}: its stdin is closed, so no message is handed to it
+   * from then on and a turn it begins itself after is its last. Returns whether it is ending so;
+   * {@link #awaitIdleEnd} then sees it out.
    */
-  synchronized boolean unanswered(Instant now, Duration bound) {
-    return turnOpen
-        && !ending
-        && log.open().requests().values().stream()
-            .anyMatch(since -> !now.isBefore(since.plus(bound)));
+  synchronized boolean endIfIdle(Instant now) {
+    if (turnOpen
+        || ending
+        || !log.unhanded().isEmpty()
+        || now.isBefore(lastActivity.plus(maxIdle))) {
+      return false;
+    }
+    begin(
+        "Sail ended "
+            + agent
+            + "'s process after "
+            + maxIdle.toMinutes()
+            + " minutes with nothing to do; your next message starts it again.");
+    return true;
+  }
+
+  /**
+   * Sees out an idle end ({@link #endIfIdle}): the process is given its idle grace to exit, a turn
+   * it began itself is never cut, and only then is it signalled. Returns whether it is over.
+   */
+  boolean awaitIdleEnd() {
+    return ProcessEnd.signalled(
+        handle, timing.grace(), timing.grace().idleExit(), false, this::idleSettled);
+  }
+
+  /**
+   * Holds the open turn's requests to {@code bound} at {@code now}: once one has waited it out, the
+   * person is told and the turn stopped, the process kept. Returns whether the process must be
+   * ended: its turn not stopped a bound after it was asked to, or no input left to ask it on.
+   */
+  synchronized boolean overBound(Instant now, Duration bound) {
+    if (!turnOpen) {
+      return false;
+    }
+    if (stopAsked != null) {
+      return !now.isBefore(stopAsked.plus(bound));
+    }
+    if (log.open().requests().values().stream()
+        .allMatch(since -> now.isBefore(since.plus(bound)))) {
+      return false;
+    }
+    log.log(
+        new ChatWire.Told(
+            "Nobody can answer the agent's request in this version of Sail, so after "
+                + bound.toMinutes()
+                + " minutes Sail stopped its turn and withdrew the request."));
+    stopAsked = now;
+    if (ending) {
+      return true;
+    }
+    stopTurn();
+    return false;
   }
 
   /**
    * Ends the process as {@link ProcessEnd} does, given {@code first} to end on its own; a turn it
-   * leaves open is cut, Sail saying why in {@code why} (null when the person ended it, which needs
-   * no saying). Returns whether it is over.
+   * leaves open is cut, Sail saying why in {@code why} (null when that needs no saying). Returns
+   * whether it is over.
    */
   boolean end(Duration first, String why) {
     synchronized (this) {
       if (!ending) {
-        ending = true;
+        begin(why);
+      } else if (why != null) {
         endReason = why;
-        ProcessEnd.closeInput(handle, "sail-chat-end-" + session);
       }
     }
     return ProcessEnd.signalled(handle, timing.grace(), first, false, this::settled);
   }
 
-  /** The process is done: a turn it left open is cut, said why. */
+  /**
+   * Ends the process as the person ended its chat, given {@code first} to end on its own: from then
+   * on it takes no message. Returns whether it is over.
+   */
+  boolean endChat(Duration first) {
+    synchronized (this) {
+      chatEnded = true;
+    }
+    return end(first, null);
+  }
+
+  private void begin(String why) {
+    ending = true;
+    endReason = why;
+    ProcessEnd.closeInput(handle, "sail-chat-end-" + session);
+  }
+
+  /**
+   * The reading is done, however it stopped: a process whose exit is not then known is ended as any
+   * is, its stdin closed and signalled, so none outlives its reader; a turn it left open is cut,
+   * said why; and the host is told before the process is over, so an end waited for is done.
+   */
   private void finished() {
+    var exit = exitWithin(EXIT_GRACE);
+    if (exit.isEmpty()) {
+      ProcessEnd.closeInput(handle, "sail-chat-unread-" + session);
+      ProcessEnd.signalled(
+          handle,
+          timing.grace(),
+          timing.grace().afterInt(),
+          false,
+          (within, answering) -> exitWithin(within).isPresent());
+      exit = exitWithin(Duration.ZERO);
+    }
     synchronized (this) {
       try {
         log.flush();
         if (turnOpen) {
-          log.cut(ending ? endReason : died(exitCode()));
-          turnOpen = false;
+          log.cut(ending ? endReason : died(exit));
         }
+      } catch (RuntimeException unlogged) {
+        System.err.println(
+            "  [chat] the end of chat " + session + " was not logged: " + unlogged.getMessage());
       } finally {
+        turnOpen = false;
+        known = exit.isPresent();
+      }
+    }
+    try {
+      host.gone(this);
+    } finally {
+      synchronized (this) {
         over = true;
         notifyAll();
       }
     }
-    host.gone(this);
   }
 
   private String died(OptionalInt exit) {
@@ -292,9 +416,10 @@ final class ChatProcess {
         + "; your next message starts it again.";
   }
 
-  private OptionalInt exitCode() {
+  /** The process's exit code, waited for up to {@code within}; empty when it is not known. */
+  private OptionalInt exitWithin(Duration within) {
     try {
-      return handle.waitFor(EXIT_GRACE);
+      return handle.waitFor(within);
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
       return OptionalInt.empty();
@@ -304,6 +429,21 @@ final class ChatProcess {
   /** Waits up to {@code within} for the process to be over; returns whether it is. */
   private synchronized boolean settled(Duration within, boolean answering) {
     ProcessEnd.await(this, within, () -> over);
+    return over;
+  }
+
+  /**
+   * Waits up to {@code within} for the process to be over, and while a turn it began itself is
+   * open, for that turn's end and then {@code within} again; returns whether it is over.
+   */
+  private synchronized boolean idleSettled(Duration within, boolean answering) {
+    ProcessEnd.await(this, within, () -> over);
+    while (turnOpen && !over && !Thread.currentThread().isInterrupted()) {
+      ProcessEnd.await(this, within, () -> over || !turnOpen);
+      if (!turnOpen) {
+        ProcessEnd.await(this, within, () -> over);
+      }
+    }
     return over;
   }
 }

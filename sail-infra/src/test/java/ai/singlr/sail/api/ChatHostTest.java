@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.engine.AgentProcess;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.LiveChat;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.Recorded;
@@ -45,7 +46,6 @@ import org.junit.jupiter.api.io.TempDir;
  * process ended when idle, when its chat ends and when sail stops, and the turn a restart cut
  * closed as cut. Each process stands in, fed what Claude Code 2.1.332 wrote.
  */
-@Timeout(value = 60, unit = TimeUnit.SECONDS)
 class ChatHostTest {
 
   private static final String INIT = line("04b-set-permission-mode-and-background-task", 148);
@@ -74,6 +74,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aChatOpensInItsOpenersOwnWorkspaceAndNothingStartsUntilAMessage() {
     var session = bench.samsChat();
 
@@ -88,6 +89,7 @@ class ChatHostTest {
 
   /** I1: the same refusals a pty agent start gets, in its order, word for word. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aChatIsRefusedAsAPtyAgentStartIsWordForWord() {
     var refused =
         List.of(
@@ -126,6 +128,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aPersonWhoSignsInInsideOpensAChatWithNoStoredLogin() {
     var session =
         as("tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true)).session();
@@ -134,6 +137,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void onlyAHarnessWithAChatFormStartsAndOnlyInAModeItsChatOffers() {
     var codex =
         assertThrows(
@@ -158,6 +162,7 @@ class ChatHostTest {
 
   /** I2, I10: one process, signed in through the login file, its argv a list, never a shell. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aMessageStartsTheProcessSignedInAndHandsItTheMessageAsALine() {
     var session = bench.samsChat();
 
@@ -175,7 +180,10 @@ class ChatHostTest {
         List.of("acme-try", "/home/dev/workspace"),
         List.of(started.container(), started.workDir()));
     assertEquals(Map.of(), started.env(), "nothing of the person's message is in its environment");
-    assertTrue(started.pidFile().startsWith("/home/dev/.sail/chats/"), started.pidFile());
+    assertEquals(
+        List.of(AgentUnit.chat(session).pidPath(), AgentUnit.chat(session).logPath()),
+        List.of(started.pidFile(), started.logFile()),
+        "one place for every process of the chat, which a later sail finds");
     var handed = bench.incus.inputs().stream().filter(in -> in.contains("fake-key-sam")).toList();
     assertEquals(1, handed.size(), "the login reaches the workspace once, as the file's input");
     assertTrue(
@@ -189,6 +197,7 @@ class ChatHostTest {
 
   /** I3: logged in order before it is read; one block's text is one item. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void everyLineIsLoggedInOrderAndOneBlocksTextIsOneItem() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -239,6 +248,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void textAfterTheWindowIsAnItemOfItsOwn() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -252,6 +262,7 @@ class ChatHostTest {
 
   /** I4: a reader that reconnects with where it left off sees nothing twice and nothing lost. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aReaderFromWhereItLeftOffSeesEachItemOnce() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -267,6 +278,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aReadHoldsUntilAnItemIsLogged() throws Exception {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -280,6 +292,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aReadWithNothingNewAnswersEmptyOnceItsBoundPasses() {
     var session = bench.samsChat();
 
@@ -292,6 +305,7 @@ class ChatHostTest {
 
   /** I5: a message said mid-turn is held, logged so, and given when the turn ends. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aMessageSentWhileATurnIsOpenIsQueuedAndHandedWhenTheTurnEnds() {
     var session = bench.samsChat();
     bench.send(session, "first");
@@ -311,6 +325,7 @@ class ChatHostTest {
 
   /** I2: idle past max_idle, the process ends; the next message resumes by id in the mode said. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void anIdleProcessEndsAndTheNextMessageResumesItsConversationInTheModeInForce() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -321,7 +336,7 @@ class ChatHostTest {
     assertFalse(fake.stdinClosed(), "not idle yet");
     bench.clock.advance(Duration.ofMinutes(1));
     bench.host.sweep();
-    fake.settle();
+    ChatBench.over(fake);
     bench.send(session, "again");
 
     assertTrue(fake.stdinClosed());
@@ -335,6 +350,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aProcessWithATurnOpenIsNeverIdle() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -347,6 +363,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void twoMessagesAtOnceStartOneProcess() throws Exception {
     var session = bench.samsChat();
 
@@ -364,6 +381,7 @@ class ChatHostTest {
 
   /** I7: what the harness does on its own, said truthfully. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aTurnTheAgentBeginsItselfIsATurnAndAMessageWaitsForItsEnd() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -387,6 +405,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void openToolRowsAreClosedWhenTheTurnEnds() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -404,6 +423,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aProcessThatDiesMidTurnIsSaidItsTurnCutAndItsRequestWithdrawn() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -432,33 +452,9 @@ class ChatHostTest {
     assertFalse(bench.store.find(session).orElseThrow().turnOpen());
   }
 
-  /** I9: a request is logged and held, then withdrawn at its bound, never answered. */
-  @Test
-  void aRequestIsHeldAndWithdrawnInPlainWordsAtItsBoundNeverAnswered() {
-    var session = bench.samsChat();
-    bench.send(session, "hi");
-    var fake = bench.says(INIT, ASKS);
-
-    bench.clock.advance(Duration.ofMinutes(4));
-    bench.host.sweep();
-    assertFalse(fake.stdinClosed(), "held within its bound");
-    bench.clock.advance(Duration.ofMinutes(1));
-    bench.host.sweep();
-    fake.settle();
-
-    var items = bench.items(session);
-    assertEquals(
-        List.of("message", "session", "permission", "told", "withdrawn", "interrupted"),
-        items.stream().map(item -> item.get("type")).toList());
-    assertEquals(
-        "Nobody can answer the agent's request in this version of Sail, so after 5 minutes Sail"
-            + " ended its turn and withdrew the request. Your next message starts it again.",
-        items.get(3).get("words"));
-    assertEquals(List.of(LiveStream.userMessage("hi")), fake.written, "nothing answered it");
-  }
-
   /** I6: an end ends the process and the chat; the log stays, and takes no message. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void endingAChatEndsItsProcessKeepsItsLogAndRefusesAMessage() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -482,6 +478,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void anEndedChatsLogIsErasedOnceItsRetentionPasses() {
     var session = bench.samsChat();
     as(
@@ -505,6 +502,7 @@ class ChatHostTest {
    * withdrawn, since they died with its process, and the next message resumes it by id.
    */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aRestartClosesTheTurnsItCutAndTheNextMessageResumesThem() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -544,6 +542,7 @@ class ChatHostTest {
 
   /** I10: a chat is its opener's alone; any other caller finds no chat at all. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aChatIsItsOpenersAloneAndAnIdSaysNothingOfAnotherPersonsChat() {
     var session = bench.samsChat();
     var none = "00000000-0000-4000-8000-000000000000";
@@ -563,6 +562,7 @@ class ChatHostTest {
 
   /** Sail stopping ends every process; their chats stay open, to resume. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void sailStoppingEndsEveryProcessAndLeavesItsChatOpen() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -576,6 +576,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aProcessThatWillNotStartIsRefusedAndItsLoginWithdrawn() {
     var session = bench.samsChat();
     bench.processes.refusing(new IOException("no incus"));
@@ -595,6 +596,7 @@ class ChatHostTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aProcessThatEndsOnlyWhenSignalledIsInterruptedThenTerminated() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -614,6 +616,7 @@ class ChatHostTest {
 
   /** I7: a request that cannot be read whole is refused at once, by its id; the turn goes on. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aRequestThatCannotBeReadWholeIsRefusedAtOnceAndSaidSo() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -635,6 +638,7 @@ class ChatHostTest {
    * the agent told to split it, and the person told why.
    */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aRequestTooLargeToShowWholeIsRefusedAtOnceAndNeverHeld() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -653,6 +657,7 @@ class ChatHostTest {
 
   /** I7: one naming no request to answer stops the turn, which would otherwise wait on it. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aRequestThatNamesNoIdToAnswerStopsTheTurn() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -676,6 +681,7 @@ class ChatHostTest {
    * the chat's first mode.
    */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aModeSaidThatALaunchMayNotPassOnResumesInTheFirstChatMode() {
     var session =
         as("sam", () -> bench.host.open("acme", "try", "claude-code", "acceptEdits", false))
@@ -699,6 +705,7 @@ class ChatHostTest {
 
   /** I6: a chat ended while its message started a process takes no message, and ends it. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aChatEndedWhileItsProcessStartsTakesNoMessageAndEndsTheProcess() {
     var session = bench.samsChat();
     bench.processes.onStart(
@@ -718,6 +725,7 @@ class ChatHostTest {
 
   /** Sail stopping cuts a turn open, saying so; the chat stays open, to resume. */
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void sailStoppingMidTurnSaysItCutTheTurn() {
     var session = bench.samsChat();
     bench.send(session, "hi");

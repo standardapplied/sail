@@ -7,14 +7,18 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.ChatWire;
 import ai.singlr.sail.store.ChatStore;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The chats this box holds: a person talks to an agent in their own workspace, the agent run as one
@@ -22,10 +26,13 @@ import java.util.concurrent.Executors;
  * the chat is logged ({@link ChatStore}) before anyone reads it. A chat is started as a pty agent
  * is, through the same doors ({@link HostPty#admitAgent}, {@link HostPty#handOver}), and every
  * route to it is its opener's alone, decided as entering its workspace is. At most one process
- * holds a chat's conversation, and only a message starts one: it ends after the project's {@code
- * max_idle} with no turn open, and the next message resumes the conversation by id, in the mode in
- * force. A request the agent makes is logged and held; nothing here answers one, so after {@link
- * ChatTiming#requestBound} the process is ended and the request withdrawn, said in plain words.
+ * holds a chat's conversation: only a message, or one left waiting, starts one, under the chat's
+ * lock, and a process started before that is not known gone is halted first and must be proved
+ * gone. It ends after the project's {@code max_idle} with no turn open, and the next message
+ * resumes the conversation by id, in the mode in force; a message left waiting when a process ends,
+ * or when sail restarts, is delivered by the next. A request the agent makes is logged and held;
+ * nothing here answers one, so after {@link ChatTiming#requestBound} its turn is stopped, said in
+ * plain words.
  */
 public final class ChatHost implements AutoCloseable {
 
@@ -34,6 +41,9 @@ public final class ChatHost implements AutoCloseable {
 
   /** The most items one read answers. */
   static final int PAGE = 500;
+
+  /** The most characters of items one read answers, beyond its first item. */
+  static final int PAGE_CHARS = 1 << 20;
 
   /** How long a chat's log is kept once it ended. */
   static final Duration RETENTION = Duration.ofDays(30);
@@ -46,6 +56,8 @@ public final class ChatHost implements AutoCloseable {
   static final String RESTARTED =
       "Sail restarted while this turn was open, so it was cut; your next message starts it again.";
 
+  private static final String MESSAGE = ChatWire.kind(ChatWire.Message.class);
+
   /** A chat opened: its session id. */
   record Opened(String session) implements Mappable {
     @Override
@@ -54,7 +66,10 @@ public final class ChatHost implements AutoCloseable {
     }
   }
 
-  /** What a read answers: the items, oldest first, and whether the chat has ended. */
+  /**
+   * What a read answers: the items, oldest first, and whether the chat has ended, said only with
+   * its last item: a reader that stops there has everything.
+   */
   record Read(List<Map<String, Object>> items, boolean ended) implements Mappable {
     @Override
     public Map<String, Object> toMap() {
@@ -81,8 +96,9 @@ public final class ChatHost implements AutoCloseable {
   private final ChatTiming timing;
   private final Map<String, ChatProcess> live = new ConcurrentHashMap<>();
   private final Map<String, Object> locks = new ConcurrentHashMap<>();
-  private final Object arrivals = new Object();
+  private final Map<String, Object> arrivals = new ConcurrentHashMap<>();
   private final PeriodicPass sweepPass = new PeriodicPass("chats", this::sweep);
+  private volatile boolean closing;
 
   /**
    * The chats {@code store} holds, admitted and started through {@code launch}, on {@code timing}.
@@ -91,6 +107,17 @@ public final class ChatHost implements AutoCloseable {
     this.store = Objects.requireNonNull(store, "store");
     this.launch = Objects.requireNonNull(launch, "launch");
     this.timing = Objects.requireNonNull(timing, "timing");
+  }
+
+  /**
+   * Takes up the chats a sail before this one left, before any request is served ({@link
+   * #reclaim}), then holds every chat to its bounds at {@code interval}. Returns how many turns the
+   * restart cut.
+   */
+  public int start(Duration interval) {
+    var cut = reclaim();
+    sweepPass.start(interval);
+    return cut;
   }
 
   /**
@@ -114,6 +141,7 @@ public final class ChatHost implements AutoCloseable {
             inside,
             null,
             false,
+            false,
             0,
             timing.clock().get(),
             null));
@@ -122,8 +150,9 @@ public final class ChatHost implements AutoCloseable {
 
   /**
    * The items of the caller's chat {@code session} after {@code after}: at once when there are any,
-   * else once one is logged or {@link ChatTiming#poll} passes, whichever is first. Never starts a
-   * process.
+   * else once one is logged or {@link ChatTiming#poll} passes, whichever is first; at most {@link
+   * #PAGE} of them and, past the first, {@link #PAGE_CHARS}. It says the chat ended only once its
+   * process is known gone, with the last of its items. Never starts a process.
    */
   public Read read(String session, long after) {
     if (after < 0) {
@@ -131,16 +160,20 @@ public final class ChatHost implements AutoCloseable {
     }
     yours(session);
     var deadline = timing.clock().get().plus(timing.poll());
-    synchronized (arrivals) {
+    var waiting = arrivals(session);
+    synchronized (waiting) {
       while (true) {
+        var ended = store.find(session).map(chat -> chat.ended() && !chat.launched()).orElse(true);
         var items = store.after(session, after, PAGE);
-        var ended = store.find(session).map(ChatStore.Chat::ended).orElse(true);
+        var page = page(items);
         var now = timing.clock().get();
-        if (!items.isEmpty() || ended || !now.isBefore(deadline)) {
-          return new Read(items.stream().map(ChatLog::wire).toList(), ended);
+        if (!page.isEmpty() || ended || !now.isBefore(deadline)) {
+          return new Read(
+              page.stream().map(ChatLog::wire).toList(),
+              ended && page.size() == items.size() && items.size() < PAGE);
         }
         try {
-          timing.patience().await(arrivals, Duration.between(now, deadline));
+          timing.patience().await(waiting, Duration.between(now, deadline));
         } catch (InterruptedException interrupted) {
           Thread.currentThread().interrupt();
           return new Read(List.of(), false);
@@ -149,31 +182,49 @@ public final class ChatHost implements AutoCloseable {
     }
   }
 
+  /** The first of {@code items}, and as many after it as fit {@link #PAGE_CHARS}. */
+  private static List<ChatStore.Item> page(List<ChatStore.Item> items) {
+    var page = new ArrayList<ChatStore.Item>();
+    var left = PAGE_CHARS;
+    for (var item : items) {
+      if (!page.isEmpty() && item.payload().length() > left) {
+        break;
+      }
+      page.add(item);
+      left -= item.payload().length();
+    }
+    return page;
+  }
+
   /**
    * Sends {@code text} to the caller's chat {@code session}: logged, then handed to the process
-   * that holds its conversation, started when none does; held, and said to be, while a turn is
-   * open.
+   * that holds its conversation, started when none does; held, and said to be, while a turn is open
+   * or the process is ending.
    */
   public Sent send(String session, String text) {
     Strings.requireNonBlank(text, "text");
     var chat = yours(session);
     synchronized (lock(session)) {
-      if (store.find(session).map(ChatStore.Chat::ended).orElse(true)) {
+      if (ended(session)) {
         throw ended(chat);
       }
       var process = live.get(session);
       if (process == null || process.over()) {
-        process = start(chat);
+        process = startProcess(store.find(session).orElseThrow(() -> unknown(session)));
       }
-      if (store.find(session).map(ChatStore.Chat::ended).orElse(true)) {
-        var ended = process;
+      if (ended(session)) {
+        var started = process;
         Thread.ofVirtual()
             .name("sail-chat-ended-" + session)
-            .start(() -> ended.end(timing.grace().afterInt(), null));
+            .start(() -> started.endChat(timing.grace().afterInt()));
         throw ended(chat);
       }
-      return process.send(text);
+      return process.send(text, () -> ended(chat));
     }
+  }
+
+  private boolean ended(String session) {
+    return store.find(session).map(ChatStore.Chat::ended).orElse(true);
   }
 
   private static ApiException ended(ChatStore.Chat chat) {
@@ -184,28 +235,37 @@ public final class ChatHost implements AutoCloseable {
   }
 
   /**
-   * Ends the caller's chat {@code session}: its process, if one holds it, is ended, and the chat is
-   * marked ended; its log stays readable for {@link #RETENTION}.
+   * Ends the caller's chat {@code session}: it is marked ended, and its process, if one holds it,
+   * ended; its log stays readable for {@link #RETENTION}, and its folder in the workspace goes once
+   * its process is known gone.
    */
   public void end(String session) {
-    yours(session);
+    var chat = yours(session);
     store.ended(session, timing.clock().get());
-    locks.remove(session);
+    arrived(session);
     var process = live.get(session);
     if (process != null) {
-      process.end(timing.grace().afterInt(), null);
+      process.endChat(timing.grace().afterInt());
+    } else if (!chat.launched()) {
+      launch.forget(chat);
     }
-    arrived();
   }
 
   /**
-   * Closes the turns left open by the processes a restart of sail ended: each chat whose turn was
-   * open is told it was cut, and its next message resumes it. Returns how many.
+   * Takes up what a sail before this one left: each process started for a chat that is not known
+   * gone is halted and proved gone, and a turn it held cut, said so; one its workspace does not
+   * answer for is asked again by the sweep, and before the chat's next start. Then each chat whose
+   * messages wait is delivered them by a process started as its opener. Returns how many turns it
+   * cut.
    */
-  public int reclaim() {
-    var cut = store.openTurns();
-    cut.forEach(session -> new ChatLog(store, session, timing, this::arrived).cut(RESTARTED));
-    return cut.size();
+  int reclaim() {
+    var cut = settleLeftovers();
+    for (var session : store.queued(MESSAGE)) {
+      synchronized (lock(session)) {
+        resumeQueued(session);
+      }
+    }
+    return cut;
   }
 
   /** Erases the chats of workspace {@code workspace} of {@code project}, which was deleted. */
@@ -218,31 +278,36 @@ public final class ChatHost implements AutoCloseable {
     store.eraseProject(project);
   }
 
-  /** Holds every chat to its bounds at {@code interval}. */
-  public void startSweep(Duration interval) {
-    sweepPass.start(interval);
-  }
-
   /**
-   * One pass: ends each process idle past its project's {@code max_idle}, and each that held a
-   * request unanswered past {@link ChatTiming#requestBound}, saying so; erases the chats that ended
-   * more than {@link #RETENTION} ago.
+   * One pass: erases the chats that ended more than {@link #RETENTION} ago, settles each process
+   * left over, and holds each live one to its bounds, each on a thread of its own: one whose chat
+   * was erased is ended, one whose turn holds a request unanswered past {@link
+   * ChatTiming#requestBound} has its turn stopped, and ended if it does not stop, and one idle past
+   * its project's {@code max_idle} is ended.
    */
   void sweep() {
     var now = timing.clock().get();
-    for (var process : List.copyOf(live.values())) {
-      if (process.unanswered(now, timing.requestBound())) {
-        process.end(
-            timing.grace().afterInt(),
-            "Nobody can answer the agent's request in this version of Sail, so after "
-                + timing.requestBound().toMinutes()
-                + " minutes Sail ended its turn and withdrew the request. Your next message"
-                + " starts it again.");
-      } else if (process.idle(now)) {
-        process.end(timing.grace().idleExit(), null);
+    store.expire(now.minus(RETENTION));
+    settleLeftovers();
+    try (var each = Executors.newVirtualThreadPerTaskExecutor()) {
+      for (var process : List.copyOf(live.values())) {
+        each.execute(() -> holdToBounds(process, now));
       }
     }
-    store.expire(now.minus(RETENTION));
+  }
+
+  private void holdToBounds(ChatProcess process, Instant now) {
+    if (store.find(process.session()).isEmpty()) {
+      process.end(timing.grace().afterInt(), null);
+    } else if (process.overBound(now, timing.requestBound())) {
+      process.end(
+          timing.grace().afterInt(),
+          process.agent()
+              + "'s turn could not be stopped, so Sail ended its process; your next message"
+              + " starts it again.");
+    } else if (process.endIfIdle(now)) {
+      Thread.ofVirtual().name("sail-chat-idle-" + process.session()).start(process::awaitIdleEnd);
+    }
   }
 
   /**
@@ -250,6 +315,7 @@ public final class ChatHost implements AutoCloseable {
    */
   @Override
   public void close() {
+    closing = true;
     sweepPass.close();
     try (var ending = Executors.newVirtualThreadPerTaskExecutor()) {
       live.values()
@@ -257,25 +323,122 @@ public final class ChatHost implements AutoCloseable {
     }
   }
 
-  /** Starts the process that holds {@code chat}'s conversation, and reads it. */
-  private ChatProcess start(ChatStore.Chat chat) {
-    var started = launch.start(chat);
+  /** Settles each chat's process left over that no process of this host holds; turns cut. */
+  private int settleLeftovers() {
+    var cut = new AtomicInteger();
+    try (var each = Executors.newVirtualThreadPerTaskExecutor()) {
+      for (var session : store.launched()) {
+        if (!live.containsKey(session)) {
+          each.execute(
+              () -> {
+                if (settled(session)) {
+                  cut.incrementAndGet();
+                }
+              });
+        }
+      }
+    }
+    return cut.get();
+  }
+
+  /**
+   * Under the chat's lock, halts the process started for chat {@code session} that no process of
+   * this host holds, and once it is proved gone, cuts the turn it held; returns whether it cut one.
+   */
+  private boolean settled(String session) {
+    synchronized (lock(session)) {
+      var chat = store.find(session).orElse(null);
+      if (chat == null || !chat.launched() || live.containsKey(session) || !launch.halted(chat)) {
+        return false;
+      }
+      log(session).cut(RESTARTED);
+      released(session);
+      return chat.turnOpen();
+    }
+  }
+
+  /**
+   * Starts the process that holds {@code chat}'s conversation, and reads it: a turn a process
+   * before it left open, proved gone in the start, is cut first. Called under the chat's lock.
+   */
+  private ChatProcess startProcess(ChatStore.Chat chat) {
+    var session = chat.id();
+    var started = launch.start(chat, () -> store.launched(session, true));
+    var log = log(session);
+    log.cut(RESTARTED);
     var process =
         new ChatProcess(
-            chat.id(),
+            session,
             started.agent(),
-            new ChatLog(store, chat.id(), timing, this::arrived),
+            log,
             started.form(),
             started.handle(),
             timing,
             started.maxIdle(),
-            ended -> {
-              live.remove(ended.session(), ended);
-              Thread.ofVirtual().name("sail-chat-withdraw").start(started.withdraw());
-            });
-    live.put(chat.id(), process);
+            ended -> gone(ended, started.withdraw()));
+    live.put(session, process);
     process.read();
     return process;
+  }
+
+  /**
+   * {@code ended}'s process is over: its login file withdrawn, the chat released when its exit is
+   * known, and, unless sail is stopping, messages left waiting delivered by the next process, if it
+   * took any; one that took none is not started again for them, which is said.
+   */
+  private void gone(ChatProcess ended, Runnable withdraw) {
+    Thread.ofVirtual().name("sail-chat-withdraw").start(withdraw);
+    var session = ended.session();
+    synchronized (lock(session)) {
+      if (!live.remove(session, ended)) {
+        return;
+      }
+      if (ended.known()) {
+        released(session);
+      }
+      if (closing) {
+        return;
+      }
+      if (ended.took()) {
+        resumeQueued(session);
+      } else if (!ended(session) && !store.unhanded(session, MESSAGE).isEmpty()) {
+        log(session)
+            .log(
+                new ChatWire.Told(
+                    ended.agent()
+                        + "'s process ended before it took your message; it waits for your next"
+                        + " one."));
+      }
+    }
+  }
+
+  /**
+   * Delivers chat {@code session}'s messages left waiting, when it is open and has any: a process
+   * is started for it as its opener, admitted as any start is, and handed the oldest, the rest as
+   * each turn ends. One that is refused now is said in the refusal's words, and its messages keep
+   * waiting. Called under the chat's lock.
+   */
+  private void resumeQueued(String session) {
+    var chat = store.find(session).filter(found -> !found.ended()).orElse(null);
+    if (chat == null || store.unhanded(session, MESSAGE).isEmpty()) {
+      return;
+    }
+    try {
+      launch.asOpener(chat, () -> startProcess(chat)).resume();
+    } catch (ApiException | IllegalArgumentException refused) {
+      log(session)
+          .log(
+              new ChatWire.Told(
+                  refused.getMessage()
+                      + " Your waiting message was not sent; it goes with your next one."));
+    }
+  }
+
+  /** Chat {@code session}'s process is known gone: an ended chat's folder goes with it. */
+  private void released(String session) {
+    store.launched(session, false);
+    store.find(session).filter(ChatStore.Chat::ended).ifPresent(launch::forget);
+    arrived(session);
   }
 
   /**
@@ -297,13 +460,22 @@ public final class ChatHost implements AutoCloseable {
     return new ApiException(ErrorCode.NOT_FOUND, "There is no chat " + session + " of yours here.");
   }
 
+  private ChatLog log(String session) {
+    return new ChatLog(store, session, timing, () -> arrived(session));
+  }
+
   private Object lock(String session) {
     return locks.computeIfAbsent(session, id -> new Object());
   }
 
-  private void arrived() {
-    synchronized (arrivals) {
-      arrivals.notifyAll();
+  private Object arrivals(String session) {
+    return arrivals.computeIfAbsent(session, id -> new Object());
+  }
+
+  private void arrived(String session) {
+    var waiting = arrivals(session);
+    synchronized (waiting) {
+      waiting.notifyAll();
     }
   }
 }

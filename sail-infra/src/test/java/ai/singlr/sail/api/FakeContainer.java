@@ -118,10 +118,15 @@ final class FakeContainer implements ShellExec {
 
   /** The agent of {@code runId} started: its unit is active and its pid file names it. */
   void started(String runId) {
+    started(runId, AgentUnit.forRun(runId).pidPath());
+  }
+
+  /** The agent of {@code runId} started, its pid file at {@code pidPath}. */
+  void started(String runId, String pidPath) {
     var agent = new Agent(pids.incrementAndGet(), readLaunchEnv(runId));
     agents.put(runId, agent);
     launched.add(runId);
-    files.put(AgentUnit.forRun(runId).pidPath(), String.valueOf(agent.pid));
+    files.put(pidPath, String.valueOf(agent.pid));
   }
 
   /**

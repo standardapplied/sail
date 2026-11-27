@@ -773,13 +773,11 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   /** Signals {@code run}'s process through its pid file; whether it is then known gone. */
   private boolean halted(RunStore.RunRow run) {
     var unit = AgentUnit.recorded(run.id(), run.unit());
-    try {
-      return new AgentSession(shell).killAgent(run.place().instance(), unit)
-              instanceof AgentSession.Halt.Ended
-          || new AgentPresence(shell).gone(run.place(), unit);
-    } catch (Exception unanswered) {
-      return false;
-    }
+    return ProcessEnd.halted(
+        shell,
+        run.place().instance(),
+        unit,
+        () -> new AgentPresence(shell).gone(run.place(), unit));
   }
 
   /**

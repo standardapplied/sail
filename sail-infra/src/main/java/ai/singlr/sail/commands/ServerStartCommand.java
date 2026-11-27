@@ -330,6 +330,14 @@ public final class ServerStartCommand implements Runnable {
         .register(rearmer)
         .register(presenceEmitter);
     try {
+      var cut = operations.chats().start(LIVE_MEMBER_SWEEP);
+      if (cut > 0) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|green ✓|@ Closed "
+                    + cut
+                    + " chat turn(s) the restart cut; each resumes on its next message"));
+      }
       server.start();
       sweeper.start();
       eventSweeper.start();
@@ -355,15 +363,6 @@ public final class ServerStartCommand implements Runnable {
                     + " once the container answers that its process is gone."));
       }
       operations.liveMembers().startSweep(LIVE_MEMBER_SWEEP);
-      var cut = operations.chats().reclaim();
-      if (cut > 0) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|green ✓|@ Closed "
-                    + cut
-                    + " chat turn(s) the restart cut; each resumes on its next message"));
-      }
-      operations.chats().startSweep(LIVE_MEMBER_SWEEP);
       var replayed = missedStops.sweep();
       if (replayed > 0) {
         System.out.println(

@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Acting;
@@ -62,6 +63,7 @@ class ChatStoreTest {
             "default",
             false,
             null,
+            false,
             false,
             0,
             AT,
@@ -119,11 +121,14 @@ class ChatStoreTest {
     assertEquals(
         List.of("conv-1", "plan", true),
         List.of(chat.conversation(), chat.mode(), chat.turnOpen()));
-    assertEquals(List.of("c1"), chats.openTurns());
   }
 
+  /**
+   * An end is kept once, and leaves the turn it finds open for the cut of its process to close,
+   * which says why: an end alone says nothing of the turn.
+   */
   @Test
-  void anEndIsKeptOnceAndClosesItsTurn() {
+  void anEndIsKeptOnceAndLeavesItsTurnToItsProcesssCut() {
     open("c1", sam, "acme", "try");
     chats.turn("c1", true);
 
@@ -133,7 +138,90 @@ class ChatStoreTest {
     var chat = chats.find("c1").orElseThrow();
     assertTrue(chat.ended());
     assertEquals(AT, chat.endedAt());
-    assertFalse(chat.turnOpen());
+    assertTrue(chat.turnOpen());
+  }
+
+  /**
+   * I2, I8: a chat a process was started for is said to be until its process is known gone, so a
+   * later sail finds what one before it left; an ended chat's is found as well.
+   */
+  @Test
+  void aChatWhoseProcessIsNotKnownGoneIsFoundByALaterSail() {
+    open("c1", sam, "acme", "try");
+    open("c2", sam, "acme", "try");
+    open("c3", sam, "acme", "try");
+    chats.launched("c1", true);
+    chats.launched("c2", true);
+    chats.launched("c2", false);
+    chats.launched("c3", true);
+    chats.ended("c3", AT);
+
+    assertEquals(List.of("c1", "c3"), chats.launched());
+    assertTrue(chats.find("c1").orElseThrow().launched());
+    assertFalse(chats.find("c2").orElseThrow().launched());
+  }
+
+  /**
+   * I5: the chats whose messages wait to be handed, which a later sail delivers; never an ended
+   * one.
+   */
+  @Test
+  void theChatsWithMessagesWaitingAreFoundAndNoEndedOne() {
+    open("waits", sam, "acme", "try");
+    open("handed", sam, "acme", "try");
+    open("ended", sam, "acme", "try");
+    for (var id : List.of("waits", "handed", "ended")) {
+      chats.append(id, "message", "{}", AT);
+      chats.append(id, "turn_ended", "{}", AT);
+    }
+    chats.handed("handed", 1);
+    chats.ended("ended", AT);
+
+    assertEquals(List.of("waits"), chats.queued("message"));
+  }
+
+  /**
+   * I3: an item is small by the protocol's own bounds, so the store refuses one past its bound,
+   * which every reader of an item parses within: what is logged can always be read back.
+   */
+  @Test
+  void anItemPastItsBoundIsRefusedSoEveryItemLoggedCanBeReadBack() {
+    open("c1", sam, "acme", "try");
+    var largest = "\"" + "a".repeat(ChatStore.MAX_PAYLOAD_CHARS - 2) + "\"";
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> chats.append("c1", "text", largest + " ", AT));
+    chats.append("c1", "text", largest, AT);
+
+    assertEquals(
+        "An item of chat c1 is "
+            + (ChatStore.MAX_PAYLOAD_CHARS + 1)
+            + " characters, past the "
+            + ChatStore.MAX_PAYLOAD_CHARS
+            + " any item can be.",
+        refused.getMessage());
+    assertEquals(1, chats.after("c1", 0, 10).size());
+  }
+
+  /** I3: what is logged together is logged whole or not at all. */
+  @Test
+  void entriesLoggedTogetherAreAllLoggedOrNone() {
+    open("c1", sam, "acme", "try");
+    chats.turn("c1", true);
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            chats.together(
+                () -> {
+                  chats.append("c1", "told", "{}", AT);
+                  chats.turn("c1", false);
+                  throw new IllegalStateException("crashed mid-cut");
+                }));
+
+    assertEquals(List.of(), chats.after("c1", 0, 10));
+    assertTrue(chats.find("c1").orElseThrow().turnOpen());
   }
 
   /** I11: a person's chats go with them. */

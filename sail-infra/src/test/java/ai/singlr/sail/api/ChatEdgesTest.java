@@ -32,7 +32,6 @@ import org.junit.jupiter.api.io.TempDir;
  * its message was handed, text whose window closes on its own, a read or an end interrupted, a door
  * that cannot say, a caller on no roster, and the host's own wiring.
  */
-@Timeout(value = 60, unit = TimeUnit.SECONDS)
 class ChatEdgesTest {
 
   private static final String INIT = line("04b-set-permission-mode-and-background-task", 148);
@@ -52,6 +51,7 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aProcessThatNoLongerReadsIsEndedAndTheMessageGoesToTheNext() {
     var session = bench.samsChat();
     bench.send(session, "first");
@@ -60,9 +60,10 @@ class ChatEdgesTest {
 
     var sent = bench.send(session, "second");
     fake.settle();
-    bench.send(session, "third");
+    var third = bench.send(session, "third");
 
     assertFalse(sent.queued());
+    assertTrue(third.queued(), "the next process has its turn open on the second");
     assertEquals(2, bench.processes.starts.size());
     assertEquals(
         List.of(LiveStream.userMessage("second")),
@@ -71,6 +72,7 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void textWhoseWindowClosesWithNoLineAfterItIsLoggedOnItsOwn() throws Exception {
     bench.windowsWait();
     var session = bench.samsChat();
@@ -85,6 +87,7 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aProcessWhoseOutputBreaksIsOverAndItsTurnCut() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -97,6 +100,7 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aProcessWhoseExitCannotBeAskedIsSaidWithoutOne() {
     var session = bench.samsChat();
     bench.send(session, "hi");
@@ -112,6 +116,7 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void anEndInterruptedWhileItWaitsSignalsAtOnce() throws Exception {
     var patient = Duration.ofMinutes(5);
     var host = bench.restarted(new ProcessEnd.Grace(patient, patient, patient, patient));
@@ -154,6 +159,7 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aReadInterruptedWhileItWaitsAnswersNothing() {
     var session = bench.samsChat();
     bench.readsWait();
@@ -166,6 +172,7 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aReadFromBeforeTheFirstItemIsRefused() {
     var session = bench.samsChat();
 
@@ -175,6 +182,7 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aCallerOnNoRosterOpensNoChat() {
     var refused =
         assertThrows(
@@ -186,6 +194,7 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aWorkspaceGoneOrADoorThatCannotSayIsRefusedSo() {
     var session = bench.samsChat();
     bench.incus.on("incus list ^acme-try$", new ShellExec.Result(0, "[]", ""));
@@ -197,6 +206,7 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void theRealTimingWaitsOnTheArrivalsItIsGivenForItsBound() throws Exception {
     var timing = ChatTiming.real();
     var arrivals = new Object();
@@ -211,8 +221,9 @@ class ChatEdgesTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void theSweepRunsOnItsScheduleUntilTheHostCloses() {
-    bench.host.startSweep(Duration.ofHours(1));
+    bench.host.start(Duration.ofHours(1));
 
     bench.host.close();
 

@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -47,6 +48,21 @@ class AgentUnitTest {
 
     assertEquals("sail-agent-legacy-shape", unit.unitName());
     assertEquals("/home/dev/.sail/runs/" + RUN_A + "/agent-session.json", unit.sessionPath());
+  }
+
+  /**
+   * A chat's every process is found at one place, its own folder, by no unit: what a later sail
+   * signals one left over through.
+   */
+  @Test
+  void aChatsProcessIsFoundInItsOwnFolderByNoUnit() {
+    var unit = AgentUnit.chat(RUN_A);
+
+    assertEquals("/home/dev/.sail/chats/" + RUN_A, AgentUnit.chatDir(RUN_A));
+    assertEquals("/home/dev/.sail/chats/" + RUN_A + "/agent.pid", unit.pidPath());
+    assertEquals("/home/dev/.sail/chats/" + RUN_A + "/agent.log", unit.logPath());
+    assertFalse(unit.systemd());
+    assertThrows(IllegalArgumentException.class, () -> AgentUnit.chat("../escape"));
   }
 
   @Test

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.engine.LiveStream;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,9 +24,9 @@ public final class ChatStore {
   /**
    * One chat: whose ({@code opener}, an FDE id), where, with which harness, in the mode in force
    * (launched, then whatever the harness last said), whether it signs in inside the workspace, the
-   * harness's own id of the conversation once said, whether a turn is open, the last of the
-   * person's messages handed to the harness ({@code handed}, a seq), and when it was opened and
-   * ended.
+   * harness's own id of the conversation once said, whether a turn is open, whether a process was
+   * started for it that is not yet known gone ({@code launched}), the last of the person's messages
+   * handed to the harness ({@code handed}, a seq), and when it was opened and ended.
    */
   public record Chat(
       String id,
@@ -37,6 +38,7 @@ public final class ChatStore {
       boolean inside,
       String conversation,
       boolean turnOpen,
+      boolean launched,
       long handed,
       Instant createdAt,
       Instant endedAt) {
@@ -54,9 +56,17 @@ public final class ChatStore {
   /** One logged item: its number in its chat, its kind, what it says as JSON, and when. */
   public record Item(long seq, String kind, String payload, Instant at) {}
 
+  /**
+   * The most characters an item's payload holds. An item is said from one line the harness wrote,
+   * of at most {@link LiveStream#MAX_LINE_CHARS}, each character of which it writes in at most six
+   * (an escape) beside its own few names, or from Sail's own words, which are short: a payload past
+   * this is no item, and every reader of one parses within it.
+   */
+  public static final int MAX_PAYLOAD_CHARS = 8 * LiveStream.MAX_LINE_CHARS;
+
   private static final String COLUMNS =
-      "id, opener, project, workspace, harness, mode, inside, conversation, turn_open, handed,"
-          + " created_at, ended_at";
+      "id, opener, project, workspace, harness, mode, inside, conversation, turn_open, launched,"
+          + " handed, created_at, ended_at";
 
   private final Sqlite db;
 
@@ -67,7 +77,9 @@ public final class ChatStore {
   /** Records {@code chat}, opened. */
   public void open(Chat chat) {
     db.execute(
-        "INSERT INTO chat_sessions (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO chat_sessions ("
+            + COLUMNS
+            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         chat.id(),
         chat.opener(),
         chat.project(),
@@ -77,6 +89,7 @@ public final class ChatStore {
         chat.inside() ? 1 : 0,
         chat.conversation(),
         chat.turnOpen() ? 1 : 0,
+        chat.launched() ? 1 : 0,
         chat.handed(),
         chat.createdAt(),
         chat.endedAt());
@@ -90,8 +103,20 @@ public final class ChatStore {
   /**
    * Logs an item of {@code kind} saying {@code payload} at {@code at}, numbered one past the chat's
    * last; returns its number, or 0 when the chat is gone (erased while its process spoke).
+   *
+   * @throws IllegalArgumentException when {@code payload} is past {@link #MAX_PAYLOAD_CHARS}
    */
   public long append(String session, String kind, String payload, Instant at) {
+    if (payload.length() > MAX_PAYLOAD_CHARS) {
+      throw new IllegalArgumentException(
+          "An item of chat "
+              + session
+              + " is "
+              + payload.length()
+              + " characters, past the "
+              + MAX_PAYLOAD_CHARS
+              + " any item can be.");
+    }
     return db.transaction(
         () -> {
           db.execute(
@@ -171,23 +196,44 @@ public final class ChatStore {
     db.execute("UPDATE chat_sessions SET turn_open = ? WHERE id = ?", open ? 1 : 0, session);
   }
 
+  /** A process was started for the chat, or the one that was is known gone. */
+  public void launched(String session, boolean launched) {
+    db.execute("UPDATE chat_sessions SET launched = ? WHERE id = ?", launched ? 1 : 0, session);
+  }
+
+  /** The chats a process was started for that is not known gone, ended or not. */
+  public List<String> launched() {
+    return db.query(
+        "SELECT id FROM chat_sessions WHERE launched = 1 ORDER BY id", row -> row.text(0));
+  }
+
+  /** The open chats with items of {@code kind} after the last message they handed. */
+  public List<String> queued(String kind) {
+    return db.query(
+        "SELECT s.id FROM chat_sessions s WHERE s.ended_at IS NULL AND EXISTS (SELECT 1 FROM"
+            + " chat_items i WHERE i.session = s.id AND i.kind = ? AND i.seq > s.handed) ORDER BY"
+            + " s.id",
+        row -> row.text(0),
+        kind);
+  }
+
+  /** Runs {@code work}, its every write to the chats, as one: all of it is kept, or none. */
+  public void together(Runnable work) {
+    db.transaction(work);
+  }
+
   /** The person's message logged at {@code seq} went to the harness. */
   public void handed(String session, long seq) {
     db.execute("UPDATE chat_sessions SET handed = ? WHERE id = ?", seq, session);
   }
 
-  /** The chat ended at {@code at}: no process holds it again. */
+  /**
+   * The chat ended at {@code at}: no process is started for it again. A turn it has open is closed
+   * by its process's cut, which says why.
+   */
   public void ended(String session, Instant at) {
     db.execute(
-        "UPDATE chat_sessions SET ended_at = ?, turn_open = 0 WHERE id = ? AND ended_at IS NULL",
-        at,
-        session);
-  }
-
-  /** The chats a turn was open in, whose process went with a restart of sail. */
-  public List<String> openTurns() {
-    return db.query(
-        "SELECT id FROM chat_sessions WHERE turn_open = 1 ORDER BY id", row -> row.text(0));
+        "UPDATE chat_sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL", at, session);
   }
 
   /** Erases the chats of workspace {@code workspace} of {@code project}, with their items. */
@@ -221,8 +267,9 @@ public final class ChatStore {
         row.integer(6) == 1,
         row.text(7),
         row.integer(8) == 1,
-        row.integer(9),
-        row.instant(10),
-        row.instant(11));
+        row.integer(9) == 1,
+        row.integer(10),
+        row.instant(11),
+        row.instant(12));
   }
 }
