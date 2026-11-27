@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
  * The shell that reads a workspace's files, sent with each {@code incus exec} as the dev user
@@ -202,15 +203,12 @@ public final class FileScripts {
           """;
 
   /**
-   * The argv, after the one that enters the container as the dev user, that prints a file within
-   * {@code home} of at most {@code cap} bytes as base64 ({@link #IMAGE}); the file's path goes on
-   * its input, then a NUL, never on a command line.
+   * The argv, after the one that enters the container as the dev user, that prints a file as base64
+   * ({@link #IMAGE}), to which a caller adds the home it must be within and the most bytes it may
+   * hold; the file's path goes on its input, then a NUL, never on a command line.
    */
-  public static List<String> image(String home, long cap) {
-    var command = new ArrayList<>(SHELL);
-    command.addAll(List.of(IMAGE, "sail-files", home, Long.toString(cap)));
-    return List.copyOf(command);
-  }
+  public static final List<String> IMAGE_COMMAND =
+      Stream.concat(SHELL.stream(), Stream.of(IMAGE, "sail-files")).toList();
 
   /**
    * Reads at most {@code $3} bytes of the file from {@code $2}: its version and its size, each

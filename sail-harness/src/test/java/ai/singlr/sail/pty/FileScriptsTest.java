@@ -329,9 +329,14 @@ class FileScriptsTest {
     assertEquals(FileScripts.IS_FOLDER, image(home, 4).getFirst());
   }
 
-  /** What {@link FileScripts#image} answers for {@code path}: its exit, then what it printed. */
+  /**
+   * What {@link FileScripts#IMAGE_COMMAND} answers for {@code path} within the home, at most {@code
+   * cap} bytes: its exit, then what it printed.
+   */
   private List<Object> image(Path path, long cap) throws Exception {
-    var process = new ProcessBuilder(FileScripts.image(home.toString(), cap)).start();
+    var command = new ArrayList<>(FileScripts.IMAGE_COMMAND);
+    command.addAll(List.of(home.toString(), Long.toString(cap)));
+    var process = new ProcessBuilder(command).start();
     try (var input = process.getOutputStream()) {
       input.write((path + "\0").getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }

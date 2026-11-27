@@ -41,6 +41,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /**
  * The chats this box holds: a person talks to an agent in their own workspace, the agent run as one
@@ -83,6 +84,13 @@ public final class ChatHost implements AutoCloseable {
 
   private static final String CHATS = ContainerExec.DEV_HOME + "/.sail/chats/";
   private static final Duration READ_IMAGE = Duration.ofSeconds(30);
+
+  /** What reads an attachment: within the workspace, at most {@link #IMAGE_BYTES}. */
+  private static final List<String> IMAGE_READ =
+      Stream.concat(
+              FileScripts.IMAGE_COMMAND.stream(), Stream.of(WORKSPACE, Long.toString(IMAGE_BYTES)))
+          .toList();
+
   private static final Map<String, String> IMAGE_TYPES =
       Map.of(
           "png", "image/png",
@@ -454,8 +462,7 @@ public final class ChatHost implements AutoCloseable {
     try {
       read =
           shell.execWithInput(
-              ContainerExec.asDevUser(
-                  instance, WORKSPACE, Map.of(), FileScripts.image(WORKSPACE, IMAGE_BYTES)),
+              ContainerExec.asDevUser(instance, WORKSPACE, Map.of(), IMAGE_READ),
               path + "\0",
               READ_IMAGE);
     } catch (IOException | TimeoutException | InterruptedException failed) {
