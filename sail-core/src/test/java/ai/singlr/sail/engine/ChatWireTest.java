@@ -63,7 +63,9 @@ class ChatWireTest {
     expected.put("id", "toolu_011VvCwXcvkemp321CMEyur6");
     expected.put("kind", "command");
     expected.put("words", "Print probe-ok");
-    expected.put("detail", Map.of("type", "command", "line", "echo probe-ok", "clipped", false));
+    expected.put(
+        "detail",
+        Map.of("type", "command", "line", "echo probe-ok", "background", false, "clipped", false));
     expected.put("clipped", false);
     assertEquals(expected, row, "no under: the agent's own row");
   }

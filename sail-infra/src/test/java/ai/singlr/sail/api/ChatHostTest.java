@@ -671,9 +671,34 @@ class ChatHostTest {
     var fake = bench.says(INIT, ASKS.replace("\"tool_name\":\"Bash\",", ""));
 
     assertEquals(
-        List.of(LiveStream.userMessage("hi"), LiveChat.refuseUnreadable(REQUEST)), fake.written);
+        List.of(
+            LiveStream.userMessage("hi"),
+            LiveChat.refuseUnreadable(new LiveStream.Step.Unreadable(REQUEST, false))),
+        fake.written);
     assertEquals(List.of("message", "session", "unreadable"), bench.kinds(session));
+    assertEquals(false, bench.items(session).get(2).get("too_large"));
     assertTrue(bench.store.find(session).orElseThrow().turnOpen(), "its turn goes on");
+  }
+
+  /**
+   * I7: a request a person could not be shown whole is never held for them: it is refused at once,
+   * the agent told to split it, and the person told why.
+   */
+  @Test
+  void aRequestTooLargeToShowWholeIsRefusedAtOnceAndNeverHeld() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+
+    var fake = bench.says(INIT, ASKS.replace("date > stamp.txt", "echo " + "a".repeat(70_000)));
+
+    assertEquals(
+        LiveChat.refuseUnreadable(new LiveStream.Step.Unreadable(REQUEST, true)),
+        fake.written.getLast());
+    assertEquals(List.of("message", "session", "unreadable"), bench.kinds(session));
+    assertEquals(true, bench.items(session).get(2).get("too_large"));
+    bench.clock.advance(Duration.ofMinutes(10));
+    bench.host.sweep();
+    assertFalse(fake.stdinClosed(), "nothing is held, so no bound ends it");
   }
 
   /** I7: one naming no request to answer stops the turn, which would otherwise wait on it. */

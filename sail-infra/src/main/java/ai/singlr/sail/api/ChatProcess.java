@@ -123,7 +123,7 @@ final class ChatProcess {
         }
       }
       case Step.Status status when status.mode() != null -> log.said(null, inForce(status.mode()));
-      case Step.Unreadable unreadable -> refuseNow(unreadable.requestId());
+      case Step.Unreadable unreadable -> refuseNow(unreadable);
       default -> {}
     }
     for (var item : LiveChat.items(step, chat)) {
@@ -132,14 +132,16 @@ final class ChatProcess {
   }
 
   /**
-   * Refuses the request {@code requestId} at once, no person asked, so its turn goes on; when it
-   * named no id to answer, stops the turn ({@link #stopTurn}), which would otherwise wait on it.
+   * Refuses the request {@code unreadable} names at once, no person asked: one that could not be
+   * read whole, or one a person could not be shown whole, which the agent is told to split; its
+   * turn goes on. One that names no id to answer stops the turn ({@link #stopTurn}), which would
+   * otherwise wait on it.
    */
-  private void refuseNow(String requestId) {
-    if (requestId == null) {
+  private void refuseNow(Step.Unreadable unreadable) {
+    if (unreadable.requestId() == null) {
       stopTurn();
     } else {
-      write(LiveChat.refuseUnreadable(requestId));
+      write(LiveChat.refuseUnreadable(unreadable));
     }
   }
 

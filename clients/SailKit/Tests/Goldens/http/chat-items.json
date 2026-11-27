@@ -106,6 +106,7 @@
           "at": "2026-11-11T09:00:00.656Z",
           "clipped": false,
           "detail": {
+            "background": false,
             "clipped": false,
             "line": "echo probe-ok",
             "type": "command"
