@@ -204,8 +204,9 @@ final class ClaudeCode implements Harness {
    * Claude Code's streaming mode: prompts are JSON lines on stdin, and every step of a turn is a
    * JSON line on stdout, text as it is written ({@code --include-partial-messages}). A read-only
    * member runs under exactly the isolation, tool cut and allow-rules of {@link #readOnly}; a full
-   * one skips permissions as {@link #headless} does. {@code --permission-prompts none} denies every
-   * prompt either way: nobody is there to answer one.
+   * one skips permission prompts as {@link #headless} does, though never the deny rules of its
+   * settings ({@link #readDenyRules}). {@code --permission-prompts none} denies every prompt either
+   * way: nobody is there to answer one.
    */
   @Override
   public Optional<List<String>> live(LiveLaunch launch) {
@@ -576,35 +577,41 @@ final class ClaudeCode implements Harness {
   }
 
   /**
-   * The Read-deny rules that belt-and-suspenders the room lane's highest-value credentials. The
-   * primary boundary is elsewhere: Claude Code auto-approves read commands ({@code cat}/{@code
-   * head}/{@code tail}/{@code grep}) only inside the working directory (the workspace), and refuses
-   * a read of any path outside it (verified empirically), so the container's secrets, all of which
-   * live outside {@code ~/workspace}, are unreadable by default even without a rule. These denies
-   * harden the box FDE {@code box.credential}, the box SSH identity ({@code ~/.ssh}, the Sail CLI
+   * The Read-deny rules every settings file Sail hands Claude Code carries, whichever lane reads
+   * it: the box FDE {@code box.credential}, the box SSH identity ({@code ~/.ssh}, the Sail CLI
    * identity), the {@code ~/.git-credentials} token, the {@code gh} token under {@code
    * ~/.config/gh} and a run's {@code launch.env}, which holds its credential and its person's login
-   * until its wrapper reads it, explicitly on top of that, so the protection does not rest solely
-   * on the cwd heuristic. Claude Code applies a {@code Read(path)} deny to a Bash command that
-   * reads that path (verified), deny outranks every allow rule, and the room invocation pins {@code
-   * --setting-sources ""} so no ambient settings file can shadow these. A full (YOLO) agent skips
-   * permission rules by design: it is the trusted member lane. Spec-CLI auth is untouched: the
-   * helper reads the credential at the OS level, not through a tool. Residual (a secret committed
-   * inside the workspace, a kernel escape, a harness-enforcement bug) is owned by the room-lane
-   * hardening follow-up, a read-only-disk sidecar, not this denylist.
+   * until its wrapper reads it. Each is an absolute path, written from the root ({@link
+   * #readDeny}). Probe 3 recorded them on Claude Code 2.1.332: each refused the Read tool and a
+   * {@code cat} of its path in both lanes, {@code --dangerously-skip-permissions} included, since a
+   * deny rule outranks bypass (03a, 03b). So they bind the full lane, and in the read-only lane
+   * they hold on top of the refusal of every read outside the workspace ({@link #readOnly}). Deny
+   * outranks every allow rule, and the read-only invocation pins {@code --setting-sources ""} so no
+   * ambient settings file can shadow these. Written with one leading slash, as Sail wrote them
+   * before, they matched nothing in either lane: a full agent read all four home paths unasked
+   * (03d). Spec-CLI auth is untouched: the helper reads the credential at the OS level, not through
+   * a tool. Residual (a secret committed inside the workspace, a read by a command Claude Code does
+   * not map to the path it reads, a kernel escape, a harness-enforcement bug) is owned by the
+   * room-lane hardening follow-up, a read-only-disk sidecar, not this denylist.
    */
   private static List<String> readDenyRules() {
     return List.of(
-        boxCredentialReadDeny(),
-        "Read(" + ContainerExec.DEV_HOME + "/.ssh/**)",
-        "Read(" + ContainerExec.DEV_HOME + "/.git-credentials)",
-        "Read(" + ContainerExec.DEV_HOME + "/.config/gh/**)",
-        "Read(" + ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env)");
+        readDeny(SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME).toString()),
+        readDeny(ContainerExec.DEV_HOME + "/.ssh/**"),
+        readDeny(ContainerExec.DEV_HOME + "/.git-credentials"),
+        readDeny(ContainerExec.DEV_HOME + "/.config/gh/**"),
+        readDeny(ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env"));
   }
 
-  private static String boxCredentialReadDeny() {
-    var credential = SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME);
-    return "Read(/" + credential + ")";
+  /**
+   * A rule denying reads of the absolute {@code path}: written {@code //path}, since a single
+   * leading {@code /} anchors a rule at the directory of the {@code --settings} file, not the root.
+   * Probe 2 recorded it: {@code Read(/home/dev/probe-secret.txt)} denied nothing (03a), {@code
+   * Read(/probe-secret.txt)} denied the file beside the settings file (03f), and {@code
+   * Read(//home/dev/probe-secret.txt)} denied the file (03b).
+   */
+  private static String readDeny(String path) {
+    return "Read(/" + path + ")";
   }
 
   private static String invocation(Launch launch) {

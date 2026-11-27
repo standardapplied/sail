@@ -2288,10 +2288,21 @@ harness in `Harnesses.all()`.
 | `Stop` | none | `STOP_GATE` |
 | `SessionEnd` | none | `SESSION_ENDED` |
 
-The file also carries `includeCoAuthoredBy: false` and the `permissions.deny` read rules that
-belt-and-brace the room lane's top credentials. A live member runs under a second file,
-`~/.sail/claude-live.json`, with those two entries and no `hooks` key: sail reads a live
-process, so nothing in it reports back.
+The file also carries `includeCoAuthoredBy: false` and the `permissions.deny` read rules
+(`ClaudeCode.readDenyRules`, the one list): the box credential, `~/.ssh`, `~/.git-credentials`,
+`~/.config/gh` and a run's `launch.env`, each an absolute path written `Read(//…)`. A live member
+runs under a second file, `~/.sail/claude-live.json`, with those two entries and no `hooks` key:
+sail reads a live process, so nothing in it reports back. Recorded on Claude Code 2.1.332
+(`chat-probe2`, `chat-probe3`), a `//` rule refuses the Read tool and a `cat` of its path in every
+permission mode, `--dangerously-skip-permissions` included: a deny rule outranks bypass. One
+leading `/` is read from the settings file's own folder, so the rules for `~/.ssh` and
+`~/.git-credentials` (since 0.24.0), `~/.config/gh` (0.47.0) and `launch.env` (0.69.0), all written
+so until this release, matched nothing: a full-permission agent read all four unasked, and a
+read-only member was kept from them only because they lie outside its workspace and nobody can
+answer its prompt. The box credential's rule was always `//`. A refusal by a rule reaches a live
+member's stream as an `is_error` tool result alone, with no `system/permission_denied` line before
+it; a refused `cat` and an unanswerable prompt write one first. `LiveStream` reads all three as the
+call coming back (`LiveStreamTest.eachRecordedRefusalOfARuleOrAPromptReadsAsItsCallComingBack`).
 
 | Codex event (`~/.codex/hooks.json`) | Matcher | Hooks |
 |---|---|---|
@@ -3134,7 +3145,7 @@ class is named):
   home and consumed on stdin by one command that removes it, success or not, so it is never
   an argument and never in a process list; a failed login fails the step naming the host.
   Other forges get nothing: the work prompt's last sentence tells a run with no authenticated
-  forge CLI to say so in the room instead of claiming CI green. The room lane's read-deny
+  forge CLI to say so in the room instead of claiming CI green. Claude Code's read-deny
   rules name `~/.config/gh/**`.
   *`ProjectApplierTest.applyReposRefreshesCredentialStoreInsteadOfInjectingToken`,
   `ProjectApplierTest.applyReposLogsGhInForAGitHubEnterpriseHostMarkedAsGitHubAndNotForGitLab`,
@@ -4891,8 +4902,8 @@ no pairing is removed through the gateway as before, and no key file is touched.
     sends it through the one function `SocketPreamble.credentialCurl` defines, `sail_curl`, which
     hands curl the `Authorization` header as a config on descriptor 3, written by the shell's
     built-in `printf` into a pipe, so it is in no process's argv, no environment of a process it
-    starts and no file, and the caller's stdin stays curl's for a body. The room
-    lane's read-deny rules name `launch.env`. On the host the file is staged in the box's own
+    starts and no file, and the caller's stdin stays curl's for a body. Claude Code's
+    read-deny rules, which every lane of it runs under, name `launch.env`. On the host the file is staged in the box's own
     staging directory beside its database (`SailPaths.stagingDir`, `/var/lib/sail/staging` on a
     box), under a directory only the server's account may write, made that account's alone
     (`0700`, `PrivateDirectory`, a link refused) before each push, and deleted whether or not the
@@ -4973,7 +4984,10 @@ no pairing is removed through the gateway as before, and no key file is touched.
     environment readers (`printenv`, `env`, `set`, `export`, `declare`) nor a read under `/proc`,
     which Sail's deny rules refuse as Claude Code's own checks do; reads outside its workspace only
     on approval it cannot get; and is denied `launch.env`. A full-permission run, every Codex run
-    among them, has no such rule. Neither harness can hide the variable from the commands
+    among them, has none of these but Sail's read-deny rules, which bind under
+    `--dangerously-skip-permissions` too: a full-permission Claude Code run is denied `launch.env`
+    as the member is, and a Codex run is not (Sail writes Codex no deny rule, and the one Codex
+    has, a permission profile's `deny`, is enforced by the sandbox it cannot start here). Neither harness can hide the variable from the commands
     it runs here: Claude Code's `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` and Codex's sandbox both need
     bubblewrap, which needs unprivileged user namespaces, and an Incus container on an Ubuntu 24.04
     host is refused them (`kernel.apparmor_restrict_unprivileged_userns=1`: `bwrap: setting up uid
