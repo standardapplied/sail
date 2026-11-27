@@ -21,7 +21,9 @@ import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -563,6 +565,128 @@ class SyncSchedulerTest {
     assertEquals(List.of(), warned);
   }
 
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aCloseInADrainsDebounceWhoseBackoffIsDueReturnsWithNoRound(@TempDir Path dir)
+      throws Throwable {
+    var told = new CopyOnWriteArrayList<String>();
+    var inDebounce = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var never = new CountDownLatch(1);
+    var scheduler =
+        new SyncScheduler(
+            journaledRound(dir.resolve("rounds.lock"), told),
+            DEBOUNCE,
+            TTL,
+            Executors.newVirtualThreadPerTaskExecutor(),
+            nanos::get,
+            wait -> {
+              if (!wait.equals(DEBOUNCE)) {
+                never.await();
+              }
+              inDebounce.countDown();
+              release.await();
+              advanceBy(wait);
+            });
+    scheduler.useHealth(SyncSchedulerTest::failedOnce);
+
+    var warned =
+        warnings(
+            () -> {
+              scheduler.afterWrite();
+              inDebounce.await();
+              closeWhileHeld(scheduler, release);
+            });
+
+    assertEquals(List.of(), told, "the drain began a round, or slept a backoff after the close");
+    assertEquals(List.of(), warned);
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aWriteDuringABackoffThenAStopStartsNoDrainOnTheShutExecutorAndWaitsForTheNextStart(
+      @TempDir Path dir) throws Throwable {
+    var lock = dir.resolve("rounds.lock");
+    var told = new CopyOnWriteArrayList<String>();
+    var refused = new CopyOnWriteArrayList<String>();
+    var backingOff = new CountDownLatch(1);
+    var never = new CountDownLatch(1);
+    var scheduler =
+        new SyncScheduler(
+            journaledRound(lock, told),
+            Duration.ZERO,
+            TTL,
+            refusalsSaid(Executors.newVirtualThreadPerTaskExecutor(), refused),
+            nanos::get,
+            wait -> {
+              backingOff.countDown();
+              never.await();
+            });
+    scheduler.useHealth(SyncSchedulerTest::failedOnce);
+
+    var warned =
+        warnings(
+            () -> {
+              scheduler.afterWrite();
+              backingOff.await();
+              scheduler.afterWrite();
+              scheduler.close();
+            });
+
+    assertEquals(
+        List.of(), refused, "the follow-up drain was started on the executor the close shut");
+    assertEquals(List.of(), told);
+    assertEquals(List.of(), warned);
+
+    var nextStart = scheduler(new QueueExecutor(), journaledRound(lock, told));
+    nextStart.useHealth(SyncSchedulerTest::failedOnce);
+    nextStart.syncNow();
+    assertEquals(List.of("began", "offered [spec ada-1]"), told);
+  }
+
+  /**
+   * {@code executor}, saying each task it refuses as the uncaught exception that would end the
+   * thread that asked, so a test sees what the stop would print.
+   */
+  private static ExecutorService refusalsSaid(ExecutorService executor, List<String> refused) {
+    return new AbstractExecutorService() {
+      @Override
+      public void execute(Runnable command) {
+        try {
+          executor.execute(command);
+        } catch (RejectedExecutionException e) {
+          refused.add(e.getClass().getSimpleName());
+          throw e;
+        }
+      }
+
+      @Override
+      public void shutdown() {
+        executor.shutdown();
+      }
+
+      @Override
+      public List<Runnable> shutdownNow() {
+        return executor.shutdownNow();
+      }
+
+      @Override
+      public boolean isShutdown() {
+        return executor.isShutdown();
+      }
+
+      @Override
+      public boolean isTerminated() {
+        return executor.isTerminated();
+      }
+
+      @Override
+      public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+        return executor.awaitTermination(timeout, unit);
+      }
+    };
+  }
+
   /** A node whose last round failed just now, so its next round waits out a backoff. */
   private static SyncStatus failedOnce() {
     return new SyncStatus(
@@ -598,36 +722,46 @@ class SyncSchedulerTest {
 
   @Test
   @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-  void closeWaitsForTheTimersRoundAndReturnsOnceItEnds() throws Exception {
+  void closeWaitsForTheTimersRoundWhichEndsWholeWithNoFailureRecorded(@TempDir Path dir)
+      throws Throwable {
+    var told = new CopyOnWriteArrayList<String>();
+    var round = journaledRound(dir.resolve("rounds.lock"), told);
     var inRound = new CountDownLatch(1);
     var release = new CountDownLatch(1);
-    var ended = new AtomicBoolean();
-    var endedWhenClosed = new AtomicBoolean();
+    var toldWhenClosed = new CopyOnWriteArrayList<String>();
     var scheduler =
         new SyncScheduler(
             () -> {
               inRound.countDown();
               awaitIgnoringInterrupts(release);
-              ended.set(true);
+              round.run();
             },
             DEBOUNCE,
             TTL);
-    inRound.await();
 
-    var closer =
-        Thread.ofPlatform()
-            .start(
-                () -> {
-                  scheduler.close();
-                  endedWhenClosed.set(ended.get());
-                });
-    while (closer.getState() == Thread.State.RUNNABLE) {
-      Thread.onSpinWait();
-    }
-    release.countDown();
-    closer.join();
+    var warned =
+        warnings(
+            () -> {
+              inRound.await();
+              var closer =
+                  Thread.ofPlatform()
+                      .start(
+                          () -> {
+                            scheduler.close();
+                            toldWhenClosed.addAll(told);
+                          });
+              while (closer.getState() == Thread.State.RUNNABLE) {
+                Thread.onSpinWait();
+              }
+              release.countDown();
+              closer.join();
+            });
 
-    assertTrue(endedWhenClosed.get(), "the close returned under the timer's round");
+    assertEquals(
+        List.of("began", "offered [spec ada-1]"),
+        toldWhenClosed,
+        "the close returned under the timer's round, or the round failed at the round lock");
+    assertEquals(List.of(), warned);
   }
 
   @Test
