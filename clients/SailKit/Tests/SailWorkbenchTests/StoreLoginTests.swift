@@ -274,18 +274,4 @@ import Testing
         again.answered(try Self.answer("login-stored"), clipboard: 4)
         #expect(again.stage == .stored(try #require(try? Self.answer("login-stored").get()), clearsClipboard: false), "a refused store's clipboard was cleared by the next")
     }
-
-    /// The longest line a store says in its own words, which the panel keeps room for: a first
-    /// key's name, the earlier key left in use, the clipboard cleared; none for a harness whose
-    /// keys are all made by running something.
-    @Test func theLongestLineIsTheEarlierKeyKeptAndTheClipboardCleared() throws {
-        var sheet = try Self.filled()
-        _ = sheet.store(Self.pasted, clipboard: Clipboard(count: 4, text: Self.pasted))
-        sheet.answered(try Self.answer("login-stored"), clipboard: 4)
-        let longest = try #require(StoreLogin.longestLine(try Self.offer()))
-        #expect(longest == sheet.notUsed && [sheet.stored, sheet.notUsed].allSatisfy { ($0?.count ?? .max) <= longest.count }, "\(longest)")
-        let made = try Exchange("workspace-agents-dock-no-login").altered(at: ["offered", 0, "kinds"], to: [Any]())
-        let offer = try #require(try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: made.body)).offered.first)
-        #expect(StoreLogin.longestLine(offer) == nil, "room kept for a key the app cannot store")
-    }
 }

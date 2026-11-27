@@ -268,25 +268,23 @@ import Testing
     /// While typing narrows the rows the foot says what was typed and, while the rows hold the keys
     /// and so ⌫ widens them, how to widen them; nothing typed, nothing said of it.
     @Test func theFootSaysWhatWasTypedAndHowToWiden() {
-        #expect(NewSessionWords.hint(.rows, modes: true, typed: "op") == "“\u{2068}op\u{2069}” · ⌫ widen · ↑↓ choose · ⌘M mode")
-        #expect(NewSessionWords.hint(.signIn, modes: false, typed: "op") == "“\u{2068}op\u{2069}”", "⌫ named while it widens nothing")
+        #expect(NewSessionWords.hint(.rows, modes: true, typed: "op") == "“\u{2068}op\u{2069}” · ⌫ widen", "a key besides ⌫ named while something is typed")
+        #expect(NewSessionWords.hint(.signIn, modes: true, typed: "op") == "“\u{2068}op\u{2069}”", "⌫ named while it widens nothing")
         #expect(NewSessionWords.hint(.none, modes: false, typed: "op") == "")
-        #expect(NewSessionWords.hint(.rows, modes: false, typed: "") == NewSessionWords.hint(.rows, modes: false))
-        #expect(NewSessionWords.hint(.rows, modes: false, typed: "שלום") == "“\u{2068}שלום\u{2069}” · ⌫ widen · ↑↓ choose", "right-to-left letters typed are not isolated from the keys")
+        #expect(NewSessionWords.hint(.rows, modes: true, typed: "") == NewSessionWords.hint(.rows, modes: true))
+        #expect(NewSessionWords.hint(.rows, modes: false, typed: "שלום") == "“\u{2068}שלום\u{2069}” · ⌫ widen", "right-to-left letters typed are not isolated from the keys")
     }
 
-    /// Where the foot is short, what was typed is cut at its end, then left out, and every key is
-    /// still named whole.
+    /// Where the foot is short, what was typed is cut at its end, then left out, and ⌫ is still
+    /// named whole.
     @Test func theFootCutsWhatWasTypedNeverAKey() {
-        let keys = "⌫ widen · ↑↓ choose · ⌘M mode"
         let room = { (room: Int) in { (said: String) in said.unicodeScalars.filter { $0.properties.generalCategory != .format }.count <= room } }
         let said = { (width: Int) in NewSessionWords.hint(.rows, modes: true, typed: "gemini", fits: room(width)) }
-        #expect(said(100) == "“\u{2068}gemini\u{2069}” · " + keys)
-        #expect(said(38) == "“\u{2068}gem…\u{2069}” · " + keys)
-        #expect(said(36) == "“\u{2068}g…\u{2069}” · " + keys)
-        #expect(said(35) == keys, "a key was cut, or what was typed kept, where not one letter of it fits")
-        #expect(said(10) == keys)
-        #expect(NewSessionWords.hint(.rows, modes: true, typed: "c", fits: room(34)) == keys)
+        #expect(said(100) == "“\u{2068}gemini\u{2069}” · ⌫ widen")
+        #expect(said(16) == "“\u{2068}gem…\u{2069}” · ⌫ widen")
+        #expect(said(14) == "“\u{2068}g…\u{2069}” · ⌫ widen")
+        #expect(said(13) == "⌫ widen", "⌫ was cut, or what was typed kept, where not one letter of it fits")
+        #expect(said(3) == "⌫ widen")
         #expect(NewSessionWords.hint(.signIn, modes: false, typed: "op", fits: room(2)) == "")
     }
 

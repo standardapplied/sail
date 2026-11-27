@@ -357,8 +357,8 @@ import Testing
     /// terminal), its name and how it signs in as its Sign in is set (its account, a key stored
     /// notwithstanding); the first chosen, with its options under its name: Mode at the harness's
     /// own default and that mode's words, then Sign in on its account and that dock holds it; the
-    /// one primary names it. Its trailing edge is on ⋯'s, 388 pt wide; in this 700 pt window the room
-    /// under the row is short of a stored key's line, so it stands over the row, in the page.
+    /// one primary names it. With room under the row it hangs 4 pt under it, its trailing edge on
+    /// ⋯'s, 388 pt wide.
     @Test func thePanelListsWhatTheRouteOffersInItsWords() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock-signed-in"])
         defer { window.orderOut(nil) }
@@ -381,8 +381,7 @@ import Testing
         #expect(shown.primary?.isEnabled == true && shown.words.contains(NewSessionWords.hint(.rows, modes: true)) && shown.warned == nil)
         #expect(!shown.words.contains { $0.contains("stopped") }, "a running workspace said it is stopped")
         let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) }), box = panel.popover.frame
-        let page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil)).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
-        #expect(near(box.width, NewSessionPanel.width) && page.contains(box), "the panel is at \(box), the row at \(row), the page \(page)")
+        #expect(near(box.width, NewSessionPanel.width) && near(box.maxY, row.minY - NewSessionPanel.gap), "the panel is at \(box), the row at \(row)")
         #expect(near(box.maxX, row.maxX - RowStyle.list.trailing), "its trailing edge \(box.maxX) is not ⋯'s \(row.maxX - RowStyle.list.trailing)")
         #expect(near(box.height, shown.height) && window.childWindows?.contains(panel.popover.panel) == true)
     }
@@ -675,9 +674,9 @@ import Testing
         #expect(few.view.rows.count == 7 && few.view.rows.first?.chosen == true, "seven rows took typing")
     }
 
-    /// The foot never cuts a key's hint: nine kinds and "c" typed, which leaves Claude Code chosen
-    /// with its modes, at the design's window and the least. Every key is named whole and the hint
-    /// shows all it says, what was typed cut first; its order is the box's whatever was typed.
+    /// What was typed always shows: nine kinds and "c" typed, which leaves Claude Code chosen with its
+    /// modes, at the design's window and the least, the foot says only what was typed and ⌫ widen,
+    /// whole; its order is the box's whatever was typed.
     @Test func theFootCutsWhatWasTypedNeverAKey() async throws {
         let nine = try Exchange("workspace-agents-dock").offering(["Pi", "OpenCode", "Gemini CLI", "Aider", "Goose", "Opal"].map { Exchange.madeUpOffer($0) })
         for (width, height) in Self.windows {
@@ -686,9 +685,9 @@ import Testing
             let panel = try await Self.open("dock", in: view)
             try Self.press(try Self.key(8, "c"), in: window)
             #expect(panel.view.rows.map(\.name.stringValue) == ["Claude Code", "Codex CLI"] && panel.view.modes != nil, "\(panel.view.words)")
-            let hint = try #require(WorkspacesViewTests.found(NSTextField.self, in: panel.view).first { $0.stringValue.contains("↑↓ choose") }, "no keys in the foot: \(panel.view.words)")
+            let hint = try #require(WorkspacesViewTests.found(NSTextField.self, in: panel.view).first { $0.stringValue.contains("widen") }, "no keys in the foot: \(panel.view.words)")
             #expect(Double(hint.fittingSize.width) <= Double(hint.frame.width) + 0.5, "at \(width) the foot's hint \(hint.stringValue) is \(hint.fittingSize.width) pt in \(hint.frame.width)")
-            #expect(["⌫ widen", "↑↓ choose", "⌘M mode"].allSatisfy(hint.stringValue.contains), "a key is not named whole: \(hint.stringValue)")
+            #expect(hint.stringValue == NewSessionWords.hint(.rows, modes: true, typed: "c"), "the foot says \(hint.stringValue) with \"c\" typed")
             let style = hint.attributedStringValue.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
             #expect(style?.baseWritingDirection == .leftToRight, "the foot's order follows what was typed")
         }
@@ -867,7 +866,8 @@ import Testing
 
     /// Everything that can show while the panel is open was measured as it opened, so its rows show
     /// as many as they did: a harness's help chosen by its mode that wraps past every other kind's,
-    /// and a key stored there, its line said over the foot, then every kind chosen under that line;
+    /// and a key stored there, its line said in the place of Sign in's words, the box as tall as it
+    /// was, then every kind chosen under that line;
     /// at the design's window and the least (where the page holds a help two lines shorter), the
     /// window at the top of the screen. Its top stays and the box stays in the page.
     @Test func whatShowsWhileOpenShortensNoRows() async throws {
@@ -885,8 +885,10 @@ import Testing
             }
             try Self.mode("Auto", in: panel)
             check("Auto chosen")
+            let tall = panel.view.height
             panel.show(.agents(agents), memory: ModeMemory(modes: ["claude-code": "auto"], ways: ["claude-code": .key]), stored: LoginSheetTests.notUsed + " Removed the key from the clipboard.", harness: "claude-code", inUse: false)
             #expect(panel.view.words.contains { $0.hasPrefix("Runs everything") } && panel.stored != nil, "\(panel.view.words)")
+            #expect(near(panel.view.height, tall), "a key stored took the box from \(tall) pt to \(panel.view.height)")
             check("a key stored")
             for at in 2 ... 3 {
                 try Self.press(try Self.down(), in: window)
@@ -904,10 +906,9 @@ import Testing
     }
 
     /// With no room under the row, the panel hangs over it: its top placed by its tallest choice,
-    /// whose foot stands at least 4 pt over the row, and at least a stored key's line over the page's
-    /// foot, and kept there for a shorter one; a key stored then moves nothing and cuts no row. Its
-    /// top is the same whichever of Claude Code's modes is remembered, Auto's words wrapping past
-    /// every other kind's: each mode was measured.
+    /// Claude Code in Auto, whose words wrap past every other kind's, its foot 4 pt over the row,
+    /// and kept there for a shorter one; a key stored, said in the place of Sign in's words, leaves
+    /// the box as tall as it was. Its top is the same whichever mode is remembered: each was measured.
     @Test func withNoRoomUnderItsRowThePanelHangsOverIt() async throws {
         let rows = try WorkspacesReachTests.list((1 ... 30).map { ["name": String(format: "ws-%02d", $0), "instance": String(format: "harbor-ws-%02d", $0), "state": "running", "owner": "uday"] })
         let agents = Exchange(method: "GET", path: "/v1/projects/harbor/workspaces/ws-30/agents", status: 200, body: try Self.wordy(3).body)
@@ -919,13 +920,13 @@ import Testing
         try Self.press(try Self.down(), in: window)
         let codex = panel.popover.frame
         try Self.press(try Self.up(), in: window)
-        let bare = panel.view.height, decoded = try Endpoint.agents(workspace: "ws-30", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: agents.body))
-        let longest = try #require(decoded.offered.first.flatMap(StoreLogin.longestLine))
-        panel.show(.agents(decoded), memory: view.memory, stored: longest, harness: "claude-code", inUse: false)
-        let line = panel.view.height - bare, page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil))
-        #expect(codex.minY >= max(row.maxY + NewSessionPanel.gap, page.minY + NewSessionPanel.inset + line) - 0.5 && near(codex.maxY, claude.maxY), "the panel is \(codex) with Codex CLI chosen, \(claude) with Claude Code, the row \(row), a stored line \(line) pt")
+        try Self.mode("Auto", in: panel)
+        let auto = panel.popover.frame
+        #expect(near(auto.minY, row.maxY + NewSessionPanel.gap) && near(codex.maxY, claude.maxY) && near(auto.maxY, claude.maxY), "the panel is \(auto) in Auto, \(codex) with Codex CLI chosen, \(claude) with Claude Code, the row \(row)")
+        let decoded = try Endpoint.agents(workspace: "ws-30", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: agents.body))
+        panel.show(.agents(decoded), memory: ModeMemory(modes: ["claude-code": "auto"], ways: ["claude-code": .key]), stored: LoginSheetTests.notUsed, harness: "claude-code", inUse: false)
         let faults = Self.misplaced(panel, in: view, top: claude.maxY, "a key stored")
-        #expect(faults.isEmpty, "\(faults.joined(separator: "\n"))")
+        #expect(faults.isEmpty && near(panel.popover.frame.minY, auto.minY), "a key stored moved the box to \(panel.popover.frame) from \(auto): \(faults.joined(separator: "\n"))")
         for mode in try #require(decoded.offered.first).modes.map(\.mode) {
             panel.close()
             view.memory = ModeMemory(modes: ["claude-code": mode])

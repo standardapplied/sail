@@ -237,24 +237,12 @@ public struct StoreLogin: Equatable, Sendable {
     /// not answered or refused, the key removed meanwhile among them): whatever the reason, the
     /// same plain sentence of what that leaves and what to do, never the server's words.
     public var notUsed: String? {
-        line(Self.earlierKept)
+        line(", but Sign in still offers your earlier key; store it again to make it the one Start takes.")
     }
-
-    /// The longest line of its own words the panel can say once a key of `offer` is stored, which
-    /// the panel keeps room for from the moment it opens: the earlier key left in use and the
-    /// clipboard cleared, the key named as a first one is; nil where the app stores no key of it.
-    public static func longestLine(_ offer: AgentOffer) -> String? {
-        offer.storable.map { _ in line(offer.display, name: defaultName, earlierKept, cleared: true) }
-    }
-
-    private static let earlierKept = ", but Sign in still offers your earlier key; store it again to make it the one Start takes."
 
     private func line(_ ending: String) -> String? {
         guard case let .stored(answer, cleared) = stage else { return nil }
-        return Self.line(display, name: answer.login.name, ending, cleared: cleared) + (answer.note.map { " " + $0 } ?? "")
-    }
-
-    private static func line(_ display: String, name: String, _ ending: String, cleared: Bool) -> String {
-        "Stored \(display) key “\(name)”" + ending + (cleared ? " Removed the key from the clipboard." : "")
+        let clipboard = cleared ? " Removed the key from the clipboard." : ""
+        return "Stored \(display) key “\(answer.login.name)”" + ending + clipboard + (answer.note.map { " " + $0 } ?? "")
     }
 }
