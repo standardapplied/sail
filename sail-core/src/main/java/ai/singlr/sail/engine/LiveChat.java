@@ -38,10 +38,12 @@ public final class LiveChat {
   private static List<ChatItem> items(Step step, HarnessChat chat, String under) {
     return switch (step) {
       case Step.Init init ->
-          List.of(new ChatItem.Session(init.model(), init.mode(), init.commands(), init.skills()));
-      case Step.TextStarted _ -> List.of(new ChatItem.Text(under, "", true));
-      case Step.Text text -> List.of(new ChatItem.Text(under, text.text(), false));
-      case Step.Said said -> List.of(new ChatItem.Text(under, said.text(), true));
+          List.of(
+              new ChatItem.Session(
+                  init.model(), init.mode(), init.commands(), init.skills(), false));
+      case Step.TextStarted _ -> List.of(new ChatItem.Text(under, "", true, false));
+      case Step.Text text -> List.of(new ChatItem.Text(under, text.text(), false, false));
+      case Step.Said said -> List.of(new ChatItem.Text(under, said.text(), true, false));
       case Step.ToolCalls called ->
           called.calls().stream().<ChatItem>map(call -> row(call, chat, under)).toList();
       case Step.ToolResults returned ->
@@ -49,30 +51,41 @@ public final class LiveChat {
               .<ChatItem>map(
                   result ->
                       new ChatItem.ToolDone(
-                          under, result.callId(), result.output(), result.error()))
+                          under, result.callId(), result.output(), result.error(), false))
               .toList();
       case Step.Subagent subagent -> items(subagent.step(), chat, subagent.callId());
       case Step.Permission asked -> List.of(permission(asked, chat));
       case Step.Question asked ->
           List.of(new ChatItem.Question(asked.requestId(), asked.callId(), asked.questions()));
       case Step.Plan asked ->
-          List.of(new ChatItem.Plan(asked.requestId(), asked.callId(), asked.plan()));
+          List.of(new ChatItem.Plan(asked.requestId(), asked.callId(), asked.plan(), false));
       case Step.Shown shown -> List.of(shown.item());
+      case Step.Unreadable _ -> List.of(new ChatItem.Unreadable());
       case Step.Status status ->
-          status.mode() == null ? List.of() : List.of(new ChatItem.ModeChanged(status.mode()));
+          status.mode() == null
+              ? List.of()
+              : List.of(new ChatItem.ModeChanged(status.mode(), false));
       case Step.Result result -> ended(result);
       case Step.Working _, Step.Other _ -> List.of();
     };
   }
 
-  /** A call's row: in the words Claude Code gives it ({@code description}), else its summary. */
+  /**
+   * A call's row: in the words Claude Code gives it ({@code description}), else its first string
+   * argument.
+   */
   private static ChatItem row(LiveStream.ToolCall call, HarnessChat chat, String under) {
     var words =
         call.input().get("description") instanceof String described && !described.isBlank()
-            ? Strings.clip(described, LiveStream.SUMMARY_CODE_POINTS)
-            : call.summary();
+            ? described
+            : LiveStream.first(call.input());
     return new ChatItem.Tool(
-        under, call.id(), chat.kind(call.tool()), words, chat.detail(call.tool(), call.input()));
+        under,
+        call.id(),
+        chat.kind(call.tool()),
+        words,
+        chat.detail(call.tool(), call.input()),
+        false);
   }
 
   private static ChatItem permission(Step.Permission asked, HarnessChat chat) {
@@ -83,7 +96,8 @@ public final class LiveChat {
         Strings.isNotBlank(asked.description()) ? asked.description() : asked.displayName(),
         asked.reason(),
         chat.detail(asked.tool(), asked.input()),
-        chat.always(asked.suggestions()));
+        chat.always(asked.suggestions()),
+        false);
   }
 
   /**
@@ -103,7 +117,8 @@ public final class LiveChat {
               result.text().isBlank()
                   ? Objects.requireNonNullElse(result.reason(), "")
                   : result.text(),
-              result.login()));
+              result.login(),
+              false));
     }
     items.add(result.turn());
     return items;
@@ -118,10 +133,10 @@ public final class LiveChat {
 
   /**
    * Allows the call and every one like it from now on: with {@code permissions}, the request's own
-   * suggestions handed back as they came, which its item's {@code always} words said. Claude Code
-   * keeps a rule it suggests for {@code localSettings} in {@code
-   * ~/workspace/.claude/settings.local.json}, a file it makes inside the workspace, and a suggested
-   * mode switches the session's mode at once (2.1.332, recorded).
+   * suggestions handed back as they came, which its item's one {@link ChatItem.Always} said; a host
+   * offers this only when the item has one. Claude Code keeps a rule it suggests for {@code
+   * localSettings} in {@code ~/workspace/.claude/settings.local.json}, a file it makes inside the
+   * workspace, and a suggested mode switches the session's mode at once (2.1.332, recorded).
    *
    * @throws IllegalArgumentException when Claude Code suggested nothing to keep
    */
@@ -151,6 +166,17 @@ public final class LiveChat {
     var answered = new LinkedHashMap<>(input);
     answered.put("answers", Objects.requireNonNull(answers));
     return allow(requestId, answered);
+  }
+
+  /**
+   * Refuses a request that could not be read whole ({@link Step.Unreadable}), at once, so its turn
+   * goes on: the agent is told why in plain words.
+   */
+  public static String refuseUnreadable(String requestId) {
+    return deny(
+        requestId,
+        "Sail could not read this request whole, so no person was asked and it is refused."
+            + " Ask again in another way if it is still needed.");
   }
 
   /** Refuses the call, a question or a plan, saying why to the agent in {@code message}. */

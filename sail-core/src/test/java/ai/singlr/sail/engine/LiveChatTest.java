@@ -32,7 +32,15 @@ class LiveChatTest {
   private static final HarnessChat CLAUDE_CODE = Harnesses.of("claude-code").chat().orElseThrow();
 
   private static final String HERE =
-      "in this workspace from now on (kept in .claude/settings.local.json)";
+      "in this workspace from now on, kept in its folder (.claude/settings.local.json).";
+
+  private static final String SESSION = "for this session only.";
+
+  private static Detail written(String path, String text) {
+    return new Detail.Edit(
+        List.of(
+            new ChatItem.Change(ChatItem.ChangeKind.CHANGE, path, null, null, text, false, false)));
+  }
 
   private static List<ChatItem> shown(String recording, int line) {
     return LiveChat.items(LiveStream.read(Recorded.line(recording, line)), CLAUDE_CODE);
@@ -48,9 +56,11 @@ class LiveChatTest {
 
   @Test
   void theAgentsTextIsShownAsItIsWrittenInParagraphs() {
-    assertEquals(List.of(new ChatItem.Text(null, "", true)), shown("01-baseline-live-flags", 20));
     assertEquals(
-        List.of(new ChatItem.Text(null, "done", false)), shown("01-baseline-live-flags", 21));
+        List.of(new ChatItem.Text(null, "", true, false)), shown("01-baseline-live-flags", 20));
+    assertEquals(
+        List.of(new ChatItem.Text(null, "done", false, false)),
+        shown("01-baseline-live-flags", 21));
   }
 
   @Test
@@ -62,7 +72,8 @@ class LiveChatTest {
                 "toolu_011VvCwXcvkemp321CMEyur6",
                 ToolKind.COMMAND,
                 "Print probe-ok",
-                new Detail.Command("echo probe-ok"))),
+                new Detail.Command("echo probe-ok", false),
+                false)),
         shown("01-baseline-live-flags", 13));
     assertEquals(
         List.of(
@@ -71,7 +82,8 @@ class LiveChatTest {
                 "toolu_01GQbMEZJcBzatfHNojTS8E8",
                 ToolKind.EDIT,
                 "/home/dev/workspace/notes.txt",
-                new Detail.Edit("/home/dev/workspace/notes.txt", null, "hi\n"))),
+                written("/home/dev/workspace/notes.txt", "hi\n"),
+                false)),
         shown("02b-relay-stdio", 42),
         "a file written whole has no text before");
     assertEquals(
@@ -85,15 +97,23 @@ class LiveChatTest {
                     "Agent",
                     "{\"description\": \"Run echo sub-ok\", \"subagent_type\": \"general-purpose\","
                         + " \"prompt\": \"Run the shell command `echo sub-ok` using the Bash tool."
-                        + " Then report the output in one sentence.\", \"run_in_background\": false}"))),
+                        + " Then report the output in one sentence.\", \"run_in_background\": false}",
+                    false),
+                false)),
         shown("05b-subagent", 28));
     assertEquals(
-        List.of(new ChatItem.ToolDone(null, "toolu_011VvCwXcvkemp321CMEyur6", "probe-ok", false)),
+        List.of(
+            new ChatItem.ToolDone(
+                null, "toolu_011VvCwXcvkemp321CMEyur6", "probe-ok", false, false)),
         shown("01-baseline-live-flags", 17));
     assertEquals(
         List.of(
             new ChatItem.ToolDone(
-                null, "toolu_01GQbMEZJcBzatfHNojTS8E8", "The person declined this edit.", true)),
+                null,
+                "toolu_01GQbMEZJcBzatfHNojTS8E8",
+                "The person declined this edit.",
+                true,
+                false)),
         shown("02b-relay-stdio", 48));
   }
 
@@ -106,7 +126,8 @@ class LiveChatTest {
                 "t1",
                 ToolKind.READ,
                 "/home/dev/workspace/a.txt",
-                new Detail.Read("/home/dev/workspace/a.txt"))),
+                new Detail.Read("/home/dev/workspace/a.txt", false),
+                false)),
         LiveChat.items(
             new Step.ToolCalls(
                 List.of(
@@ -129,10 +150,12 @@ class LiveChatTest {
                 "toolu_013wKQqCQd4JL5cPCj24T27x",
                 ToolKind.COMMAND,
                 "Print sub-ok via echo",
-                new Detail.Command("echo sub-ok"))),
+                new Detail.Command("echo sub-ok", false),
+                false)),
         shown("05b-subagent", 35));
     assertEquals(
-        List.of(new ChatItem.ToolDone(call, "toolu_013wKQqCQd4JL5cPCj24T27x", "sub-ok", false)),
+        List.of(
+            new ChatItem.ToolDone(call, "toolu_013wKQqCQd4JL5cPCj24T27x", "sub-ok", false, false)),
         shown("05b-subagent", 36));
     assertEquals(List.of(), shown("05b-subagent", 32));
     assertEquals(
@@ -140,12 +163,13 @@ class LiveChatTest {
             new ChatItem.Text(
                 "toolu_011gGRQDib3ZHFWutXd9HSGT",
                 "The command `echo sub-ok` printed \"sub-ok\".",
-                true)),
+                true,
+                false)),
         shown("05c-subagent-forward-text", 50));
   }
 
   @Test
-  void aPermissionRequestIsShownInPlainWordsWithWhyAndWhatAlwaysWouldChange() {
+  void aPermissionRequestIsShownInPlainWordsWithWhyAndTheDetailBesideThem() {
     assertEquals(
         List.of(
             new ChatItem.Permission(
@@ -154,10 +178,13 @@ class LiveChatTest {
                 ToolKind.COMMAND,
                 "Write current date into stamp.txt",
                 null,
-                new Detail.Command("date > stamp.txt"),
+                new Detail.Command("date > stamp.txt", false),
                 List.of(
-                    "Allow `date > stamp.txt` " + HERE,
-                    "Let it work in /home/dev/workspace for this session"))),
+                    new ChatItem.Always(
+                        List.of(
+                            "Allow this exact command: `date > stamp.txt`, " + HERE,
+                            "Let it work in the folder /home/dev/workspace, " + SESSION))),
+                false)),
         shown("02b-relay-stdio", 16));
     assertEquals(
         List.of(
@@ -167,15 +194,23 @@ class LiveChatTest {
                 ToolKind.EDIT,
                 "notes.txt",
                 null,
-                new Detail.Edit("/home/dev/workspace/notes.txt", null, "hi\n"),
-                List.of("Switch to Edits freely for this session"))),
+                written("/home/dev/workspace/notes.txt", "hi\n"),
+                List.of(new ChatItem.Always(List.of("Switch to Edits freely, " + SESSION))),
+                false)),
         shown("02b-relay-stdio", 44));
     var reasoned = (ChatItem.Permission) shown("04d-interrupt-while-tool-runs", 20).getFirst();
     assertEquals("This command requires approval", reasoned.reason());
     assertEquals(
         List.of(
             new ChatItem.Permission(
-                "r1", "t1", ToolKind.COMMAND, "Bash", null, new Detail.Command("ls"), List.of())),
+                "r1",
+                "t1",
+                ToolKind.COMMAND,
+                "Bash",
+                null,
+                new Detail.Command("ls", false),
+                List.of(),
+                false)),
         LiveChat.items(
             new Step.Permission(
                 "r1", "t1", "Bash", "Bash", Map.of("command", "ls"), null, null, List.of()),
@@ -183,14 +218,50 @@ class LiveChatTest {
         "with no description it is named by the tool, and with no suggestion never always");
   }
 
+  /** Every "always" Claude Code 2.1.332 offered in the S0 probe, in the words a person reads. */
   @Test
-  void oneAlwaysOnACommandSaysItAlsoWidensWhereAndSwitchesTheMode() {
+  void everyRecordedAlwaysIsSaidInPlainWords() {
+    var folder = "Let it work in the folder /home/dev/workspace, " + SESSION;
     assertEquals(
         List.of(
-            "Allow `touch always.txt` " + HERE,
-            "Let it work in /home/dev/workspace for this session",
-            "Switch to Edits freely for this session"),
-        ((ChatItem.Permission) shown("02b-relay-stdio", 99).getFirst()).always());
+            List.of("Allow this exact command: `date > stamp.txt`, " + HERE, folder),
+            List.of("Switch to Edits freely, " + SESSION),
+            List.of("Allow any command that starts with `echo original`, " + HERE, folder),
+            List.of(
+                "Allow this exact command: `touch always.txt`, " + HERE,
+                folder,
+                "Switch to Edits freely, " + SESSION),
+            List.of("Allow this exact command: `date > stamp4.txt`, " + HERE, folder),
+            List.of(
+                "Allow this exact command: `printf 'hi\\n' > /home/dev/workspace/hello.txt && cat"
+                    + " /home/dev/workspace/hello.txt`, "
+                    + HERE,
+                folder),
+            List.of("Allow this exact command: `date > c.txt`, " + HERE, folder),
+            List.of("Switch to Edits freely, " + SESSION),
+            List.of(
+                "Allow this exact command: `python3 -c \"import time; time.sleep(25);"
+                    + " print('slept')\"`, "
+                    + HERE)),
+        List.of(
+                always("02b-relay-stdio", 16),
+                always("02b-relay-stdio", 44),
+                always("02b-relay-stdio", 72),
+                always("02b-relay-stdio", 99),
+                always("02d-relay-stdio-allow-without-input", 17),
+                always("03b-plan-exit-plan-mode", 91),
+                always("04a-cancel-request-by-interrupt", 16),
+                always("04b-set-permission-mode-and-background-task", 132),
+                always("04d-interrupt-while-tool-runs", 20))
+            .stream()
+            .map(ChatItem.Always::words)
+            .toList());
+  }
+
+  private static ChatItem.Always always(String recording, int line) {
+    var offered = ((ChatItem.Permission) shown(recording, line).getFirst()).always();
+    assertEquals(1, offered.size(), recording + ":" + line);
+    return offered.getFirst();
   }
 
   @Test
@@ -204,7 +275,10 @@ class LiveChatTest {
                     new Asked(
                         "Which color?",
                         "Color",
-                        List.of(new Choice("Red", "Choose red"), new Choice("Blue", "Choose blue")),
+                        List.of(
+                            new Choice("Red", "Choose red", false),
+                            new Choice("Blue", "Choose blue", false)),
+                        false,
                         false)))),
         shown("03a-ask-user-question", 21));
     assertEquals(
@@ -212,7 +286,8 @@ class LiveChatTest {
             new ChatItem.Plan(
                 "1164cc67-5e3b-4c52-9696-57d3610fcb0e",
                 "toolu_01H6Ej9TxsJDvVS7r7Zex4dC",
-                "Create /home/dev/workspace/hello.txt containing \"hi\".\n")),
+                "Create /home/dev/workspace/hello.txt containing \"hi\".\n",
+                false)),
         shown("03b-plan-exit-plan-mode", 28));
     assertEquals(
         List.of(new ChatItem.Withdrawn("dc0b76a9-43c6-4484-a47b-1b7c1e5a4b10")),
@@ -222,9 +297,11 @@ class LiveChatTest {
   @Test
   void aRetryAndACompactionAreNoticesAndAModeChangeIsShown() {
     assertEquals(
-        List.of(new ChatItem.Retrying(1, 2, 513, "overloaded")), shown("05e-api-retry", 5));
-    assertEquals(List.of(new ChatItem.Compacted("manual", 18074, 3069)), shown("05d-compact", 17));
-    assertEquals(List.of(new ChatItem.ModeChanged("acceptEdits")), shown("02b-relay-stdio", 103));
+        List.of(new ChatItem.Retrying(1, 2, 513, "overloaded", false)), shown("05e-api-retry", 5));
+    assertEquals(
+        List.of(new ChatItem.Compacted("manual", 18074, 3069, false)), shown("05d-compact", 17));
+    assertEquals(
+        List.of(new ChatItem.ModeChanged("acceptEdits", false)), shown("02b-relay-stdio", 103));
     assertEquals(List.of(), shown("01-baseline-live-flags", 4));
     assertEquals(List.of(), shown("05d-compact", 14));
   }
@@ -235,7 +312,8 @@ class LiveChatTest {
 
     assertEquals(
         List.of(
-            new ChatItem.Session("claude-haiku-5-5", "default", init.commands(), init.skills())),
+            new ChatItem.Session(
+                "claude-haiku-5-5", "default", init.commands(), init.skills(), false)),
         shown("04b-set-permission-mode-and-background-task", 148));
   }
 
@@ -256,13 +334,13 @@ class LiveChatTest {
     assertEquals(
         List.of(
             new ChatItem.Failed(
-                "Invalid API key · Fix external API key", new LoginOutcome.Refused()),
+                "Invalid API key · Fix external API key", new LoginOutcome.Refused(), false),
             new TurnEnded(null, 0, 0, 286)),
         shown("06a-invalid-key", 6));
     assertEquals(
         List.of(
             new ChatItem.Failed(
-                "Not logged in · Please run /login", new LoginOutcome.Undelivered()),
+                "Not logged in · Please run /login", new LoginOutcome.Undelivered(), false),
             new TurnEnded(null, 0, 0, 182)),
         shown("06b-no-credential", 6));
     assertEquals(
@@ -271,11 +349,12 @@ class LiveChatTest {
                 "API Error: 529 Overloaded. This is a server-side issue, usually temporary — try"
                     + " again in a moment. If it persists, check your inference gateway"
                     + " (127.0.0.1:18529).",
-                null),
+                null,
+                false),
             new TurnEnded(null, 0, 0, 1935)),
         shown("05e-api-retry", 8));
     assertEquals(
-        List.of(new ChatItem.Failed("error_max_turns", null), new TurnEnded(null, 0, 0, 0)),
+        List.of(new ChatItem.Failed("error_max_turns", null, false), new TurnEnded(null, 0, 0, 0)),
         LiveChat.items(
             LiveStream.read(
                 "{\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":true}"),
@@ -294,7 +373,7 @@ class LiveChatTest {
   @Test
   void aRefusalOfTheHostsRequestIsShown() {
     assertEquals(
-        List.of(new ChatItem.Refused("mode-2", "Cannot set permission mode")),
+        List.of(new ChatItem.Refused("mode-2", "Cannot set permission mode", false)),
         LiveChat.items(
             LiveStream.read(
                 "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\","
@@ -404,12 +483,17 @@ class LiveChatTest {
   @Test
   void aBlankDescriptionGivesARowItsFirstArgument() {
     assertEquals(
-        List.of(new ChatItem.Tool(null, "t1", ToolKind.COMMAND, "ls", new Detail.Command("ls"))),
+        List.of(
+            new ChatItem.Tool(
+                null, "t1", ToolKind.COMMAND, "ls", new Detail.Command("ls", false), false)),
         LiveChat.items(
             new Step.ToolCalls(
                 List.of(
                     new LiveStream.ToolCall(
-                        "t1", "Bash", "ls", Map.of("command", "ls", "description", " ")))),
+                        "t1",
+                        "Bash",
+                        "ls",
+                        LiveStream.ordered("command", "ls", "description", " ")))),
             CLAUDE_CODE));
   }
 
@@ -421,6 +505,115 @@ class LiveChatTest {
                 IllegalArgumentException.class,
                 () -> LiveChat.allowAlways("r1", Map.of("command", "ls"), List.of()))
             .getMessage());
+  }
+
+  @Test
+  void whatTheAgentWroteLongIsShownInPartAndSaysSo() {
+    var huge = "w".repeat(200_000);
+    var summary = "w".repeat(LiveStream.SUMMARY_CODE_POINTS);
+    var content = "w".repeat(LiveStream.CONTENT_CODE_POINTS);
+
+    assertEquals(
+        List.of(
+            new ChatItem.Permission(
+                "r1",
+                "t1",
+                ToolKind.COMMAND,
+                summary,
+                summary,
+                new Detail.Command(content, true),
+                List.of(),
+                true)),
+        read(
+            "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
+                + "\"can_use_tool\",\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\","
+                + "\"input\":{\"command\":\"%s\"},\"description\":\"%s\","
+                + "\"decision_reason\":\"%s\"}}",
+            huge));
+    assertEquals(
+        List.of(
+            new ChatItem.Question(
+                "r1",
+                "t1",
+                List.of(
+                    new Asked(
+                        content,
+                        summary,
+                        List.of(new Choice(summary, content, true)),
+                        false,
+                        true)))),
+        read(
+            "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
+                + "\"can_use_tool\",\"tool_name\":\"AskUserQuestion\",\"tool_use_id\":\"t1\","
+                + "\"input\":{\"questions\":[{\"question\":\"%s\",\"header\":\"%s\","
+                + "\"options\":[{\"label\":\"%s\",\"description\":\"%s\"}]}]}}}",
+            huge));
+    assertEquals(
+        List.of(new ChatItem.Failed(content, null, true), new TurnEnded(null, 0, 0, 0)),
+        read("{\"type\":\"result\",\"is_error\":true,\"result\":\"%s\"}", huge));
+    assertEquals(
+        List.of(new ChatItem.ModeChanged("w".repeat(LiveStream.NAME_CODE_POINTS), true)),
+        read("{\"type\":\"system\",\"subtype\":\"status\",\"permissionMode\":\"%s\"}", huge));
+    assertEquals(
+        List.of(new ChatItem.ToolDone(null, "t1", content, false, true)),
+        read(
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\","
+                + "\"tool_use_id\":\"t1\",\"content\":\"%s\"}]}}",
+            huge));
+    assertEquals(
+        List.of(new ChatItem.Text("t9", content, true, true)),
+        read(
+            "{\"type\":\"assistant\",\"parent_tool_use_id\":\"t9\",\"message\":"
+                + "{\"content\":[{\"type\":\"text\",\"text\":\"%s\"}]}}",
+            huge));
+    assertEquals(
+        List.of(
+            new ChatItem.Tool(
+                null, "t1", ToolKind.READ, summary, new Detail.Read(content, true), true)),
+        read(
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\","
+                + "\"id\":\"t1\",\"name\":\"Read\",\"input\":{\"file_path\":\"%s\"}}]}}",
+            huge));
+    assertEquals(
+        List.of(new ChatItem.Refused("m1", summary, true)),
+        read(
+            "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\","
+                + "\"request_id\":\"m1\",\"error\":\"%s\"}}",
+            huge));
+  }
+
+  private static List<ChatItem> read(String template, String text) {
+    return LiveChat.items(LiveStream.read(template.replace("%s", text)), CLAUDE_CODE);
+  }
+
+  @Test
+  void aRequestWhoseSuggestionIsMissingIsShownWithNoAlways() {
+    assertEquals(
+        List.of(),
+        ((ChatItem.Permission)
+                read(
+                        "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
+                            + "\"can_use_tool\",\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\","
+                            + "\"input\":{\"command\":\"ls\"},\"permission_suggestions\":"
+                            + "[{\"type\":\"setMode\",\"mode\":\"acceptEdits\",\"destination\":"
+                            + "\"session\"},%s]}}",
+                        "null")
+                    .getFirst())
+            .always());
+  }
+
+  @Test
+  void aRequestThatCannotBeReadIsShownAndRefusedAtOnce() {
+    assertEquals(
+        List.of(new ChatItem.Unreadable()), LiveChat.items(new Step.Unreadable("r1"), CLAUDE_CODE));
+    assertWritten(
+        "02b-relay-stdio",
+        45,
+        LiveChat.refuseUnreadable("79327ade-fc36-4737-926f-eb6dde76e6df")
+            .replace(
+                "Sail could not read this request whole, so no person was asked and it is refused."
+                    + " Ask again in another way if it is still needed.",
+                "The person declined this edit."));
   }
 
   @Test

@@ -134,26 +134,28 @@ import Testing
         #expect(failures.map { $0.said(at: "") } == failures.map(\.description))
     }
 
-    /// M9: the latest request wins: an answer for a project no longer chosen, or overtaken by a later
-    /// request, is dropped; the rows stay paired with the project they were listed for.
-    @Test func theLatestListingWinsAndKeepsItsProject() {
+    /// M9: each project's latest request wins: an answer overtaken by a later request for its project
+    /// is dropped, while another project's request overtakes none; the rows stay paired with the
+    /// project they were listed for, and nil asks for nothing anyone takes.
+    @Test func eachProjectsLatestListingWinsAndKeepsItsProject() {
         let dock = WorkspaceRow(name: "dock", instance: "acme-dock", state: .known(.running), owner: "uday")
         let pier = WorkspaceRow(name: "pier", instance: "beta-pier", state: .known(.stopped), owner: "uday")
         var listing = WorkspaceListing()
         let first = listing.ask("acme")
         let second = listing.ask("beta")
-        let late = listing.take([dock], request: first)
-        #expect(!late, "acme's answer, arriving after beta was chosen")
-        #expect(listing.rows.isEmpty && listing.listed == nil)
-        let taken = listing.take([pier], request: second)
-        #expect(taken)
-        #expect(listing.rows == [pier] && listing.listed == "beta")
+        #expect(listing.take([dock], request: first) == "acme", "acme's answer, arriving after beta was asked")
+        #expect(listing.take([pier], request: second) == "beta")
+        #expect(listing.rows == ["acme": [dock], "beta": [pier]])
         let third = listing.ask("beta")
-        let overtaken = listing.take([dock], request: second)
-        #expect(!overtaken, "overtaken by a later request for the same project")
-        #expect(listing.isLatest(third) && !listing.isLatest(second))
-        #expect(listing.rows == [pier] && listing.listed == "beta", "the rows shown keep the project they were listed for")
+        #expect(listing.take([dock], request: second) == nil, "overtaken by a later request for the same project")
+        #expect(listing.project(of: third) == "beta" && listing.project(of: second) == nil && listing.project(of: first) == "acme")
+        #expect(listing.rows["beta"] == [pier], "an overtaken answer replaced the rows")
+        listing.settle("pier", in: "beta", as: .running)
+        listing.settle("dock", in: "acme", as: nil)
+        #expect(listing.rows["beta"]?.map(\.state) == [.known(.running)] && listing.rows["acme"] == [])
+        let nowhere = listing.ask(nil)
+        #expect(listing.project(of: nowhere) == nil && listing.take([dock], request: nowhere) == nil && listing.asked("acme") && !listing.asked("gamma"))
         listing.clear()
-        #expect(listing.rows.isEmpty && listing.listed == nil && !listing.isLatest(third))
+        #expect(listing.rows.isEmpty && listing.project(of: third) == nil && !listing.asked("acme"))
     }
 }

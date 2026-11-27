@@ -1175,6 +1175,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
             LiveStream.Step.Plan _,
             LiveStream.Step.Shown _,
             LiveStream.Step.Status _,
+            LiveStream.Step.Unreadable _,
             LiveStream.Step.Other _ -> {}
       }
     }
@@ -1295,9 +1296,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     }
 
     private void called(LiveStream.ToolCall call) {
-      calls.put(call.id(), call.tool());
+      var tool = Strings.clip(call.tool(), LiveStream.NAME_CODE_POINTS);
+      calls.put(call.id(), tool);
       var data = new LinkedHashMap<String, Object>();
-      data.put("tool", call.tool());
+      data.put("tool", tool);
       data.put("summary", call.summary());
       data.put("status", "started");
       tell(Event.WellKnownTypes.AGENT_TOOL_CALL, data);

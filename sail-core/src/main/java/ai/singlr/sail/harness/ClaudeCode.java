@@ -587,17 +587,21 @@ final class ClaudeCode implements Harness {
    */
   private static List<String> readDenyRules() {
     return List.of(
-        boxCredentialReadDeny(),
-        "Read(" + ContainerExec.DEV_HOME + "/.ssh/**)",
-        "Read(" + ContainerExec.DEV_HOME + "/.git-credentials)",
-        "Read(" + ContainerExec.DEV_HOME + "/.config/gh/**)",
-        "Read(" + ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env)",
+        readDeny(SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME).toString()),
+        readDeny(ContainerExec.DEV_HOME + "/.ssh/**"),
+        readDeny(ContainerExec.DEV_HOME + "/.git-credentials"),
+        readDeny(ContainerExec.DEV_HOME + "/.config/gh/**"),
+        readDeny(ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env"),
         "Read(~/.sail/sessions/**)");
   }
 
-  private static String boxCredentialReadDeny() {
-    var credential = SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME);
-    return "Read(/" + credential + ")";
+  /**
+   * A rule denying reads of the absolute {@code path}: written {@code //path}, since a single
+   * leading {@code /} anchors a rule at the settings source, the directory of the {@code
+   * --settings} file, not the root (Claude Code's permission rules, as its documentation says).
+   */
+  private static String readDeny(String path) {
+    return "Read(/" + path + ")";
   }
 
   private static String invocation(Launch launch) {

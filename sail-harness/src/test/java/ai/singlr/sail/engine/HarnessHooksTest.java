@@ -155,10 +155,10 @@ class HarnessHooksTest {
     assertEquals(
         List.of(
             "Read(//var/lib/sail/run/box.credential)",
-            "Read(/home/dev/.ssh/**)",
-            "Read(/home/dev/.git-credentials)",
-            "Read(/home/dev/.config/gh/**)",
-            "Read(/home/dev/.sail/runs/**/launch.env)",
+            "Read(//home/dev/.ssh/**)",
+            "Read(//home/dev/.git-credentials)",
+            "Read(//home/dev/.config/gh/**)",
+            "Read(//home/dev/.sail/runs/**/launch.env)",
             "Read(~/.sail/sessions/**)"),
         deny,
         "the room lane's reads are cwd-scoped (Claude auto-approves cat/head/tail/grep only inside"
