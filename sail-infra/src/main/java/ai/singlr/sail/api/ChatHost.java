@@ -393,7 +393,7 @@ public final class ChatHost implements AutoCloseable {
   private ChatProcess holder(ChatStore.Chat chat) {
     var session = chat.id();
     var held = live.get(session);
-    if (held != null && !held.end().over()) {
+    if (held != null) {
       return held;
     }
     var log = log(session);

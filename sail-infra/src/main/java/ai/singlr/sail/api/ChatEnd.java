@@ -145,13 +145,6 @@ final class ChatEnd {
     }
   }
 
-  /** Whether the process is over: nothing reads it any more. */
-  boolean over() {
-    synchronized (guard) {
-      return over;
-    }
-  }
-
   /** Whether the process is known gone: over, and its exit known. */
   boolean known() {
     synchronized (guard) {
