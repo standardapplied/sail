@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.identity.Actor;
 import java.time.Duration;
 import java.time.Instant;
@@ -251,6 +252,12 @@ public final class SyncScheduler implements AutoCloseable {
     }
   }
 
+  /**
+   * Stops the timer and waits for it, then for the round executor, and only then closes the health
+   * source their reads go through: interrupting a thread inside a native call does not stop it. The
+   * source only ever reads, so a failure to close it loses nothing and is a warning naming its
+   * cause, never a failure of the command whose work is done.
+   */
   @Override
   public void close() {
     if (timer != null) {
@@ -263,7 +270,10 @@ public final class SyncScheduler implements AutoCloseable {
     try {
       healthSource.close();
     } catch (Exception e) {
-      throw new IllegalStateException("Closing the sync health source failed", e);
+      System.getLogger(SyncScheduler.class.getName())
+          .log(
+              System.Logger.Level.WARNING,
+              "Closing the sync health source failed: " + Remedied.reasonOf(e));
     }
   }
 

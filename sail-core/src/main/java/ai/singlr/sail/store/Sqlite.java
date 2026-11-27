@@ -66,7 +66,7 @@ public final class Sqlite implements AutoCloseable {
   private int transactionDepth;
   private boolean writeLocked;
   private RuntimeException doom;
-  private volatile boolean closed;
+  private boolean closed;
   private long statements;
   private Path path;
   final BlobRetention contentRetention = new BlobRetention(null);
@@ -129,10 +129,25 @@ public final class Sqlite implements AutoCloseable {
     }
   }
 
+  /**
+   * Closes the connection once another thread's statement or scope on it has ended: the close takes
+   * the connection's lock, so neither the handle nor the arena its calls run through is freed under
+   * a call in flight, and every call that comes after is refused ("Database is closed").
+   */
   @Override
   public void close() {
-    if (closed) return;
-    closed = true;
+    lock.lock();
+    try {
+      if (!closed) {
+        closed = true;
+        free();
+      }
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  private void free() {
     try {
       var _ = (int) lib.close.invokeExact(db);
     } catch (Throwable t) {
@@ -166,8 +181,7 @@ public final class Sqlite implements AutoCloseable {
   }
 
   public void execute(String sql, Object... params) {
-    requireOpen();
-    lock.lock();
+    lockOpen();
     try (var stmtArena = Arena.ofConfined()) {
       var stmt = prepare(stmtArena, sql);
       try {
@@ -189,8 +203,7 @@ public final class Sqlite implements AutoCloseable {
   }
 
   public <T> List<T> query(String sql, RowMapper<T> mapper, Object... params) {
-    requireOpen();
-    lock.lock();
+    lockOpen();
     try (var stmtArena = Arena.ofConfined()) {
       var stmt = prepare(stmtArena, sql);
       try {
@@ -275,7 +288,7 @@ public final class Sqlite implements AutoCloseable {
   }
 
   private <T> T transaction(String begin, Supplier<T> work, boolean commit) {
-    lock.lock();
+    lockOpen();
     try {
       if (transactionDepth > 0) {
         transactionDepth++;
@@ -358,8 +371,7 @@ public final class Sqlite implements AutoCloseable {
    * connection lock across both calls; outside one, another thread's write may intervene.
    */
   public int changes() {
-    requireOpen();
-    lock.lock();
+    lockOpen();
     try {
       return (int) lib.changes.invokeExact(db);
     } catch (Throwable t) {
@@ -443,8 +455,16 @@ public final class Sqlite implements AutoCloseable {
     }
   }
 
-  private void requireOpen() {
-    if (closed) throw new IllegalStateException("Database is closed");
+  /**
+   * Takes the connection's lock, refusing once the connection is closed: checked under the lock, so
+   * a call that waited for it while the connection closed never runs on the freed handle.
+   */
+  private void lockOpen() {
+    lock.lock();
+    if (closed) {
+      lock.unlock();
+      throw new IllegalStateException("Database is closed");
+    }
   }
 
   /**

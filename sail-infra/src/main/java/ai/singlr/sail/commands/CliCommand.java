@@ -16,6 +16,8 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.PrintStream;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -162,41 +164,50 @@ public final class CliCommand {
 
   /**
    * A failure as {@code reader} reads it: an API refusal's message, then its fix on a line of its
-   * own; an API failure with no fix that wraps a cause, its message and the cause's, through every
-   * wrapper that names no fix, so the line says why; a failure below the door that names a remedy,
-   * its reason and remedy on one line; anything else, its message.
+   * own; a failure below the door that names a remedy, its reason and remedy on one line; any other
+   * failure that wraps a cause, its message and the cause's, through every wrapper that names no
+   * fix, so the line says why; anything else, its message.
    */
   public static List<String> lines(Exception failure, OperatorCommand reader) {
     var e = Refusals.translated(failure);
-    var message = Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName());
+    var message = said(e);
     return switch (e) {
       case ApiException refusal when !refusal.remedy().isEmpty() ->
           List.of(message, reader.render(refusal.remedy()));
-      case ApiException wrapped when wrapped.getCause() != null ->
+      case Remedied remedied when !remedied.remedy().isEmpty() -> List.of(reader.render(remedied));
+      case Exception wrapped when wrapped.getCause() != null ->
           List.of(withCause(message, wrapped.getCause(), reader));
-      case ApiException refusal -> List.of(message);
-      case Remedied remedied -> List.of(reader.render(remedied));
       default -> List.of(message);
     };
   }
 
   /**
-   * {@code message}, then what {@code cause} says as {@code reader} reads it, its fix included,
-   * through every wrapper that names no fix. A cause that only repeats the message adds nothing.
+   * {@code message}, then what each cause says as {@code reader} reads it, through every wrapper
+   * that names no fix and ending at one that does, its fix included. A cause the line already says
+   * adds nothing, and a cause met again ends the line.
    */
   private static String withCause(String message, Throwable cause, OperatorCommand reader) {
-    var said =
-        cause instanceof ApiException wrapped
-                && wrapped.remedy().isEmpty()
-                && wrapped.getCause() != null
-            ? withCause(
-                Objects.requireNonNullElse(
-                    wrapped.getMessage(), wrapped.getClass().getSimpleName()),
-                wrapped.getCause(),
-                reader)
-            : reader.render(Remedied.whole(cause));
-    var head = message.endsWith(".") ? message.substring(0, message.length() - 1) : message;
-    return said.equals(message) || said.startsWith(head + ": ") ? said : head + ": " + said;
+    var line = message;
+    var seen = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
+    for (var next = cause; next != null && seen.add(next); next = next.getCause()) {
+      if (!Remedied.remedyOf(next).isEmpty()) {
+        return joined(line, reader.render(Remedied.whole(next)));
+      }
+      line = joined(line, said(next));
+    }
+    return line;
+  }
+
+  private static String joined(String line, String said) {
+    if (line.contains(said)) {
+      return line;
+    }
+    var head = line.endsWith(".") ? line.substring(0, line.length() - 1) : line;
+    return said.startsWith(head + ": ") ? said : head + ": " + said;
+  }
+
+  private static String said(Throwable failure) {
+    return Objects.requireNonNullElse(failure.getMessage(), failure.getClass().getSimpleName());
   }
 
   private static OperatorCommand reader() {
