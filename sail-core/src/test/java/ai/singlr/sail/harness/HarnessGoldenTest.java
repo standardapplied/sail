@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ChatItem.Detail;
+import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.Recorded;
 import ai.singlr.sail.harness.Harness.Launch;
 import ai.singlr.sail.harness.Harness.LiveLaunch;
@@ -609,7 +610,7 @@ class HarnessGoldenTest {
     assertEquals(
         new Detail.Other("mcp__github__create_issue", "{\"title\": \"t\"}", false),
         CLAUDE_CODE_CHAT.detail("mcp__github__create_issue", Map.of("title", "t")));
-    var longer = "z".repeat(ChatItem.CONTENT_CODE_POINTS + 1);
+    var longer = "z".repeat(LiveStream.CONTENT_CODE_POINTS + 1);
     assertEquals(
         changed(ChatItem.ChangeKind.CHANGE, "/w/a.txt", null, longer.substring(1), false, true),
         CLAUDE_CODE_CHAT.detail("Write", Map.of("file_path", "/w/a.txt", "content", longer)),
@@ -767,7 +768,7 @@ class HarnessGoldenTest {
                     rule(
                         "allow",
                         "localSettings",
-                        bash("x".repeat(ChatItem.CONTENT_CODE_POINTS) + " *"))));
+                        bash("x".repeat(LiveStream.CONTENT_CODE_POINTS) + " *"))));
     for (var suggestion : unsaid) {
       assertEquals(List.of(), always(suggestion.getValue()), suggestion.getKey());
       assertEquals(

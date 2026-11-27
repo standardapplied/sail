@@ -5,6 +5,10 @@
 
 package ai.singlr.sail.engine;
 
+import static ai.singlr.sail.engine.LiveStream.CONTENT_CODE_POINTS;
+import static ai.singlr.sail.engine.LiveStream.NAME_CODE_POINTS;
+import static ai.singlr.sail.engine.LiveStream.SUMMARY_CODE_POINTS;
+
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.harness.LoginOutcome;
 import java.util.List;
@@ -18,20 +22,11 @@ import java.util.List;
  * harness's own name for it, which need not be one of its chat modes ({@code HarnessChat.modes}).
  *
  * <p>What the agent wrote is never markup, and is clipped where the item is made, to its bound:
- * {@link #NAME_CODE_POINTS} for a name, {@link #SUMMARY_CODE_POINTS} for a short line, {@link
- * #CONTENT_CODE_POINTS} for anything long. A piece holding text that was cut says so in its one
- * {@code clipped} flag, so a client marks it as shown in part.
+ * {@link LiveStream#NAME_CODE_POINTS} for a name, {@link LiveStream#SUMMARY_CODE_POINTS} for a
+ * short line, {@link LiveStream#CONTENT_CODE_POINTS} for anything long. A piece holding text that
+ * was cut says so in its one {@code clipped} flag, so a client marks it as shown in part.
  */
 public sealed interface ChatItem {
-
-  /** How much of a name the agent gave, a mode's, a model's, a command's, a person is shown. */
-  int NAME_CODE_POINTS = 64;
-
-  /** How much of a short line, a row's words, a reason, a label, a person is shown. */
-  int SUMMARY_CODE_POINTS = 120;
-
-  /** How much of what the agent wrote at length, a text, a call's input or output, is shown. */
-  int CONTENT_CODE_POINTS = 1 << 16;
 
   /** What a tool call does, as a person reads its row. */
   enum ToolKind {

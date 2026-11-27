@@ -25,11 +25,11 @@ import org.junit.jupiter.api.Test;
  */
 class ChatItemTest {
 
-  private static final String NAME = "n".repeat(ChatItem.NAME_CODE_POINTS);
+  private static final String NAME = "n".repeat(LiveStream.NAME_CODE_POINTS);
 
-  private static final String SUMMARY = "s".repeat(ChatItem.SUMMARY_CODE_POINTS);
+  private static final String SUMMARY = "s".repeat(LiveStream.SUMMARY_CODE_POINTS);
 
-  private static final String CONTENT = "c".repeat(ChatItem.CONTENT_CODE_POINTS);
+  private static final String CONTENT = "c".repeat(LiveStream.CONTENT_CODE_POINTS);
 
   private static String over(String whole) {
     return whole + whole.charAt(0);
@@ -131,10 +131,10 @@ class ChatItemTest {
 
   @Test
   void aClipNeverSplitsACharacter() {
-    var faces = "😀".repeat(ChatItem.NAME_CODE_POINTS + 1);
+    var faces = "😀".repeat(LiveStream.NAME_CODE_POINTS + 1);
 
     var mode = new ChatItem.ModeChanged(faces, false);
 
-    assertEquals(new ChatItem.ModeChanged("😀".repeat(ChatItem.NAME_CODE_POINTS), true), mode);
+    assertEquals(new ChatItem.ModeChanged("😀".repeat(LiveStream.NAME_CODE_POINTS), true), mode);
   }
 }

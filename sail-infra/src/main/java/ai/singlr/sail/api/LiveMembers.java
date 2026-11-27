@@ -17,7 +17,6 @@ import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
-import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.DispatchRepos;
@@ -1316,7 +1315,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     }
 
     private void called(LiveStream.ToolCall call) {
-      var tool = Strings.clip(call.tool(), ChatItem.NAME_CODE_POINTS);
+      var tool = Strings.clip(call.tool(), LiveStream.NAME_CODE_POINTS);
       calls.put(call.id(), tool);
       var data = new LinkedHashMap<String, Object>();
       data.put("tool", tool);

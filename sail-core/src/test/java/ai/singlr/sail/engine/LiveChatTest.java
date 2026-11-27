@@ -510,8 +510,8 @@ class LiveChatTest {
   @Test
   void whatTheAgentWroteLongIsShownInPartAndSaysSo() {
     var huge = "w".repeat(200_000);
-    var summary = "w".repeat(ChatItem.SUMMARY_CODE_POINTS);
-    var content = "w".repeat(ChatItem.CONTENT_CODE_POINTS);
+    var summary = "w".repeat(LiveStream.SUMMARY_CODE_POINTS);
+    var content = "w".repeat(LiveStream.CONTENT_CODE_POINTS);
 
     assertEquals(
         List.of(
@@ -552,7 +552,7 @@ class LiveChatTest {
         List.of(new ChatItem.Failed(content, null, true), new TurnEnded(null, 0, 0, 0)),
         read("{\"type\":\"result\",\"is_error\":true,\"result\":\"%s\"}", huge));
     assertEquals(
-        List.of(new ChatItem.ModeChanged("w".repeat(ChatItem.NAME_CODE_POINTS), true)),
+        List.of(new ChatItem.ModeChanged("w".repeat(LiveStream.NAME_CODE_POINTS), true)),
         read("{\"type\":\"system\",\"subtype\":\"status\",\"permissionMode\":\"%s\"}", huge));
     assertEquals(
         List.of(new ChatItem.ToolDone(null, "t1", content, false, true)),

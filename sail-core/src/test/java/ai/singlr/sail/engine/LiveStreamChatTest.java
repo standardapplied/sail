@@ -438,7 +438,7 @@ class LiveStreamChatTest {
 
   @Test
   void whatTheAgentWroteIsReadWholeForItsItemToClip() {
-    var longer = "y".repeat(ChatItem.CONTENT_CODE_POINTS + 5);
+    var longer = "y".repeat(LiveStream.CONTENT_CODE_POINTS + 5);
 
     assertEquals(
         new Step.ToolResults(List.of(new ToolResult("t1", longer, false))),

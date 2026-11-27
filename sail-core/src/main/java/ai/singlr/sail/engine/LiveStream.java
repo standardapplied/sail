@@ -44,6 +44,18 @@ public final class LiveStream {
    */
   public static final int MAX_LINE_CHARS = 1 << 20;
 
+  /** How much of a name the agent gave, a mode's, a model's, a command's, a person is shown. */
+  public static final int NAME_CODE_POINTS = 64;
+
+  /**
+   * How much of a short line, a row's words, a reason, a label, a person is shown, and of a tool's
+   * first string argument a reader of the room is.
+   */
+  public static final int SUMMARY_CODE_POINTS = 120;
+
+  /** How much of what the agent wrote at length, a text, a call's input or output, is shown. */
+  public static final int CONTENT_CODE_POINTS = 1 << 16;
+
   private static final String SUCCESS = "success";
 
   /** How a turn a person stopped ends: in its text, or while a tool waited or ran. */
@@ -273,7 +285,8 @@ public final class LiveStream {
    */
   private static Step turn(String type, Map<String, Object> event) {
     var subagent = event.get("parent_tool_use_id") != null;
-    var blocks = blocks(event);
+    var blocks =
+        list(map(event.get("message")).get("content")).stream().map(LiveStream::map).toList();
     var step =
         switch (type) {
           case "stream_event" ->
@@ -403,10 +416,15 @@ public final class LiveStream {
     }
   }
 
+  /**
+   * A {@code can_use_tool} read whole. Its suggestions are the harness's own, to hand back as they
+   * came: none when there are none, or when one is missing ({@code null}), since what is left of
+   * them is no longer what it offered to keep.
+   */
   private static Step asked(String id, Map<String, Object> request) {
     var call = id(request, "tool_use_id");
-    var tool = string(request.get("tool_name"));
-    if (tool.isBlank() || !(request.get("input") instanceof Map<?, ?>)) {
+    var tool = Objects.toString(text(request, "tool_name"), "");
+    if ("".equals(tool) || !(request.get("input") instanceof Map<?, ?>)) {
       throw new IllegalArgumentException("Not a call: " + tool);
     }
     var input = map(request.get("input"));
@@ -419,22 +437,15 @@ public final class LiveStream {
               id,
               call,
               tool,
-              string(request.get("display_name")),
+              Objects.toString(text(request, "display_name"), ""),
               input,
               text(request, "description"),
               text(request, "decision_reason"),
-              suggestions(request.get("permission_suggestions")));
+              request.get("permission_suggestions") instanceof List<?> suggestions
+                      && !suggestions.contains(null)
+                  ? List.copyOf(suggestions)
+                  : List.of());
     };
-  }
-
-  /**
-   * The harness's own suggestions, to hand back as they came; none when there are none, or when one
-   * is missing ({@code null}), since what is left of them is no longer what it offered to keep.
-   */
-  private static List<Object> suggestions(Object suggested) {
-    return suggested instanceof List<?> suggestions && !suggestions.contains(null)
-        ? List.copyOf(suggestions)
-        : List.of();
   }
 
   private static List<ChatItem.Asked> questions(Map<String, Object> input) {
@@ -480,7 +491,10 @@ public final class LiveStream {
                 block -> {
                   var input = map(block.get("input"));
                   return new ToolCall(
-                      id(block, "id"), string(block.get("name")), summary(input), input);
+                      id(block, "id"),
+                      Objects.toString(text(block, "name"), ""),
+                      Strings.clip(first(input), SUMMARY_CODE_POINTS),
+                      input);
                 })
             .toList();
     return calls.isEmpty() ? otherwise : new Step.ToolCalls(calls);
@@ -494,24 +508,15 @@ public final class LiveStream {
                 block ->
                     new ToolResult(
                         id(block, "tool_use_id"),
-                        output(block.get("content")),
+                        block.get("content") instanceof String text
+                            ? text
+                            : list(block.get("content")).stream()
+                                .map(part -> text(map(part), "text"))
+                                .filter(Objects::nonNull)
+                                .collect(Collectors.joining("\n")),
                         Boolean.TRUE.equals(block.get("is_error"))))
             .toList();
     return results.isEmpty() ? new Step.Other("user") : new Step.ToolResults(results);
-  }
-
-  /** A call's output: its text, or the text of the blocks it came back as. */
-  private static String output(Object content) {
-    return content instanceof String text
-        ? text
-        : list(content).stream()
-            .map(block -> text(map(block), "text"))
-            .filter(Objects::nonNull)
-            .collect(Collectors.joining("\n"));
-  }
-
-  private static String summary(Map<String, Object> input) {
-    return Strings.clip(first(input), ChatItem.SUMMARY_CODE_POINTS);
   }
 
   /** A call's first string argument, whole; empty when it has none. */
@@ -523,17 +528,9 @@ public final class LiveStream {
         .orElse("");
   }
 
-  private static List<Map<String, Object>> blocks(Map<String, Object> event) {
-    return list(map(event.get("message")).get("content")).stream().map(LiveStream::map).toList();
-  }
-
   /** {@code value} as a name that picks how a line is read, clipped; empty for what is no text. */
   private static String name(Object value) {
-    return Strings.clip(string(value), ChatItem.NAME_CODE_POINTS);
-  }
-
-  private static String string(Object value) {
-    return value instanceof String text ? text : "";
+    return value instanceof String named ? Strings.clip(named, NAME_CODE_POINTS) : "";
   }
 
   private static List<String> names(Object value) {
