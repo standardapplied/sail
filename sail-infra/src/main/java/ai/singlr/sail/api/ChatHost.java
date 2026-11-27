@@ -107,11 +107,7 @@ public final class ChatHost implements AutoCloseable {
   private final PeriodicPass sweepPass = new PeriodicPass("chats", this::sweep);
   private volatile boolean closing;
 
-  /**
-   * What a chat's person answers its agent with, and their stop and mode: reached through this
-   * host's held processes alone, under the chat's lock, so none of them ever starts a process.
-   */
-  final ChatAnswers answers;
+  private final ChatAnswers answers;
 
   /**
    * The chats {@code store} holds, admitted and started through {@code launch}, on {@code timing}.
@@ -129,6 +125,14 @@ public final class ChatHost implements AutoCloseable {
                     store.find(session).orElseThrow(), log(session), live.get(session));
               }
             });
+  }
+
+  /**
+   * What a chat's person answers its agent with, and their stop and mode: reached through this
+   * host's held processes alone, under the chat's lock, so none of them ever starts a process.
+   */
+  ChatAnswers answers() {
+    return answers;
   }
 
   /**
@@ -241,21 +245,15 @@ public final class ChatHost implements AutoCloseable {
     var chat = yours(session);
     synchronized (lock(session)) {
       if (ended(session)) {
-        throw ended(chat);
+        throw ChatAnswers.ended(chat, "message");
       }
-      return holder(store.find(session).orElseThrow()).send(text, ended(chat));
+      return holder(store.find(session).orElseThrow())
+          .send(text, ChatAnswers.ended(chat, "message"));
     }
   }
 
   private boolean ended(String session) {
     return store.find(session).map(ChatStore.Chat::ended).orElse(true);
-  }
-
-  private static ApiException ended(ChatStore.Chat chat) {
-    return new ApiException(
-        ErrorCode.CONFLICT,
-        "This chat has ended, so it takes no message.",
-        "Open a new chat in workspace " + chat.workspace() + ".");
   }
 
   /**

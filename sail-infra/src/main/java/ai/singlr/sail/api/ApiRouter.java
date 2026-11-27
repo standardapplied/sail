@@ -850,18 +850,18 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     return ApiResponse.ok(
         operations
             .chats()
-            .answers
+            .answers()
             .answer(call.param("session"), call.param("request"), call.body()));
   }
 
   /** {@code POST /v1/sessions/{id}/chat:interrupt}: the open turn stopped. */
   private ApiResponse interruptChat(Call call) {
-    return ApiResponse.ok(operations.chats().answers.interrupt(call.param("session")));
+    return ApiResponse.ok(operations.chats().answers().interrupt(call.param("session")));
   }
 
   /** {@code PUT /v1/sessions/{id}/chat/mode} with {@code {"mode"}}, between turns. */
   private ApiResponse setChatMode(Call call) throws IOException {
-    return ApiResponse.ok(operations.chats().answers.mode(call.param("session"), call.body()));
+    return ApiResponse.ok(operations.chats().answers().mode(call.param("session"), call.body()));
   }
 
   /** This runner's terminal door, refused on a runner that offers none over the network. */

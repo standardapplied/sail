@@ -13,9 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.engine.LiveChat;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.Recorded;
+import ai.singlr.sail.store.ChatStore;
+import ai.singlr.sail.store.SqliteException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -78,15 +81,15 @@ class ChatAnswersTest {
   }
 
   private Map<String, Object> answer(String session, String request, Map<String, Object> body) {
-    return as("sam", () -> bench.host.answers.answer(session, request, body)).toMap();
+    return as("sam", () -> bench.host.answers().answer(session, request, body)).toMap();
   }
 
   private Map<String, Object> interrupt(String session) {
-    return as("sam", () -> bench.host.answers.interrupt(session)).toMap();
+    return as("sam", () -> bench.host.answers().interrupt(session)).toMap();
   }
 
   private Map<String, Object> mode(String session, String mode) {
-    return as("sam", () -> bench.host.answers.mode(session, Map.of("mode", mode))).toMap();
+    return as("sam", () -> bench.host.answers().mode(session, Map.of("mode", mode))).toMap();
   }
 
   private static ApiException refused(Executable route) {
@@ -229,10 +232,147 @@ class ChatAnswersTest {
     assertEquals(Map.of("seq", 4L), first.get());
     var refusal = (ApiException) second.get();
     assertEquals(
-        List.of("request_answered", "You answered this at 09:00:00: allow."),
+        List.of("request_answered", "You answered this at 09:00:00 UTC: allow."),
         List.of(refusal.code(), refusal.reason()));
     assertEquals(1, responses(fake).size());
     assertEquals(List.of("message", "session", "permission", "answered"), bench.kinds(session));
+  }
+
+  /** I2: a second answer while the first is still being logged is refused; one reaches it. */
+  @Test
+  void twoAnswersAtOnceWhileTheFirstIsLoggedReachTheRequestOnce() throws Exception {
+    var session = bench.samsChat();
+    var fake = asked(session, ASKS);
+    var logging = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var inTheLog = new AtomicReference<Boolean>();
+    bench.clock.onRead(
+        1,
+        () -> {
+          inTheLog.set(
+              StackWalker.getInstance()
+                  .walk(
+                      frames ->
+                          frames.anyMatch(
+                              frame ->
+                                  frame.getClassName().equals(ChatLog.class.getName())
+                                      && frame.getMethodName().equals("log"))));
+          logging.countDown();
+          await(release);
+        });
+    var first = new AtomicReference<Object>();
+    var firstAnswer = Thread.ofPlatform().start(() -> first.set(answer(session, REQUEST, ALLOW)));
+    assertTrue(logging.await(20, TimeUnit.SECONDS), "the first answer was never logged");
+    var second = new AtomicReference<Throwable>();
+
+    var racing =
+        bench.heldInTheHost(
+            "sail-test-second-answer",
+            () -> {
+              try {
+                answer(session, REQUEST, Map.of("decision", "deny"));
+              } catch (ApiException refused) {
+                second.set(refused);
+              }
+            });
+    var whileLogged = bench.kinds(session);
+    release.countDown();
+    firstAnswer.join(Duration.ofSeconds(20));
+    racing.join(Duration.ofSeconds(20));
+
+    assertEquals(true, inTheLog.get(), "the first answer was held in its log write");
+    assertEquals(List.of("message", "session", "permission"), whileLogged);
+    assertEquals(Map.of("seq", 4L), first.get());
+    assertEquals("request_answered", ((ApiException) second.get()).code());
+    assertEquals(List.of(Recorded.parsed("02b-relay-stdio", 17)), responses(fake));
+    assertEquals(List.of("message", "session", "permission", "answered"), bench.kinds(session));
+  }
+
+  /** I3: an answer whose logging fails is neither logged nor sent, and its retry reaches it. */
+  @Test
+  void anAnswerWhoseLogWriteFailsIsKeptSoItsRetryReachesTheAgentOnce() {
+    var session = bench.samsChat();
+    var fake = asked(session, ASKS);
+    bench.db.execute(
+        "CREATE TRIGGER no_answer BEFORE INSERT ON chat_items WHEN NEW.kind = 'answered'"
+            + " BEGIN SELECT RAISE(ABORT, 'database is locked'); END");
+
+    assertThrows(SqliteException.class, () -> answer(session, REQUEST, ALLOW));
+    var failed = List.copyOf(responses(fake));
+    var logged = bench.kinds(session);
+    bench.db.execute("DROP TRIGGER no_answer");
+    var retried = answer(session, REQUEST, ALLOW);
+
+    assertEquals(List.of(), failed);
+    assertEquals(List.of("message", "session", "permission"), logged);
+    assertEquals(Map.of("seq", 4L), retried);
+    assertEquals(List.of(Recorded.parsed("02b-relay-stdio", 17)), responses(fake));
+    assertEquals(List.of("message", "session", "permission", "answered"), bench.kinds(session));
+  }
+
+  /**
+   * I2, I3: once a refused write began its process's end, the other request it holds takes no
+   * answer, though the process is not yet gone: one answer is logged, and the other withdrawn.
+   */
+  @Test
+  void anAnswerWhileItsProcessEndsIsRefusedAndNeverLogged() {
+    var session = bench.samsChat();
+    var fake = asked(session, ASKS, ALWAYS);
+    fake.holdsItsEnd();
+    fake.breaksStdin();
+
+    var first = refused(() -> answer(session, REQUEST, ALLOW));
+    var second = refused(() -> answer(session, ALWAYS_REQUEST, ALLOW));
+    var logged = bench.kinds(session);
+    fake.releasesItsEnd();
+    over(fake);
+
+    assertEquals(
+        List.of("request_withdrawn", "request_withdrawn", WITHDRAWN),
+        List.of(first.code(), second.code(), second.reason()));
+    assertEquals(List.of("message", "session", "permission", "permission", "answered"), logged);
+    assertEquals(
+        List.of(
+            "message",
+            "session",
+            "permission",
+            "permission",
+            "answered",
+            "told",
+            "withdrawn",
+            "interrupted"),
+        bench.kinds(session));
+    assertEquals(List.of(), responses(fake));
+  }
+
+  /** A request no longer waited for is said in the name of the chat's own harness. */
+  @Test
+  void aRequestNoLongerWaitedForIsSaidInItsHarnessesName() {
+    var session = Ids.newId().toString();
+    var at = bench.clock.instant();
+    bench.store.open(
+        new ChatStore.Chat(
+            session,
+            bench.samId,
+            "beta",
+            "dock",
+            "codex",
+            "default",
+            false,
+            null,
+            false,
+            false,
+            0,
+            at,
+            null));
+    bench.store.append(session, "permission", "{\"id\":\"" + REQUEST + "\"}", at);
+
+    var refusal = refused(() -> answer(session, REQUEST, ALLOW));
+
+    assertEquals(
+        List.of(
+            "request_withdrawn", "Codex CLI no longer waits for this answer, so it was not sent."),
+        List.of(refusal.code(), refusal.reason()));
   }
 
   private static void await(CountDownLatch latch) {
@@ -329,7 +469,7 @@ class ChatAnswersTest {
     restarted.reclaim();
 
     var refusal =
-        refused(() -> as("sam", () -> restarted.answers.answer(session, REQUEST, ALLOW)).toMap());
+        refused(() -> as("sam", () -> restarted.answers().answer(session, REQUEST, ALLOW)).toMap());
 
     assertEquals("request_withdrawn", refusal.code());
     assertEquals(List.of(), responses(old));
@@ -397,9 +537,9 @@ class ChatAnswersTest {
 
     var routes =
         List.<Executable>of(
-            () -> as("tom", () -> bench.host.answers.answer(session, REQUEST, ALLOW)),
-            () -> as("tom", () -> bench.host.answers.interrupt(session)),
-            () -> as("tom", () -> bench.host.answers.mode(session, Map.of("mode", "plan"))));
+            () -> as("tom", () -> bench.host.answers().answer(session, REQUEST, ALLOW)),
+            () -> as("tom", () -> bench.host.answers().interrupt(session)),
+            () -> as("tom", () -> bench.host.answers().mode(session, Map.of("mode", "plan"))));
 
     for (var route : routes) {
       var refusal = refused(route);
@@ -464,11 +604,13 @@ class ChatAnswersTest {
                 as(
                     "sam",
                     () ->
-                        bench.host.answers.mode(
-                            session, Map.of("mode", "plan", "rules", List.of())))));
+                        bench
+                            .host
+                            .answers()
+                            .mode(session, Map.of("mode", "plan", "rules", List.of())))));
     assertEquals(
         "mode is the name of one of the chat's modes.",
-        invalid(() -> as("sam", () -> bench.host.answers.mode(session, Map.of("mode", 1)))));
+        invalid(() -> as("sam", () -> bench.host.answers().mode(session, Map.of("mode", 1)))));
     assertEquals(1, fake.written.size());
     answer(session, REQUEST, ALLOW);
     assertEquals(1, responses(fake).size(), "the request was kept for the person's answer");

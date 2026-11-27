@@ -249,10 +249,11 @@ final class ChatProcess {
   }
 
   /**
-   * Answers the request {@code id} it holds with {@code reply}, the person {@code by}'s, once: the
-   * step is taken out, {@code answered} logged, then the answer written, so the log never says less
-   * than the agent was told. Returns the seq it was logged as, or 0, logging and writing nothing,
-   * when it holds no such request.
+   * Answers the request {@code id} it holds with {@code reply}, the person {@code by}'s, once:
+   * {@code answered} logged, the step taken out, then the answer written, so the log never says
+   * less than the agent was told, and an answer that could not be logged leaves the request held
+   * for the next. Returns the seq it was logged as, or 0, logging and writing nothing, when it
+   * holds no such request.
    *
    * @throws ApiException {@code withdrawn} when it holds it but takes no answer: it is ending, no
    *     longer read or its turn is being stopped, or the answer was not taken, said in the cut of
@@ -268,9 +269,9 @@ final class ChatProcess {
       throw withdrawn;
     }
     var line = LiveReply.reply(step, reply, chat);
-    asked.remove(id);
     var seq =
         log.log(new ChatWire.Answered(id, reply.decision(), reply.message(), reply.answers(), by));
+    asked.remove(id);
     if (!write(
         line,
         agent

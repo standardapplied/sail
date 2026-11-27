@@ -11,7 +11,7 @@
       "error": {
         "code": "request_answered",
         "field_errors": [],
-        "message": "You answered this at 09:00:00: deny."
+        "message": "You answered this at 09:00:00 UTC: deny."
       },
       "schema_version": 1
     },

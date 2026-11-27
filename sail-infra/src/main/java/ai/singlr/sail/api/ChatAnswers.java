@@ -95,9 +95,9 @@ final class ChatAnswers {
           if (chat.ended()) {
             throw ended(chat, "answer");
           }
-          var seq = process == null ? 0 : process.answer(request, reply, by, withdrawn());
+          var seq = process == null ? 0 : process.answer(request, reply, by, withdrawn(chat));
           if (seq == 0) {
-            throw unanswerable(log.about(request), request);
+            throw unanswerable(chat, log.about(request), request);
           }
           return new Logged(seq);
         });
@@ -194,10 +194,11 @@ final class ChatAnswers {
   }
 
   /**
-   * The refusal of an answer to {@code request} that no process takes, as the log says of it
-   * ({@code about}): none asked, answered already, or no longer waited for.
+   * The refusal of an answer to {@code request} of {@code chat} that no process takes, as the log
+   * says of it ({@code about}): none asked, answered already, or no longer waited for.
    */
-  private static ApiException unanswerable(List<ChatStore.Item> about, String request) {
+  private static ApiException unanswerable(
+      ChatStore.Chat chat, List<ChatStore.Item> about, String request) {
     if (about.stream().noneMatch(ChatLog::asks)) {
       return new ApiException(
           ErrorCode.NOT_FOUND, "There is no request " + request + " in this chat.");
@@ -211,20 +212,22 @@ final class ChatAnswers {
                     ErrorCode.REQUEST_ANSWERED,
                     "You answered this at "
                         + TIME.format(answered.at())
-                        + ": "
+                        + " UTC: "
                         + ChatLog.fields(answered).get("decision")
                         + "."))
-        .orElseGet(ChatAnswers::withdrawn);
+        .orElseGet(() -> withdrawn(chat));
   }
 
-  private static ApiException withdrawn() {
+  private static ApiException withdrawn(ChatStore.Chat chat) {
     return new ApiException(
         ErrorCode.REQUEST_WITHDRAWN,
-        "Claude Code no longer waits for this answer, so it was not sent.",
+        Harnesses.of(chat.harness()).displayName()
+            + " no longer waits for this answer, so it was not sent.",
         "Answer what it asks next, or send a message.");
   }
 
-  private static ApiException ended(ChatStore.Chat chat, String what) {
+  /** What refuses a {@code what} to {@code chat}, which has ended: a message's and an answer's. */
+  static ApiException ended(ChatStore.Chat chat, String what) {
     return new ApiException(
         ErrorCode.CONFLICT,
         "This chat has ended, so it takes no " + what + ".",

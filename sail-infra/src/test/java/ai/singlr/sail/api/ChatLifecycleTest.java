@@ -501,7 +501,7 @@ class ChatLifecycleTest {
   }
 
   private Map<String, Object> interrupt(String session) {
-    return ChatBench.as("sam", () -> bench.host.answers.interrupt(session)).toMap();
+    return ChatBench.as("sam", () -> bench.host.answers().interrupt(session)).toMap();
   }
 
   /** I7: a request still open when its turn ends is withdrawn: nothing can answer it then. */

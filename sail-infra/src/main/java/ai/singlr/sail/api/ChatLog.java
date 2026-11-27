@@ -36,21 +36,20 @@ final class ChatLog {
   private static final String TURN_ENDED = ChatWire.kind(ChatItem.TurnEnded.class);
   private static final String MESSAGE = ChatWire.kind(ChatWire.Message.class);
   private static final String ANSWERED = ChatWire.kind(ChatWire.Answered.class);
+  private static final String PERMISSION = ChatWire.kind(ChatItem.Permission.class);
+  private static final String QUESTION = ChatWire.kind(ChatItem.Question.class);
+  private static final String PLAN = ChatWire.kind(ChatItem.Plan.class);
 
   /** The kinds a request is asked as: every {@link ChatItem.Request}. */
-  private static final List<String> ASKED =
-      List.of(
-          ChatWire.kind(ChatItem.Permission.class),
-          ChatWire.kind(ChatItem.Question.class),
-          ChatWire.kind(ChatItem.Plan.class));
+  private static final List<String> ASKED = List.of(PERMISSION, QUESTION, PLAN);
 
   /** The kinds that ask or close a request: these and the person's answer and its withdrawal. */
   private static final List<String> REQUEST =
-      List.of(ASKED.get(0), ASKED.get(1), ASKED.get(2), ANSWERED, WITHDRAWN);
+      List.of(PERMISSION, QUESTION, PLAN, ANSWERED, WITHDRAWN);
 
   /** The kinds that open or close a row or a request. */
   private static final List<String> OPENING =
-      List.of(TOOL, DONE, ASKED.get(0), ASKED.get(1), ASKED.get(2), ANSWERED, WITHDRAWN);
+      List.of(TOOL, DONE, PERMISSION, QUESTION, PLAN, ANSWERED, WITHDRAWN);
 
   /**
    * What a chat's open turn left open, as its log says since the turn before it ended: the tool
