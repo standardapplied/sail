@@ -87,6 +87,8 @@ public final class SyncScheduler implements AutoCloseable {
   private boolean followUp;
   private boolean attempted;
   private long attemptedAtNanos;
+  private boolean closing;
+  private Thread backingOff;
 
   public SyncScheduler(Reconcile reconcile, Duration debounce, Duration freshenTtl) {
     this(
@@ -258,14 +260,16 @@ public final class SyncScheduler implements AutoCloseable {
   }
 
   /**
-   * Stops the timer and waits for its tick, then interrupts the round executor and waits for it,
-   * and only then closes the health source their reads go through: interrupting a thread inside a
-   * native call does not stop it. A drain waiting out its debounce or a backoff runs its pending
-   * round at once, so either wait is at most one round, which on a dead link the round's ssh ends
-   * ({@code SshSyncChannel}: a 10 s connect timeout, then two unanswered 10 s keepalives). A round
-   * cut short loses nothing: every write is journaled with it, and the next round offers it. The
-   * source only ever reads, so a failure to close it is a warning naming its causes, never a
-   * failure of the command whose work is done.
+   * Stops the timer and waits for its tick, then waits for the round executor, and only then closes
+   * the health source their reads go through: interrupting a thread inside a native call does not
+   * stop it. A stop never waits out a backoff: a drain sleeping one is woken and runs no round, and
+   * its write, journaled with it, goes to main with the next start's first round. A drain in its
+   * debounce is not interrupted, since a round's first step (the round lock) fails on an
+   * interrupted thread: it sends its write before the close returns, unless it would first have to
+   * wait out a backoff. So the close waits at most the rest of a debounce and one round, which on a
+   * dead link the round's ssh ends ({@code SshSyncChannel}: a 10 s connect timeout, then two
+   * unanswered 10 s keepalives). The source only ever reads, so a failure to close it is a warning
+   * naming its causes, never a failure of the command whose work is done.
    */
   @Override
   public void close() {
@@ -274,7 +278,10 @@ public final class SyncScheduler implements AutoCloseable {
       timer.close();
     }
     if (executor != null) {
-      executor.shutdownNow();
+      synchronized (state) {
+        closing = true;
+        if (backingOff != null) backingOff.interrupt();
+      }
       executor.close();
     }
     try {
@@ -327,7 +334,11 @@ public final class SyncScheduler implements AutoCloseable {
     }
   }
 
+  /**
+   * Runs the drain's round once a backoff allows; a drain whose thread is interrupted runs none.
+   */
   private void runWhenReady() {
+    if (Thread.currentThread().isInterrupted()) return;
     while (true) {
       Duration wait;
       synchronized (freshenLock) {
@@ -338,15 +349,26 @@ public final class SyncScheduler implements AutoCloseable {
         }
         wait = backoff.remaining();
       }
-      try {
-        sleeper.sleep(wait);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        synchronized (freshenLock) {
-          runRound();
-        }
+      if (!backOff(wait)) {
         return;
       }
+    }
+  }
+
+  /** Sleeps out a backoff and answers whether to try again: never once a close or an interrupt. */
+  private boolean backOff(Duration wait) {
+    synchronized (state) {
+      if (closing) return false;
+      backingOff = Thread.currentThread();
+    }
+    try {
+      sleeper.sleep(wait);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+    synchronized (state) {
+      backingOff = null;
+      return !closing && !Thread.currentThread().isInterrupted();
     }
   }
 

@@ -59,7 +59,7 @@ final class PairingRevocation {
               + "'s key line from "
               + box.operator()
               + "'s authorized_keys ("
-              + failure.getClass().getSimpleName()
+              + Remedied.fileReasonOf(failure)
               + "), so nothing of "
               + handle
               + " was removed and its pairing still works.",
@@ -156,7 +156,7 @@ final class PairingRevocation {
               + ", which may hold "
               + handle
               + "'s key ("
-              + failure.getClass().getSimpleName()
+              + Remedied.fileReasonOf(failure)
               + "). "
               + KEPT_UNTIL_THE_KEY_IS_GONE,
           Remedy.of(

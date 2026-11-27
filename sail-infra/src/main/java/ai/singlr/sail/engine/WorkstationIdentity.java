@@ -48,7 +48,7 @@ public final class WorkstationIdentity {
           "This box's workstation key ("
               + path
               + ") could not be read ("
-              + e.getClass().getSimpleName()
+              + Remedied.fileReasonOf(e)
               + ").",
           Remedy.of("Check that the account sail runs as can read it."),
           e);

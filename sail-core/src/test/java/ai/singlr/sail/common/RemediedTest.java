@@ -97,7 +97,8 @@ class RemediedTest {
     assertEquals(
         "Is a directory",
         Remedied.fileReasonOf(new FileSystemException("/k.pub", null, "Is a directory")));
-    assertEquals("Input/output error", Remedied.fileReasonOf(new IOException("Input/output error")));
+    assertEquals(
+        "Input/output error", Remedied.fileReasonOf(new IOException("Input/output error")));
     assertEquals(
         "AccessDeniedException",
         Remedied.fileReasonOf(new AccessDeniedException("/k.pub")),

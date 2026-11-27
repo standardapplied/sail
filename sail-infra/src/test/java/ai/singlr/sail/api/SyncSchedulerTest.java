@@ -247,7 +247,8 @@ class SyncSchedulerTest {
   }
 
   @Test
-  void anInterruptedBackoffStillFlushesThePendingWrite() {
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void anInterruptedBackoffRunsNoRoundAndKeepsTheInterrupt() {
     var executor = new QueueExecutor();
     var scheduler =
         scheduler(
@@ -257,12 +258,15 @@ class SyncSchedulerTest {
               throw new IllegalStateException("offline");
             },
             duration -> {
-              throw new InterruptedException("shutdown");
+              if (!duration.equals(DEBOUNCE)) {
+                throw new InterruptedException("shutdown");
+              }
+              advanceBy(duration);
             });
     scheduler.syncNow();
     scheduler.afterWrite();
     executor.runAll();
-    assertEquals(2, rounds.get());
+    assertEquals(1, rounds.get(), "only the failed round before the backoff ran");
     assertTrue(Thread.interrupted());
   }
 
@@ -358,7 +362,7 @@ class SyncSchedulerTest {
   }
 
   @Test
-  void anInterruptedDebounceWaitStillFlushesTheRound() {
+  void anInterruptedDebounceWaitRunsNoRoundAndKeepsTheInterrupt() {
     var executor = new QueueExecutor();
     var scheduler =
         scheduler(
@@ -371,7 +375,7 @@ class SyncSchedulerTest {
     scheduler.afterWrite();
     executor.runAll();
 
-    assertEquals(1, rounds.get());
+    assertEquals(0, rounds.get(), "a round's first step fails on an interrupted thread");
     assertTrue(Thread.interrupted());
   }
 

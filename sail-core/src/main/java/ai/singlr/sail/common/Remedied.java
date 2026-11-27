@@ -6,6 +6,7 @@
 package ai.singlr.sail.common;
 
 import java.io.IOException;
+import java.nio.file.FileSystemException;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Objects;
@@ -94,6 +95,17 @@ public interface Remedied {
     }
     var head = line.endsWith(".") ? line.substring(0, line.length() - 1) : line;
     return said.startsWith(head + ": ") ? said : head + ": " + said;
+  }
+
+  /**
+   * What a file's failure says, for a line that already names the file: a {@link
+   * FileSystemException}'s reason, never its message, which repeats the path; another failure's
+   * words; else its type, as an {@code AccessDeniedException} the platform gives no reason is said.
+   */
+  static String fileReasonOf(IOException failure) {
+    var words =
+        failure instanceof FileSystemException file ? file.getReason() : failure.getMessage();
+    return Strings.isBlank(words) ? failure.getClass().getSimpleName() : words;
   }
 
   /** What {@code failure} says to do about it; {@link Remedy#NONE} when it names nothing. */
