@@ -495,7 +495,7 @@ import Testing
         model.beginCreate()
         model.type("half-typed")
         let request = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor")
-        #expect(request == nil, "harbor's success listed demo again")
+        #expect(request.flatMap(model.project(of:)) == "harbor", "harbor's success listed demo again")
         #expect(Self.table(model)?.create?.name == "half-typed", "harbor's success took demo's typed name")
         let harbor = model.choose("harbor")
         model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-made"), request: harbor, at: Self.at)
@@ -655,7 +655,8 @@ extension WorkspacesModelTests {
         Self.send("lab", &model)
         let timings = WorkspaceTimings(cloneMs: 0, startMs: 0, readyMs: 0, totalMs: 0, readySteps: [:])
         let lab = WorkspaceCreated(project: "demo", workspace: "lab", instance: "demo-lab", owner: "uday", template: "v1", stale: false, timings: timings)
-        #expect(model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor") == nil)
+        let harborAgain = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor")
+        #expect(harborAgain.flatMap(model.project(of:)) == "harbor", "harbor's create did not list harbor again")
         let demoAgain = model.created(.success(lab), project: "demo")
         model.listed(.success(WorkspaceList(project: "demo", workspaces: [
             WorkspaceRow(name: "lab", instance: "demo-lab", state: .known(.running), owner: "uday"),
@@ -675,7 +676,8 @@ extension WorkspacesModelTests {
         let harbor = model.choose("harbor")
         let timings = WorkspaceTimings(cloneMs: 0, startMs: 0, readyMs: 0, totalMs: 0, readySteps: [:])
         let pier = WorkspaceCreated(project: "demo", workspace: "pier", instance: "demo-pier", owner: "uday", template: "v1", stale: false, timings: timings)
-        #expect(model.created(.success(pier), project: "demo") == nil, "demo's create listed harbor")
+        let demoAgain = model.created(.success(pier), project: "demo")
+        #expect(demoAgain.flatMap(model.project(of:)) == "demo", "demo's create listed another project")
         model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: harbor, at: Self.at)
         #expect(Self.table(model)?.yours.first(where: \.chosen) == nil, "demo's created pier was chosen in harbor's list")
     }
@@ -955,7 +957,7 @@ extension WorkspacesModelTests {
         let demo = model.choose("demo")
         model.listed(.success(WorkspaceList(project: "demo", workspaces: [])), request: demo, at: Self.at)
         let elsewhere = model.changed(.delete(force: false), "pier", project: "harbor", try Self.holdsWork("pier"))
-        #expect(elsewhere == nil && Self.page(model)?.banner == nil && model.asking == nil, "harbor's refusal was said or asked over demo")
+        #expect(elsewhere.flatMap(model.project(of:)) == "harbor" && Self.page(model)?.banner == nil && model.asking == nil, "harbor's refusal was said or asked over demo")
         let back = model.choose("harbor")
         model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: back, at: Self.at)
         #expect(Self.page(model)?.banner?.title.contains("holds work") == true, "coming back, harbor said nothing of pier's refusal")

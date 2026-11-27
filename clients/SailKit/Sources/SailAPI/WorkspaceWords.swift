@@ -73,56 +73,60 @@ extension WorkspaceRow {
     }
 }
 
-/// The pane's list of a project's workspaces, asked again and again: the latest request wins. A
-/// list is taken only for the project and the request still shown, so an answer that arrives after
-/// another project was chosen, or after a later request, is dropped; the rows stay paired with the
-/// project they were listed for, which Open and Create act on.
+/// The workspaces listed of each project, the left panel's rows under it and its page's alike,
+/// asked again and again: each project's latest request wins. Requests are numbered across
+/// projects, so an answer names the project it was asked for; one overtaken by a later request for
+/// its project is dropped, while another project's request overtakes none. The rows stay paired
+/// with the project they were listed for, which Open and Create act on.
 public struct WorkspaceListing: Sendable {
-    /// The project of the request now shown.
-    public private(set) var asking: String?
-    /// The project the rows were listed for.
-    public private(set) var listed: String?
-    public private(set) var rows: [WorkspaceRow] = []
-    /// The latest request's number.
+    /// Each project's rows as last listed; a project never listed has none.
+    public private(set) var rows: [String: [WorkspaceRow]] = [:]
+    /// The latest request's number, of any project.
     public private(set) var latest = 0
+    /// Each project's latest request.
+    private var asked: [String: Int] = [:]
 
     public init() {}
 
-    /// A request for `project`'s list: its number, which ``take(_:request:)`` checks.
+    /// A request for `project`'s list: its number, which ``take(_:request:)`` checks. Nil asks for
+    /// nothing anyone takes.
     public mutating func ask(_ project: String?) -> Int {
         latest += 1
-        asking = project
+        if let project { asked[project] = latest }
         return latest
     }
 
-    /// Takes `rows`, listed by request `number` for the project it asked, when that is still the
-    /// request shown; false, and nothing taken, when a later request overtook it. Every request
-    /// is a later one, another project's included.
-    public mutating func take(_ rows: [WorkspaceRow], request number: Int) -> Bool {
-        guard number == latest else { return false }
-        self.rows = rows
-        listed = asking
-        return true
+    /// The project request `number` asked for while it is that project's latest; nil once overtaken.
+    public func project(of number: Int) -> String? {
+        asked.first { $0.value == number }?.key
     }
 
-    /// Row `name` as an action's answer left it, until a list asked after that answer is taken: only
-    /// the latest request's list is, so a list already in flight cannot bring the old state back.
-    /// Nil `state` takes the row out (deleted).
-    public mutating func settle(_ name: String, as state: WorkspaceState?) {
-        guard let state else { return rows.removeAll { $0.name == name } }
-        rows = rows.map { $0.name == name ? WorkspaceRow(name: $0.name, instance: $0.instance, state: .known(state), owner: $0.owner) : $0 }
+    /// Whether `project`'s list was ever asked.
+    public func asked(_ project: String) -> Bool {
+        asked[project] != nil
     }
 
-    /// Whether request `number` is still the one shown.
-    public func isLatest(_ number: Int) -> Bool {
-        number == latest
+    /// Takes `rows`, listed by request `number`, for the project it asked when it is still that
+    /// project's latest: that project; nil, and nothing taken, when a later request overtook it.
+    public mutating func take(_ rows: [WorkspaceRow], request number: Int) -> String? {
+        guard let project = project(of: number) else { return nil }
+        self.rows[project] = rows
+        return project
     }
 
-    /// Lists nothing: no project to list.
+    /// Row `name` of `project` as an action's answer left it, until a list asked after that answer is
+    /// taken: only the latest request's list is, so a list already in flight cannot bring the old
+    /// state back. Nil `state` takes the row out (deleted).
+    public mutating func settle(_ name: String, in project: String, as state: WorkspaceState?) {
+        guard let listed = rows[project] else { return }
+        guard let state else { return rows[project] = listed.filter { $0.name != name } }
+        rows[project] = listed.map { $0.name == name ? WorkspaceRow(name: $0.name, instance: $0.instance, state: .known(state), owner: $0.owner) : $0 }
+    }
+
+    /// Lists nothing: no project to list, every answer on its way dropped.
     public mutating func clear() {
         latest += 1
-        asking = nil
-        listed = nil
-        rows = []
+        asked = [:]
+        rows = [:]
     }
 }

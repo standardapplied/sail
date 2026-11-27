@@ -88,13 +88,18 @@ final class WorkspaceLine: NSStackView {
     /// The pill a row shows: Creating only for the create under way here; each state the server
     /// sends by its own word, and Unknown for one this app does not know.
     static func pill(_ line: WorkspacesModel.Line) -> PillState {
-        guard !line.creating else { return .creating }
-        switch line.busy {
+        line.creating ? .creating : pill(state: line.state, busy: line.busy)
+    }
+
+    /// The state a workspace in `state` shows, with `busy` under way on it: its page row's pill, and
+    /// its square in the left panel.
+    static func pill(state: Open<WorkspaceState>, busy: WorkspacesModel.Action?) -> PillState {
+        switch busy {
         case .stop?: return .stopping
         case .delete?: return .deleting
         case nil: break
         }
-        return switch line.state {
+        return switch state {
         case .known(.running): .running
         case .known(.stopped): .stopped
         case .known(.frozen): .paused
@@ -196,7 +201,7 @@ extension WorkspaceLine: MarkedRow {
         ]).cut(.byTruncatingTail)
     }
 
-    package func mark(chosen _: Bool, strong: Bool) {
+    package func mark(chosen _: Bool, strong: Bool, offers _: Bool) {
         let weight: NSFont.Weight = strong ? .semibold : .medium
         guard let font = title.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont,
               font != NSFont.systemFont(ofSize: Look.Step.body.points, weight: weight),
