@@ -1,0 +1,1 @@
+{"type":"system","subtype":"permission_denied","tool_name":"Bash","tool_use_id":"toolu_019GS8cW4vBPBaqm81GX3tbs","decision_reason_type":"rule","message":"cat from '/home/dev/.ssh/probe-secret.txt' was blocked by a deny rule.","uuid":"5903f4f2-04de-4d36-84df-59cf62314f63","session_id":"074da4f4-afa5-46d1-b7e2-1303d4e22295"}

@@ -110,7 +110,7 @@ final class ClaudeCode implements Harness {
           "Bash(set:*)",
           "Bash(export:*)",
           "Bash(declare:*)",
-          "Read(//proc/**)");
+          readDeny("/proc/**"));
 
   @Override
   public String yamlName() {
@@ -170,11 +170,11 @@ final class ClaudeCode implements Harness {
    * (verified empirically). So the session reads the code it is consulting on and nothing else:
    * every container secret lives outside the workspace ({@code ~/.ssh}, {@code ~/.sail}, {@code
    * ~/.claude}, {@code /var/lib/sail}) and is unreadable by default. The {@code Read}-deny rules in
-   * {@link #readDenyRules}, which Claude applies to a Bash read of a denied path too,
-   * belt-and-suspenders the highest-value credentials on top of that; they are not the primary
-   * boundary. Git is deliberately absent: {@code git diff --output=<path>} writes through a prefix
-   * allow-rule, and git's external-diff and pager config are command-execution surfaces, which a
-   * read-only lane must not expose.
+   * {@link #readDenyRules}, which Claude applies to the Bash reads it maps to a path too, stop the
+   * ordinary reads of the highest-value credentials on top of that; they are not the boundary. Git
+   * is deliberately absent: {@code git diff --output=<path>} writes through a prefix allow-rule,
+   * and git's external-diff and pager config are command-execution surfaces, which a read-only lane
+   * must not expose.
    *
    * <p>The invocation is pinned closed against ambient configuration: {@code --setting-sources ""}
    * excludes every user/project/local settings file, so a {@code .claude/settings.json} in the
@@ -213,8 +213,9 @@ final class ClaudeCode implements Harness {
    * Claude Code's streaming mode: prompts are JSON lines on stdin, and every step of a turn is a
    * JSON line on stdout, text as it is written ({@code --include-partial-messages}). A read-only
    * member runs under exactly the isolation, tool cut and allow-rules of {@link #readOnly}; a full
-   * one skips permissions as {@link #headless} does. {@code --permission-prompts none} denies every
-   * prompt either way: nobody is there to answer one.
+   * one skips permission prompts as {@link #headless} does, though never the deny rules of its
+   * settings ({@link #readDenyRules}). {@code --permission-prompts none} denies every prompt either
+   * way: nobody is there to answer one.
    */
   @Override
   public Optional<List<String>> live(LiveLaunch launch) {
@@ -567,32 +568,48 @@ final class ClaudeCode implements Harness {
   }
 
   /**
-   * The Read-deny rules that belt-and-suspenders the room lane's highest-value credentials. The
-   * primary boundary is elsewhere: Claude Code auto-approves read commands ({@code cat}/{@code
-   * head}/{@code tail}/{@code grep}) only inside the working directory (the workspace), and refuses
-   * a read of any path outside it (verified empirically), so the container's secrets, all of which
-   * live outside {@code ~/workspace}, are unreadable by default even without a rule. These denies
-   * harden the box FDE {@code box.credential}, the box SSH identity ({@code ~/.ssh}, the Sail CLI
-   * identity), the {@code ~/.git-credentials} token, the {@code gh} token under {@code
-   * ~/.config/gh}, a run's {@code launch.env}, which holds its credential and its person's login
-   * until its wrapper reads it, and a session's login file under {@code ~/.sail/sessions}, which
-   * holds its person's login until its shell reads it, explicitly on top of that, so the protection
-   * does not rest solely on the cwd heuristic. Claude Code applies a {@code Read(path)} deny to a
-   * Bash command that reads that path (verified), deny outranks every allow rule, and the room
-   * invocation pins {@code --setting-sources ""} so no ambient settings file can shadow these. A
-   * full (YOLO) agent skips permission rules by design: it is the trusted member lane. Spec-CLI
-   * auth is untouched: the helper reads the credential at the OS level, not through a tool.
-   * Residual (a secret committed inside the workspace, a kernel escape, a harness-enforcement bug)
-   * is owned by the room-lane hardening follow-up, a read-only-disk sidecar, not this denylist.
+   * The Read-deny rules every settings file Sail hands Claude Code carries, whichever lane reads
+   * it: the box FDE {@code box.credential}; {@code ~/.ssh}, which holds no private key, only the
+   * owner's public keys in {@code authorized_keys}, and costs nothing to name; the person's forge
+   * token in {@code ~/.git-credentials} and the store Sail writes beside it before it moves it in,
+   * the same token in {@code gh}'s login under {@code ~/.config/gh} and the file Sail hands it to
+   * {@code gh} in; a run's {@code launch.env}, which holds its credential and its person's harness
+   * login until its wrapper reads it; and a session's login file under {@code ~/.sail/sessions},
+   * which holds its person's login until its shell reads it. Each is an exact absolute path or a
+   * folder's {@code **}, written from the root ({@link #readDeny}). A harness's own stored login
+   * ({@link Harness#storedLogins}) is not in the list, since nothing recorded shows a harness still
+   * starts signed in with a deny on its own login file. An agent can read it. They stop an agent's
+   * ordinary reads of these files; they are not a boundary. Recorded on Claude Code 2.1.332 for
+   * {@code ~/.ssh}, in both lanes, {@code --dangerously-skip-permissions} included, since a deny
+   * rule outranks bypass (probe 3, 03a and 03b; probe 4): a rule refuses the Read tool, directly,
+   * through a symlink to the file or its folder and in a subagent, and the Bash commands whose file
+   * arguments Claude Code checks against it ({@code cat}, {@code head}, {@code tail}, {@code cp},
+   * {@code base64}, {@code od}, {@code grep -r}, {@code find -exec cat}, {@code awk}, {@code sed},
+   * {@code git diff --no-index}), the path spelled with {@code $HOME}, {@code ..} or after {@code
+   * cd} too. It does not stop {@code less} or {@code more} piped on, {@code python3 -c open()},
+   * {@code tar}, {@code dd}, {@code xxd}, {@code sh -c} or {@code bash -lc} around a {@code cat},
+   * {@code git hash-object} then {@code cat-file}, a hard link into the workspace then Read, or a
+   * command that only uses the file ({@code ssh-keygen -y -f}): in the full lane those run unasked,
+   * so an agent that sets out to read these files still can. Nor does a file's owner or mode keep
+   * them from it: its user has passwordless {@code sudo}. Keeping them from an agent that tries is
+   * the boundary spec's to do ({@code
+   * sail-an-agent-cannot-read-what-its-workspace-holds-in-trust}), not a rule's. Written with one
+   * leading slash, as Sail wrote them before, they matched nothing in either lane: a full agent
+   * read all four home paths unasked (probe 3, 03d). Deny outranks every allow rule, and the
+   * read-only invocation pins {@code --setting-sources ""} so no ambient settings file can shadow
+   * these. Spec-CLI auth is untouched: the helper reads the credential at the OS level, not through
+   * a tool.
    */
   private static List<String> readDenyRules() {
     return List.of(
         readDeny(SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME).toString()),
         readDeny(ContainerExec.DEV_HOME + "/.ssh/**"),
-        readDeny(ContainerExec.DEV_HOME + "/.git-credentials"),
+        readDeny(ContainerExec.DEV_GIT_CREDENTIALS),
+        readDeny(ContainerExec.DEV_GIT_CREDENTIALS_NEW),
         readDeny(ContainerExec.DEV_HOME + "/.config/gh/**"),
+        readDeny(ContainerExec.DEV_HOME + "/" + ContainerExec.GH_TOKEN_FILE),
         readDeny(ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env"),
-        "Read(~/.sail/sessions/**)");
+        readDeny(ContainerExec.DEV_HOME + "/.sail/sessions/**"));
   }
 
   /**

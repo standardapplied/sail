@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,6 +19,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
@@ -215,6 +217,38 @@ class ContainerSailSetupTest {
           ContainerSailSetup.fingerprintOf(mutated),
           "a change to " + path + " must change the fingerprint");
     }
+  }
+
+  /**
+   * Every deny rule of every settings file Sail installs is an absolute path written {@code
+   * Read(//…)}: Claude Code reads one leading {@code /} from the settings file's own folder, so a
+   * rule written so matches nothing (probe 2, 03a and 03f), and in the full lane the agent read
+   * every path such rules named (probe 3, 03d).
+   */
+  @Test
+  @SuppressWarnings("unchecked")
+  void everyDenyRuleOfEveryInstalledSettingsFileReadsItsPathFromTheRoot() {
+    var denies = new LinkedHashMap<String, List<String>>();
+    ContainerSailSetup.installedFiles()
+        .forEach(
+            (path, content) -> {
+              if (path.endsWith(".json")
+                  && YamlUtil.parseMap(content).get("permissions") instanceof Map<?, ?> permissions
+                  && permissions.get("deny") instanceof List<?> rules) {
+                denies.put(path, (List<String>) rules);
+              }
+            });
+
+    assertEquals(
+        List.of("/home/dev/.sail/claude-settings.json", "/home/dev/.sail/claude-live.json"),
+        List.copyOf(denies.keySet()));
+    denies.forEach(
+        (path, rules) ->
+            rules.forEach(
+                rule ->
+                    assertTrue(
+                        rule.startsWith("Read(//"),
+                        path + " writes " + rule + ", which names no path from the root")));
   }
 
   @Test

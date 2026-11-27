@@ -17,10 +17,11 @@ import java.util.Objects;
  * its recording: {@code claude-chat/<recording>.<line>.json} is line {@code <line>} of {@code
  * probe/claude/<recording>.jsonl} (the first probe), {@code probe2/claude/<recording>.jsonl} (the
  * second: always rules behind wrappers, the bypass mode, read-deny paths, a subagent's request and
- * Edits freely) or {@code probe3/claude/<recording>.jsonl} (the third: Asks first launched as
- * {@code manual}, and the refusals of the room lane's read-deny rules), its {@code msg} as it went
- * over the pipe, or for a recording's first line the {@code argv} it ran and the probe's {@code
- * note}.
+ * Edits freely), {@code probe3/claude/<recording>.jsonl} (the third: Asks first launched as {@code
+ * manual}, and the refusals of the room lane's read-deny rules) or {@code
+ * probe4/claude/<recording>.jsonl} (the fourth: what a read-deny rule stops, technique by
+ * technique), its {@code msg} as it went over the pipe, or for a recording's first line the {@code
+ * argv} it ran and the probe's {@code note}.
  */
 public final class Recorded {
 

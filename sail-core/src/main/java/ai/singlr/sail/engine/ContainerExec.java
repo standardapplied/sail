@@ -35,6 +35,21 @@ public final class ContainerExec {
   /** Where a container session opens by default — the engineer's checkout. */
   public static final String DEV_WORKSPACE = "/home/dev/workspace";
 
+  /** The dev user's git credential store, which git reads a forge token from. */
+  public static final String DEV_GIT_CREDENTIALS = DEV_HOME + "/.git-credentials";
+
+  /**
+   * Where Sail writes the dev user's next git credential store whole before it moves it over {@link
+   * #DEV_GIT_CREDENTIALS}: a give cut short leaves it.
+   */
+  public static final String DEV_GIT_CREDENTIALS_NEW = DEV_GIT_CREDENTIALS + ".sail-new";
+
+  /**
+   * Under a user's home, the file Sail hands {@code gh} its token in: one name, so a login cut
+   * short leaves a file the strip and a disown know to take.
+   */
+  public static final String GH_TOKEN_FILE = ".sail/gh-token";
+
   private ContainerExec() {}
 
   /**
