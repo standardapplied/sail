@@ -22,8 +22,8 @@ import java.util.Set;
 final class ClaudeCodeAlways {
 
   /**
-   * Each suggestion's type with every field it was recorded with (02b): a suggestion with any
-   * other field is not said, since a field Sail does not know may change what is granted.
+   * Each suggestion's type with every field it was recorded with (02b): a suggestion with any other
+   * field is not said, since a field Sail does not know may change what is granted.
    */
   private static final Map<String, Set<String>> FIELDS =
       Map.of(
@@ -134,8 +134,8 @@ final class ClaudeCodeAlways {
   /**
    * A Bash rule in plain words, as Claude Code's permission rules read: one with no {@code *}
    * allows that exact command; one whose only {@code *} ends it (written {@code " *"}, {@code ":*"}
-   * or {@code "*"}) allows every command that starts with what comes before. A compound command
-   * is not said: Claude Code matches each of its commands alone, so it may never match again.
+   * or {@code "*"}) allows every command that starts with what comes before. A compound command is
+   * not said: Claude Code matches each of its commands alone, so it may never match again.
    */
   private static Optional<String> command(Object rule) {
     var said = rule instanceof Map<?, ?> map ? map : Map.of();
@@ -158,8 +158,8 @@ final class ClaudeCodeAlways {
 
   /**
    * {@code text} between backticks, so nothing in it reads as the sentence's own words; empty for
-   * what cannot be quoted so: a blank, a backtick that would end the quote, a character that is
-   * not drawn as itself (a control or format character, such as a line break or a right-to-left
+   * what cannot be quoted so: a blank, a backtick that would end the quote, a character that is not
+   * drawn as itself (a control or format character, such as a line break or a right-to-left
    * override, or a line or paragraph separator), or a {@code ..} that climbs out of a folder.
    */
   private static Optional<String> quoted(Object text) {
