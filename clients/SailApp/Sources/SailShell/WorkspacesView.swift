@@ -941,10 +941,13 @@ public final class WorkspacesView: NSView {
             return
         }
         cardSaid = [said.title, said.body].filter { !$0.isEmpty }
-        let first = SailButton("Try Again", kind: .primary, look: look, target: self, action: #selector(askAgain(_:)))
-        first.shortcut("r", modifiers: .command, mono: mono)
-        tryAgain = first
-        let actions = [first, SailButton("Open Account", kind: .quiet, look: look, target: self, action: #selector(openAccount(_:)))]
+        var actions = [SailButton("Open Account", kind: .quiet, look: look, target: self, action: #selector(openAccount(_:)))]
+        if said.action != nil {
+            let first = SailButton("Try Again", kind: .primary, look: look, target: self, action: #selector(askAgain(_:)))
+            first.shortcut("r", modifiers: .command, mono: mono)
+            tryAgain = first
+            actions.insert(first, at: 0)
+        }
         let line = triedAt.map { "last tried " + Self.clock.string(from: $0) }
         let empty = EmptyState(icon: .cloudOff, title: said.title, body: said.body, actions: actions, line: line, look: look, titleFont: titleFont, mono: mono)
         empty.translatesAutoresizingMaskIntoConstraints = false

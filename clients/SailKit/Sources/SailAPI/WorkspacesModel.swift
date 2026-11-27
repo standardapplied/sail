@@ -85,6 +85,8 @@ public struct WorkspacesModel: Sendable {
         /// What the panel says when it lists no project: none open to the person, or, never listed,
         /// that the control plane could not be asked.
         public let emptyLine: String?
+        /// Never listed, for a failure that asking again can mend: Try Again under that line.
+        public let tryAgain: Bool
         /// What is shown is the last listed, its refresh having failed: the panel is drawn dimmed.
         public let stale: Bool
         /// Create Project is offered beside the projects listed: wherever the main area does not
@@ -232,7 +234,8 @@ public struct WorkspacesModel: Sendable {
         public let title: String
         public let body: String
         public let line: String?
-        public let action: EmptyAction
+        /// Nil when nothing a person can press would mend it.
+        public let action: EmptyAction?
         /// Something is missing rather than empty: the tile is dashed.
         public let missing: Bool
     }
@@ -259,11 +262,10 @@ public struct WorkspacesModel: Sendable {
             self.tryAgain = tryAgain
         }
 
-        /// A list titled `title` that could not be had, said as `error` is at `place`: Try Again,
-        /// but not for an ended sign-in, which only signing in again mends (the welcome comes by
-        /// itself).
+        /// A list titled `title` that could not be had, said as `error` is at `place`, with Try
+        /// Again when asking again can mend it.
         static func failed(_ title: String, _ error: SailError, at place: String) -> Notice {
-            Notice(tone: .error, title: title, line: error.said(at: place), tryAgain: error != .signIn(.ended))
+            Notice(tone: .error, title: title, line: error.said(at: place), tryAgain: WorkspacesModel.asksAgain(after: error))
         }
     }
 
@@ -868,6 +870,7 @@ public struct WorkspacesModel: Sendable {
         return Panel(
             projects: (projects ?? []).map { Project(name: $0.name, mark: Self.mark($0.template), expanded: expanded.contains($0.name), holds: expanded.contains($0.name) ? nest($0.name) : nil) },
             chosen: thisMacChosen ? Self.thisMac : chosen, chosenRow: panelRow, controlPlane: person.named, who: who, listed: projects != nil, emptyLine: emptyLine,
+            tryAgain: projects == nil && projectsFailure.map(Self.asksAgain) == true,
             stale: projects != nil && (projectsFailure != nil || shownFailed),
             creates: person.creates && projects != nil && (projects?.isEmpty == false || thisMacChosen)
         )
@@ -939,8 +942,14 @@ public struct WorkspacesModel: Sendable {
             title: unreached ? "Sail can’t reach the control plane" : "Sail can’t list your projects",
             body: (unreached && !person.controlPlane.isEmpty ? "\(person.controlPlane) did not answer." : error.said(at: person.controlPlane)) + network
                 + " Your terminals on this Mac keep working; your workspaces come back when the control plane answers.",
-            line: nil, action: .checkAgain, missing: false
+            line: nil, action: Self.asksAgain(after: error) ? .checkAgain : nil, missing: false
         )
+    }
+
+    /// Whether asking again can mend `error`, so Try Again is offered: every failure but an ended
+    /// sign-in, which only signing in again mends (the welcome comes by itself).
+    static func asksAgain(after error: SailError) -> Bool {
+        error != .signIn(.ended)
     }
 
     /// Why New Workspace is not offered in `project`; nil when it is.

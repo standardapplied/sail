@@ -58,10 +58,8 @@ final class Told: Sendable {
         await view.projectsAsked?.value
         #expect(Self.sailsOwn(view.text) && view.text.contains("Your sign-in ended."), "\(view.text)")
         #expect(told.times == 1)
-        if listedBefore {
-            let offered = ReattachTests.buttons(view).filter { $0.title == "Try Again" && !$0.isHiddenOrHasHiddenAncestor }
-            #expect(offered.isEmpty, "an ended sign-in's banner offers Try Again")
-        }
+        let offered = ReattachTests.buttons(view).filter { $0.title == "Try Again" && !$0.isHiddenOrHasHiddenAncestor }
+        #expect(offered.isEmpty, "an ended sign-in's \(listedBefore ? "banner" : "card") offers Try Again")
     }
 
     @Test func aProjectsWorkspacesListingSaysTheEndInSailsWords() async throws {

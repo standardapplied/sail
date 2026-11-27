@@ -115,10 +115,18 @@ actor AnsweringAll: Transport {
         #expect(refusal.reason == .ended && refusal.lines == ["Your sign-in to https://sail.standardapplied.com has ended.", "Sign in again with your passkey."])
     }
 
-    /// A list that could not be had for an ended sign-in offers no Try Again, which cannot mend it
-    /// (the welcome comes by itself); for any other failure it does.
-    @Test func anEndedSignInsBannerOffersNoTryAgain() throws {
+    /// A list that could not be had for an ended sign-in offers no Try Again anywhere, which cannot
+    /// mend it (the welcome comes by itself): not the first listing's card nor the panel under it,
+    /// nor a listing's banner; for any other failure each does.
+    @Test func anEndedSignInOffersNoTryAgain() throws {
         for (error, again) in [(SailError.signIn(.ended), false), (.unreachable("lost"), true)] {
+            var first = WorkspacesModel(person: WorkspacesModelTests.ana)
+            first.projectsListed(.failure(error), request: first.askingProjects())
+            guard case let .unreachable(card) = first.screen else {
+                Issue.record("no card: \(first.screen)")
+                continue
+            }
+            #expect(card.action == (again ? .checkAgain : nil) && first.panel.tryAgain == again, "\(error): \(card), the panel's \(first.panel.tryAgain)")
             var model = WorkspacesModelTests.listed(WorkspacesModelTests.ana)
             model.projectsListed(.failure(error), request: model.askingProjects())
             let projects = try #require(WorkspacesModelTests.page(model)?.banner)
