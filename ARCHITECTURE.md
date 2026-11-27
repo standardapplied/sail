@@ -2289,9 +2289,18 @@ harness in `Harnesses.all()`.
 | `SessionEnd` | none | `SESSION_ENDED` |
 
 The file also carries `includeCoAuthoredBy: false` and the `permissions.deny` read rules
-(`ClaudeCode.readDenyRules`, the one list): the box credential, `~/.ssh`, `~/.git-credentials`,
-`~/.config/gh`, a run's `launch.env` and a session's login file under `~/.sail/sessions`, each
-an absolute path written `Read(//…)`. A live member runs under a second file,
+(`ClaudeCode.readDenyRules`, the one list): the box credential, `~/.ssh` (which holds no private key, only the
+owner's public keys in `authorized_keys`; its rule costs nothing), `~/.git-credentials`
+and the `~/.git-credentials.sail-new` Sail writes before moving it in, `~/.config/gh` and the
+`~/.sail/gh-token` Sail hands `gh` its token in, a run's `launch.env` and a session's login file
+under `~/.sail/sessions`, each an absolute path written `Read(//…)` (the git store, its
+`.sail-new` and the `gh` token file are named by `ContainerExec`'s constants, the ones their
+writers and the strip use). The harness's own stored
+login (`Harness.storedLogins`: Claude Code's `~/.claude/.credentials.json`, `~/.claude.json` and
+`~/.claude/backups`, Codex's `~/.codex/auth.json`) is not in the list, and an agent can read it;
+closing that is the boundary spec `sail-an-agent-cannot-read-what-its-workspace-holds-in-trust`.
+Nor does a file's owner or mode keep any of these from an agent: its user has passwordless `sudo`.
+A live member runs under a second file,
 `~/.sail/claude-live.json`, with those two entries and no `hooks` key: sail reads a live process,
 so nothing in it reports back. The rules stop an agent's ordinary reads of those files; they are
 not a boundary. Recorded on Claude Code 2.1.332 for `~/.ssh` (`chat-probe3`, `chat-probe4`), in
@@ -2305,7 +2314,7 @@ hash-object` then `git cat-file`, a hard link into the workspace then Read, or a
 uses the file (`ssh-keygen -y -f`). In the full lane those run unasked, so a full-permission agent
 that sets out to read these files still can; in the asking lane a person is shown each such command
 before it runs, except the Read of a hard link, which runs unasked as any read inside the workspace
-does. Keeping a file from an agent that tries is the OS's to do, not a rule's. One leading `/` is
+does. Keeping a file from an agent that tries is the boundary spec's to do, not a rule's. One leading `/` is
 read from the settings file's own folder (`chat-probe2`), so the rules for `~/.ssh` and
 `~/.git-credentials` (since 0.24.0), `~/.config/gh` (0.47.0) and `launch.env` (0.69.0), all written
 so until this release, matched nothing: a full-permission agent read all four unasked, and a

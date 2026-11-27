@@ -21,7 +21,9 @@ class HarnessHooksGoldenTest {
       """
       {"includeCoAuthoredBy": false, \
       "permissions": {"deny": ["Read(//var/lib/sail/run/box.credential)", \
-      "Read(//home/dev/.ssh/**)", "Read(//home/dev/.git-credentials)", "Read(//home/dev/.config/gh/**)", \
+      "Read(//home/dev/.ssh/**)", "Read(//home/dev/.git-credentials)", \
+      "Read(//home/dev/.git-credentials.sail-new)", "Read(//home/dev/.config/gh/**)", \
+      "Read(//home/dev/.sail/gh-token)", \
       "Read(//home/dev/.sail/runs/**/launch.env)", "Read(//home/dev/.sail/sessions/**)"]}, \
       "hooks": {\
       "SessionStart": [{"matcher": "startup", "hooks": [\
@@ -60,7 +62,9 @@ class HarnessHooksGoldenTest {
       """
       {"includeCoAuthoredBy": false, \
       "permissions": {"deny": ["Read(//var/lib/sail/run/box.credential)", \
-      "Read(//home/dev/.ssh/**)", "Read(//home/dev/.git-credentials)", "Read(//home/dev/.config/gh/**)", \
+      "Read(//home/dev/.ssh/**)", "Read(//home/dev/.git-credentials)", \
+      "Read(//home/dev/.git-credentials.sail-new)", "Read(//home/dev/.config/gh/**)", \
+      "Read(//home/dev/.sail/gh-token)", \
       "Read(//home/dev/.sail/runs/**/launch.env)", "Read(//home/dev/.sail/sessions/**)"]}}""";
 
   @Test

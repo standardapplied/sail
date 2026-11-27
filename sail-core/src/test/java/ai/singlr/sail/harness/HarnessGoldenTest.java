@@ -386,7 +386,8 @@ class HarnessGoldenTest {
     assertEquals(
         "{includeCoAuthoredBy=false, permissions={deny=[Read(//var/lib/sail/run/box.credential),"
             + " Read(//home/dev/.ssh/**), Read(//home/dev/.git-credentials),"
-            + " Read(//home/dev/.config/gh/**), Read(//home/dev/.sail/runs/**/launch.env),"
+            + " Read(//home/dev/.git-credentials.sail-new), Read(//home/dev/.config/gh/**),"
+            + " Read(//home/dev/.sail/gh-token), Read(//home/dev/.sail/runs/**/launch.env),"
             + " Read(//home/dev/.sail/sessions/**)]}}",
         settings.entries().toString());
   }
@@ -394,10 +395,12 @@ class HarnessGoldenTest {
   /**
    * A rule's single leading {@code /} anchors it at the directory of the {@code --settings} file
    * that holds it, {@code //} at the root and {@code ~/} at the home (Claude Code's permission
-   * rules), so each deny names its file from the root or the home, never from {@code ~/.sail}.
+   * rules): probe 2 recorded the first denying nothing and the other two denying, so each deny
+   * names its file from the root, the one form probe 3 recorded in both lanes, never from {@code
+   * ~/.sail}.
    */
   @Test
-  void everyReadDenyNamesItsFileFromTheRootOrTheHome() {
+  void everyReadDenyNamesItsFileFromTheRoot() {
     @SuppressWarnings("unchecked")
     var denies =
         (List<String>)
@@ -405,10 +408,8 @@ class HarnessGoldenTest {
                     CLAUDE_CODE.liveSettings().orElseThrow().entries().get("permissions"))
                 .get("deny");
 
-    assertEquals(6, denies.size());
-    assertTrue(
-        denies.stream().allMatch(rule -> rule.startsWith("Read(//") || rule.startsWith("Read(~/")),
-        denies.toString());
+    assertEquals(8, denies.size());
+    assertTrue(denies.stream().allMatch(rule -> rule.startsWith("Read(//")), denies.toString());
     assertEquals(
         Map.of(
             "03a-read-deny-abs",
