@@ -53,9 +53,9 @@ public final class ChatWire {
    */
   public record Answered(
       String request,
-      LiveChat.Decision decision,
+      LiveReply.Decision decision,
       String message,
-      List<LiveChat.Answer> answers,
+      List<LiveReply.Answer> answers,
       String by)
       implements Own {
     public Answered {

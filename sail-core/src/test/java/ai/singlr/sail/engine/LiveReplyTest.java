@@ -8,9 +8,9 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.sail.engine.LiveChat.Answer;
-import ai.singlr.sail.engine.LiveChat.Decision;
-import ai.singlr.sail.engine.LiveChat.Reply;
+import ai.singlr.sail.engine.LiveReply.Answer;
+import ai.singlr.sail.engine.LiveReply.Decision;
+import ai.singlr.sail.engine.LiveReply.Reply;
 import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
@@ -28,7 +28,7 @@ import org.junit.jupiter.api.function.Executable;
  * 5), and every reply a request does not take refused in plain words.
  */
 @Timeout(value = 60, unit = TimeUnit.SECONDS)
-class LiveChatReplyTest {
+class LiveReplyTest {
 
   private static final HarnessChat CLAUDE_CODE = Harnesses.of("claude-code").chat().orElseThrow();
 
@@ -59,17 +59,17 @@ class LiveChatReplyTest {
   @Test
   void anAllowHandsBackTheRequestsOwnInput() {
     assertWritten(
-        "02b-relay-stdio", 17, LiveChat.reply(step("02b-relay-stdio", 16), ALLOW, CLAUDE_CODE));
+        "02b-relay-stdio", 17, LiveReply.reply(step("02b-relay-stdio", 16), ALLOW, CLAUDE_CODE));
     assertWritten(
         "03b-plan-exit-plan-mode",
         59,
-        LiveChat.reply(step("03b-plan-exit-plan-mode", 58), ALLOW, CLAUDE_CODE));
+        LiveReply.reply(step("03b-plan-exit-plan-mode", 58), ALLOW, CLAUDE_CODE));
   }
 
   @Test
   void anAlwaysHandsBackTheRequestsOwnSuggestionsAsTheyCame() {
     assertWritten(
-        "02b-relay-stdio", 100, LiveChat.reply(step("02b-relay-stdio", 99), ALWAYS, CLAUDE_CODE));
+        "02b-relay-stdio", 100, LiveReply.reply(step("02b-relay-stdio", 99), ALWAYS, CLAUDE_CODE));
   }
 
   @Test
@@ -78,7 +78,7 @@ class LiveChatReplyTest {
 
     assertEquals(
         "Claude Code offered no way to allow this always; allow it once instead.",
-        refused(() -> LiveChat.reply(unsaid, ALWAYS, CLAUDE_CODE)));
+        refused(() -> LiveReply.reply(unsaid, ALWAYS, CLAUDE_CODE)));
   }
 
   @Test
@@ -88,21 +88,21 @@ class LiveChatReplyTest {
         new Reply(Decision.DENY, "  I would rather not choose a color today.  ", List.of());
 
     assertWritten(
-        "05-answer-twice", 17, LiveChat.reply(step("05-answer-twice", 16), denied, CLAUDE_CODE));
+        "05-answer-twice", 17, LiveReply.reply(step("05-answer-twice", 16), denied, CLAUDE_CODE));
     assertWritten(
         "03-question-denied-with-words",
         22,
-        LiveChat.reply(step("03-question-denied-with-words", 21), padded, CLAUDE_CODE));
+        LiveReply.reply(step("03-question-denied-with-words", 21), padded, CLAUDE_CODE));
     assertWritten(
         "03b-plan-exit-plan-mode",
         29,
-        LiveChat.reply(
+        LiveReply.reply(
             step("03b-plan-exit-plan-mode", 28),
             new Reply(Decision.DENY, "Change the plan: write the word bye instead.", List.of()),
             CLAUDE_CODE));
     assertEquals(
-        LiveChat.deny("bda0b4cf-c4f6-4219-bd84-0f0617292889", LiveChat.NOT_ALLOWED),
-        LiveChat.reply(step("05-answer-twice", 16), DENY, CLAUDE_CODE));
+        LiveChat.deny("bda0b4cf-c4f6-4219-bd84-0f0617292889", LiveReply.NOT_ALLOWED),
+        LiveReply.reply(step("05-answer-twice", 16), DENY, CLAUDE_CODE));
   }
 
   @Test
@@ -125,7 +125,7 @@ class LiveChatReplyTest {
     assertWritten(
         "02-question-multi-select-and-own-words",
         34,
-        LiveChat.reply(
+        LiveReply.reply(
             asked,
             answer(
                 new Answer("Which size?", List.of(), "teal, but only on weekends"),
@@ -134,7 +134,7 @@ class LiveChatReplyTest {
     assertWritten(
         "03a-ask-user-question",
         22,
-        LiveChat.reply(
+        LiveReply.reply(
             step("03a-ask-user-question", 21),
             answer(chosen("Which color?", "Blue")),
             CLAUDE_CODE));
@@ -147,12 +147,12 @@ class LiveChatReplyTest {
 
     assertEquals(
         "Answer every question this asks, each named by its exact text.",
-        refused(() -> LiveChat.reply(asked, answer(size), CLAUDE_CODE)));
+        refused(() -> LiveReply.reply(asked, answer(size), CLAUDE_CODE)));
     assertEquals(
         "A question answered is not one this asks; name each by its exact text.",
         refused(
             () ->
-                LiveChat.reply(
+                LiveReply.reply(
                     asked,
                     answer(size, chosen("Which colors?", "Red"), chosen("Which colour?", "Red")),
                     CLAUDE_CODE)));
@@ -160,7 +160,7 @@ class LiveChatReplyTest {
         "Each question is answered once.",
         refused(
             () ->
-                LiveChat.reply(
+                LiveReply.reply(
                     asked,
                     answer(size, chosen("Which colors?", "Red"), chosen("Which colors?", "Blue")),
                     CLAUDE_CODE)));
@@ -171,18 +171,19 @@ class LiveChatReplyTest {
         notAChoice,
         refused(
             () ->
-                LiveChat.reply(asked, answer(size, chosen("Which colors?", "Teal")), CLAUDE_CODE)));
+                LiveReply.reply(
+                    asked, answer(size, chosen("Which colors?", "Teal")), CLAUDE_CODE)));
     assertEquals(
         notAChoice,
         refused(
             () ->
-                LiveChat.reply(
+                LiveReply.reply(
                     asked, answer(size, chosen("Which colors?", "Red", "Red")), CLAUDE_CODE)));
     assertEquals(
         "This question takes one choice.",
         refused(
             () ->
-                LiveChat.reply(
+                LiveReply.reply(
                     asked,
                     answer(chosen("Which size?", "Small", "Large"), chosen("Which colors?", "Red")),
                     CLAUDE_CODE)));
@@ -210,11 +211,11 @@ class LiveChatReplyTest {
             + " alone.",
         refused(
             () ->
-                LiveChat.reply(
+                LiveReply.reply(
                     asked, answer(chosen("Which?", "Red, Blue", "Green")), CLAUDE_CODE)));
     assertEquals(
         LiveChat.answer("q1", Map.of(), Map.of("Which?", "Red, Blue")),
-        LiveChat.reply(asked, answer(chosen("Which?", "Red, Blue")), CLAUDE_CODE));
+        LiveReply.reply(asked, answer(chosen("Which?", "Red, Blue")), CLAUDE_CODE));
   }
 
   @Test
@@ -227,18 +228,19 @@ class LiveChatReplyTest {
     var toQuestion = "Claude Code asks a question: answer it, or deny it.";
     var toPlan = "Claude Code asks to approve its plan: allow it, or deny it with what to change.";
 
-    assertEquals(toPermission, refused(() -> LiveChat.reply(permission, answered, CLAUDE_CODE)));
-    assertEquals(toQuestion, refused(() -> LiveChat.reply(question, ALLOW, CLAUDE_CODE)));
-    assertEquals(toQuestion, refused(() -> LiveChat.reply(question, ALWAYS, CLAUDE_CODE)));
-    assertEquals(toPlan, refused(() -> LiveChat.reply(plan, ALWAYS, CLAUDE_CODE)));
-    assertEquals(toPlan, refused(() -> LiveChat.reply(plan, answered, CLAUDE_CODE)));
+    assertEquals(toPermission, refused(() -> LiveReply.reply(permission, answered, CLAUDE_CODE)));
+    assertEquals(toQuestion, refused(() -> LiveReply.reply(question, ALLOW, CLAUDE_CODE)));
+    assertEquals(toQuestion, refused(() -> LiveReply.reply(question, ALWAYS, CLAUDE_CODE)));
+    assertEquals(toPlan, refused(() -> LiveReply.reply(plan, ALWAYS, CLAUDE_CODE)));
+    assertEquals(toPlan, refused(() -> LiveReply.reply(plan, answered, CLAUDE_CODE)));
   }
 
   @Test
   void onlyARequestAPersonWasShownWholeIsAnswered() {
     var unreadable = new Step.Unreadable("r1", true);
 
-    assertThrows(IllegalStateException.class, () -> LiveChat.reply(unreadable, ALLOW, CLAUDE_CODE));
+    assertThrows(
+        IllegalStateException.class, () -> LiveReply.reply(unreadable, ALLOW, CLAUDE_CODE));
   }
 
   @Test

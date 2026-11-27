@@ -235,7 +235,7 @@
     "allRecordComponents": true
   },
   {
-    "name": "ai.singlr.sail.engine.LiveChat$Answer",
+    "name": "ai.singlr.sail.engine.LiveReply$Answer",
     "allDeclaredMethods": true,
     "allRecordComponents": true
   },

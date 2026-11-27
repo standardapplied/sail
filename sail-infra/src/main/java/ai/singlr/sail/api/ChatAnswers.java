@@ -6,7 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.ChatWire;
-import ai.singlr.sail.engine.LiveChat;
+import ai.singlr.sail.engine.LiveReply;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
@@ -147,7 +147,7 @@ final class ChatAnswers {
    *
    * @throws IllegalArgumentException for a field it does not name, or one not of its shape
    */
-  private static LiveChat.Reply reply(Map<String, Object> body) {
+  private static LiveReply.Reply reply(Map<String, Object> body) {
     if (!ANSWER.containsAll(body.keySet())) {
       throw new IllegalArgumentException("An answer names only decision, message and answers.");
     }
@@ -158,12 +158,12 @@ final class ChatAnswers {
     if (message != null && !(message instanceof String)) {
       throw new IllegalArgumentException("message is the person's own words, as text.");
     }
-    return new LiveChat.Reply(
-        LiveChat.Decision.named(decision), (String) message, answers(body.get("answers")));
+    return new LiveReply.Reply(
+        LiveReply.Decision.named(decision), (String) message, answers(body.get("answers")));
   }
 
   /** Each question's answer, as {@code answers} names them, in its order. */
-  private static List<LiveChat.Answer> answers(Object answers) {
+  private static List<LiveReply.Answer> answers(Object answers) {
     if (answers == null) {
       return List.of();
     }
@@ -171,13 +171,13 @@ final class ChatAnswers {
       throw new IllegalArgumentException(
           "answers name each question by its text, each with what was chosen or said.");
     }
-    var given = new ArrayList<LiveChat.Answer>();
+    var given = new ArrayList<LiveReply.Answer>();
     named.forEach((question, answer) -> given.add(answer((String) question, answer)));
     return given;
   }
 
   /** The answer {@code answer} gives {@code question}: its labels chosen, or own words. */
-  private static LiveChat.Answer answer(String question, Object answer) {
+  private static LiveReply.Answer answer(String question, Object answer) {
     if (!(answer instanceof Map<?, ?> one)
         || !ONE_ANSWER.containsAll(one.keySet())
         || !(one.get("own") == null || one.get("own") instanceof String)
@@ -189,7 +189,7 @@ final class ChatAnswers {
     if (!chosen.stream().allMatch(String.class::isInstance)) {
       throw new IllegalArgumentException("Each label chosen is text, as its choice names it.");
     }
-    return new LiveChat.Answer(
+    return new LiveReply.Answer(
         question, chosen.stream().map(String.class::cast).toList(), (String) one.get("own"));
   }
 

@@ -10,6 +10,7 @@ import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ChatWire;
 import ai.singlr.sail.engine.LiveChat;
+import ai.singlr.sail.engine.LiveReply;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.harness.HarnessChat;
@@ -258,7 +259,7 @@ final class ChatProcess {
    *     the turn
    * @throws IllegalArgumentException for a reply the request does not take, which leaves it held
    */
-  synchronized long answer(String id, LiveChat.Reply reply, String by, ApiException withdrawn) {
+  synchronized long answer(String id, LiveReply.Reply reply, String by, ApiException withdrawn) {
     var step = asked.get(id);
     if (step == null) {
       return 0;
@@ -266,7 +267,7 @@ final class ChatProcess {
     if (!writable() || stopAsked != null) {
       throw withdrawn;
     }
-    var line = LiveChat.reply(step, reply, chat);
+    var line = LiveReply.reply(step, reply, chat);
     asked.remove(id);
     var seq =
         log.log(new ChatWire.Answered(id, reply.decision(), reply.message(), reply.answers(), by));
