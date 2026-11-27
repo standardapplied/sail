@@ -80,8 +80,6 @@ public final class WorkspacesView: NSView {
     var onThisMacShown: @MainActor () -> Void = {}
     /// Open Account, from the card that says the control plane is out of reach.
     var onSignIn: @MainActor () -> Void = {}
-    /// The control plane found the session ended: the check that says so is asked.
-    var onSessionEnded: @MainActor () -> Void = {}
     /// The clipboard a login's sheet reads and clears: the person's; a test's own.
     var pasteboard = NSPasteboard.general
     /// Its look, taken at once while shown and on being shown while hidden: a look switched under
@@ -135,9 +133,9 @@ public final class WorkspacesView: NSView {
     /// How the reads of a template being built wait between them: a test's own.
     var pause: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     /// The project whose template its page reads (nil: none), whether those reads ended, and the
-    /// last reads started, cancelled before others start.
+    /// last reads started, cancelled before others start: what a test awaits.
     private var reading: (project: String?, ended: Bool) = (nil, true)
-    private var lastReads: Task<Void, Never>?
+    package private(set) var lastReads: Task<Void, Never>?
     /// The reads started: an answer to reads since replaced is dropped.
     private var reads = 0
     /// The window is off screen (closed, in the Dock, the app hidden): nothing is read, nothing ticks.
@@ -561,22 +559,20 @@ public final class WorkspacesView: NSView {
 
     /// Project `name`'s template's build asked once while it is unanswered, which the server joins
     /// when one is under way: its answer draws the build card, which then reads the template; a
-    /// refusal, or no answer, is said on the card; an ended session is handed to the check that says it.
+    /// refusal, or no answer, is said on the card.
     private func build(_ name: String, era: Int) async {
         guard let client, model.asksBuild(name) else { return }
         render()
         let built = await Self.result { () async throws(SailError) in try await client.send(.buildTemplate(project: name)) }
         guard era == self.era else { return }
-        let after = model.built(name, built)
+        model.built(name, built)
         render()
-        if after == .sessionEnded { onSessionEnded() }
     }
 
     /// Reads the template of the project whose page shows its build: once each time that page is
     /// shown, then every 2 s while the build runs or a read got no answer, one read at a time.
     /// Leaving the page (another project, This Mac, another section, the window off screen), signing
-    /// out, the build ending or a refusal stops the reads; a project gone lists the projects again,
-    /// and an ended session is handed to the check that says it.
+    /// out, the build ending or a refusal stops the reads; a project gone lists the projects again.
     private func readTemplate() {
         let wanted = door == .signedIn && !isHiddenOrHasHiddenAncestor && !away ? model.templateShown : nil
         if wanted == reading.project, !reading.ended || wanted.map(model.readsAgain) != true { return }
@@ -590,13 +586,9 @@ public final class WorkspacesView: NSView {
         lastReads = Task { [weak self] in
             await client.readTemplate(project, sleep: pause) { answer in
                 guard let self, era == self.era, self.reads == read else { return false }
-                let after = self.model.templateRead(project, answer)
+                let listsProjects = self.model.templateRead(project, answer)
                 self.render()
-                switch after {
-                case .listProjects?: self.askProjects()
-                case .sessionEnded?: self.onSessionEnded()
-                case nil: break
-                }
+                if listsProjects { self.askProjects() }
                 return self.model.readsAgain(project)
             }
             if let self, reads == read { reading.ended = true }
@@ -949,10 +941,13 @@ public final class WorkspacesView: NSView {
             return
         }
         cardSaid = [said.title, said.body].filter { !$0.isEmpty }
-        let first = SailButton("Try Again", kind: .primary, look: look, target: self, action: #selector(askAgain(_:)))
-        first.shortcut("r", modifiers: .command, mono: mono)
-        tryAgain = first
-        let actions = [first, SailButton("Open Account", kind: .quiet, look: look, target: self, action: #selector(openAccount(_:)))]
+        var actions = [SailButton("Open Account", kind: .quiet, look: look, target: self, action: #selector(openAccount(_:)))]
+        if said.action != nil {
+            let first = SailButton("Try Again", kind: .primary, look: look, target: self, action: #selector(askAgain(_:)))
+            first.shortcut("r", modifiers: .command, mono: mono)
+            tryAgain = first
+            actions.insert(first, at: 0)
+        }
         let line = triedAt.map { "last tried " + Self.clock.string(from: $0) }
         let empty = EmptyState(icon: .cloudOff, title: said.title, body: said.body, actions: actions, line: line, look: look, titleFont: titleFont, mono: mono)
         empty.translatesAutoresizingMaskIntoConstraints = false

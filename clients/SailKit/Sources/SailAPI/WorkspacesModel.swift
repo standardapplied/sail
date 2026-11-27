@@ -85,6 +85,8 @@ public struct WorkspacesModel: Sendable {
         /// What the panel says when it lists no project: none open to the person, or, never listed,
         /// that the control plane could not be asked.
         public let emptyLine: String?
+        /// Never listed, for a failure that asking again can mend: Try Again under that line.
+        public let tryAgain: Bool
         /// What is shown is the last listed, its refresh having failed: the panel is drawn dimmed.
         public let stale: Bool
         /// Create Project is offered beside the projects listed: wherever the main area does not
@@ -232,7 +234,8 @@ public struct WorkspacesModel: Sendable {
         public let title: String
         public let body: String
         public let line: String?
-        public let action: EmptyAction
+        /// Nil when nothing a person can press would mend it.
+        public let action: EmptyAction?
         /// Something is missing rather than empty: the tile is dashed.
         public let missing: Bool
     }
@@ -257,6 +260,12 @@ public struct WorkspacesModel: Sendable {
             self.title = title
             self.line = line
             self.tryAgain = tryAgain
+        }
+
+        /// A list titled `title` that could not be had, said as `error` is at `place`, with Try
+        /// Again when asking again can mend it.
+        static func failed(_ title: String, _ error: SailError, at place: String) -> Notice {
+            Notice(tone: .error, title: title, line: error.said(at: place), tryAgain: error.mayTryAgain)
         }
     }
 
@@ -379,7 +388,7 @@ public struct WorkspacesModel: Sendable {
     /// Every project's workspaces as listed, the panel's and the pages' alike.
     private var listing = WorkspaceListing()
     private var listedAt: [String: Date] = [:]
-    private var listFailures: [String: String] = [:]
+    private var listFailures: [String: SailError] = [:]
     /// The projects open in the panel: the person's arrangement on this Mac, never sent anywhere.
     public private(set) var expanded: Set<String>
     private var creates: [String: CreateLine] = [:]
@@ -521,7 +530,7 @@ public struct WorkspacesModel: Sendable {
             }
         case let .failure(error):
             guard let project = listing.project(of: request) else { return }
-            listFailures[project] = error.said(at: person.controlPlane)
+            listFailures[project] = error
         }
     }
 
@@ -621,39 +630,31 @@ public struct WorkspacesModel: Sendable {
     /// The build of project `name`'s template answered: started or joined, its card drawn from the
     /// answer; refused, said on its card in the server's words and what to do; not answered, its
     /// template read to learn whether it started, said on its card only if none did. A session found
-    /// ended is said on none: it is handed to the check that says it, as a read's is.
-    @discardableResult
-    public mutating func built(_ name: String, _ answer: Result<TemplateStatus, SailError>) -> AfterRead? {
+    /// ended is said on none: the welcome says it, as for a read.
+    public mutating func built(_ name: String, _ answer: Result<TemplateStatus, SailError>) {
         buildsAsked.remove(name)
         switch answer {
         case .success:
             buildSaid[name] = nil
             buildUnanswered.remove(name)
             templateRead(name, answer)
-        case let .failure(error) where AccountRefusal.ends(error):
+        case .failure(.signIn):
             buildSaid[name] = nil
             buildUnanswered.remove(name)
-            return .sessionEnded
         case let .failure(error):
             buildSaid[name] = lines(error)
             if case .refused = error { buildUnanswered.remove(name) } else { buildUnanswered.insert(name) }
         }
-        return nil
-    }
-
-    /// What a template read or a build asks of the page beyond its card: the projects listed again,
-    /// since the project is gone; or the session's end handed to the check that says it.
-    public enum AfterRead: Equatable, Sendable {
-        case listProjects, sessionEnded
     }
 
     /// Takes project `name`'s template as read: its card is drawn from it, and its pill and New
     /// Workspace follow its state at once. A read that got no answer keeps the card as read before,
-    /// saying so; one the server refused says its words on the card and stops the reads, and says
-    /// what else follows.
+    /// saying so; one the server refused says its words on the card and stops the reads, as one that
+    /// found the session ended does, saying nothing. Whether the projects are to be listed again:
+    /// the project is gone.
     @discardableResult
-    public mutating func templateRead(_ name: String, _ answer: Result<TemplateStatus, SailError>) -> AfterRead? {
-        guard let index = projects?.firstIndex(where: { $0.name == name }), let project = projects?[index] else { return nil }
+    public mutating func templateRead(_ name: String, _ answer: Result<TemplateStatus, SailError>) -> Bool {
+        guard let index = projects?.firstIndex(where: { $0.name == name }), let project = projects?[index] else { return false }
         switch answer {
         case let .success(status):
             templates[name] = status
@@ -663,19 +664,19 @@ public struct WorkspacesModel: Sendable {
             buildUnanswered.remove(name)
             if [.known(.building), .known(.ready)].contains(status.state) { buildSaid[name] = nil }
             projects?[index] = ProjectSummary(name: name, containerStatus: project.containerStatus, template: status.state)
-            return nil
-        case let .failure(error) where AccountRefusal.ends(error):
+            return false
+        case .failure(.signIn):
             templateMissed[name] = nil
             templateRefused[name] = []
-            return .sessionEnded
+            return false
         case let .failure(.refused(refusal)):
             templateMissed[name] = nil
             templateRefused[name] = lines(.refused(refusal))
-            return refusal.code == .known(.projectNotInCatalog) ? .listProjects : nil
+            return refusal.code == .known(.projectNotInCatalog)
         case let .failure(error):
             templateMissed[name] = error.said(at: person.controlPlane)
             templateRefused[name] = nil
-            return nil
+            return false
         }
     }
 
@@ -869,6 +870,7 @@ public struct WorkspacesModel: Sendable {
         return Panel(
             projects: (projects ?? []).map { Project(name: $0.name, mark: Self.mark($0.template), expanded: expanded.contains($0.name), holds: expanded.contains($0.name) ? nest($0.name) : nil) },
             chosen: thisMacChosen ? Self.thisMac : chosen, chosenRow: panelRow, controlPlane: person.named, who: who, listed: projects != nil, emptyLine: emptyLine,
+            tryAgain: projects == nil && projectsFailure?.mayTryAgain == true,
             stale: projects != nil && (projectsFailure != nil || shownFailed),
             creates: person.creates && projects != nil && (projects?.isEmpty == false || thisMacChosen)
         )
@@ -927,7 +929,7 @@ public struct WorkspacesModel: Sendable {
 
     /// The projects' refresh that failed while projects are shown, said over the page.
     private var projectsBanner: Notice? {
-        projectsFailure.map { Notice(tone: .error, title: "Couldn’t list your projects", line: $0.said(at: person.controlPlane), tryAgain: true) }
+        projectsFailure.map { Notice.failed("Couldn’t list your projects", $0, at: person.controlPlane) }
     }
 
     /// The card when no project could be listed: what is true, in Sail's words with the address and
@@ -940,7 +942,7 @@ public struct WorkspacesModel: Sendable {
             title: unreached ? "Sail can’t reach the control plane" : "Sail can’t list your projects",
             body: (unreached && !person.controlPlane.isEmpty ? "\(person.controlPlane) did not answer." : error.said(at: person.controlPlane)) + network
                 + " Your terminals on this Mac keep working; your workspaces come back when the control plane answers.",
-            line: nil, action: .checkAgain, missing: false
+            line: nil, action: error.mayTryAgain ? .checkAgain : nil, missing: false
         )
     }
 
@@ -1030,7 +1032,7 @@ public struct WorkspacesModel: Sendable {
     /// says why it waits; only a project with none listed says what is missing in its place.
     private func page(_ project: ProjectSummary) -> Page {
         let name = project.name, listed = listing.rows[name] != nil, unready = Self.unready(project), listFailure = listFailures[name]
-        let banner = refused[name]?.notice ?? listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? unread(project) ?? projectsBanner
+        let banner = refused[name]?.notice ?? listFailure.map { Notice.failed("Couldn’t list \(name)’s workspaces", $0, at: person.controlPlane) } ?? unread(project) ?? projectsBanner
         let rows = WorkspaceList(project: name, workspaces: listing.rows[name] ?? []).rows(for: person.handle)
         if let unready, rows.isEmpty, listed, listFailure == nil {
             return Page(

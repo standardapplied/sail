@@ -224,7 +224,7 @@ final class Reached: Sendable {
         let (welcome, window) = try Self.shown(RecordedServer([]), defaults: Self.signedInBefore())
         defer { window.orderOut(nil) }
         let day = try #require(Calendar(identifier: .gregorian).date(from: DateComponents(timeZone: .current, year: 2026, month: 11, day: 25, hour: 12)))
-        welcome.checked(.failure(AccountRefusal(.refused(Refusal(code: .known(.invalidBearerToken), message: "Session expired.")), at: Self.plane, step: .asking)), endedOn: day)
+        welcome.checked(.failure(AccountRefusal(.signIn(.ended), at: Self.plane, step: .asking)), endedOn: day)
         welcome.layoutSubtreeIfNeeded()
         let banner = try #require(welcome.banner)
         #expect(banner.tone == .info && Self.visible(banner) && welcome.text.contains("Your sign-in ended on 25 November. Your sessions on the runner kept running."))

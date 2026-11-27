@@ -27,6 +27,9 @@ actor GoldenDesk: Transport {
     /// Each route as it is answered, after any hold: what the app has been told, in order.
     private(set) var answered: [String] = []
     private var holding: Set<String> = []
+    /// The server's refusal of every call asked with a session, while the session is ended, and
+    /// how many requests were asked before it ended.
+    private var ended: (refusal: HTTPResponse, asked: Int)?
     private var heldAnswers: [String: [CheckedContinuation<Void, Never>]] = [:]
 
     /// From now on `route` is answered only once ``release(_:)`` names it.
@@ -194,6 +197,17 @@ actor GoldenDesk: Transport {
         held["GET /v1/projects/\(project)/workspaces"] = .zero
     }
 
+    /// From now on every call asked with a session is refused as ended; false, answered again.
+    func endSession(_ ends: Bool) throws {
+        let refusal = try Exchange("refusal-invalid-bearer-token")
+        ended = ends ? (HTTPResponse(status: refusal.status, headers: refusal.headers, body: refusal.body), asked.count) : nil
+    }
+
+    /// How many times `route` was asked since the session last ended.
+    func askedSinceTheEnd(_ route: String) -> Int? {
+        ended.map { since in asked[since.asked...].count { $0.route == route } }
+    }
+
     /// From now on a proxy answers `route` with a 502 of its own; nil, nothing.
     func fail(_ route: String?, unreached: Bool = false) {
         failing = route
@@ -205,6 +219,7 @@ actor GoldenDesk: Transport {
         if let after = held[request.route], after > .zero { try? await Task.sleep(for: after) }
         if holding.contains(request.route) { await withCheckedContinuation { heldAnswers[request.route, default: []].append($0) } }
         defer { answered.append(request.route) }
+        if let ended, request.headers["Authorization"] != nil { return ended.refusal }
         guard request.route != failing else { throw unreached ? SailError.unreachable("Could not connect to the server.") : SailError.unexpected(route: request.route, status: 502) }
         if request.method == .get, request.path.hasSuffix("/sessions"), let door = Self.door {
             return HTTPResponse(status: 200, headers: [:], body: Self.encoded(door.listing))
@@ -478,6 +493,18 @@ extension Driver {
         if let route = step.proxyFails {
             await GoldenDesk.shared.fail(route.isEmpty ? nil : route)
             return (true, "")
+        }
+        if let ends = step.endSession {
+            do {
+                try await GoldenDesk.shared.endSession(ends)
+                return (true, "")
+            } catch {
+                return (false, "refusal-invalid-bearer-token: \(error)")
+            }
+        }
+        if let asked = step.askedSinceTheEnd, asked.count == 2, let times = Int(asked[1]) {
+            let since = await GoldenDesk.shared.askedSinceTheEnd(asked[0])
+            return (since == times, "\(asked[0]) asked \(since.map(String.init) ?? "with no session ended") times since the session ended")
         }
         if let count = step.doorLists {
             guard let door = GoldenDesk.door else { return (false, "the drive's runner door did not listen") }

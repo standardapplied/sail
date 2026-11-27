@@ -175,7 +175,7 @@ package final class LeftPanel: NSView {
         shown = panel
         let failed = !panel.listed && panel.emptyLine != nil
         loading(!panel.listed && !failed)
-        tryAgain.isHidden = !failed || panel.chosen != WorkspacesModel.thisMac
+        tryAgain.isHidden = !panel.tryAgain || panel.chosen != WorkspacesModel.thisMac
         createProject.isHidden = !panel.creates
         emptyLine.isHidden = panel.emptyLine == nil
         emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [
