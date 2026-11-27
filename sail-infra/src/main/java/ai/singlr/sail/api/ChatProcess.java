@@ -283,9 +283,6 @@ final class ChatProcess {
    */
   boolean end(Duration first, String why) {
     synchronized (this) {
-      if (over) {
-        return true;
-      }
       if (!ending) {
         ending = true;
         endReason = why;
