@@ -474,7 +474,7 @@
   {"name": "ls-storing-shown-no-suggestion-in-the-frame", "loginSheetIs": ["no suggestion window is showing"]},
   {"name": "ls-the-store-answers", "releaseAnswers": "PUT /v1/logins/claude-code/default"},
   {"name": "ls-the-sheet-goes", "loginSheetIs": ["closed"]},
-  {"name": "ls-the-panel-ready", "newSessionSays": ["Claude Code", "API key “default”", "Sign in", "API key “default”", "Stored Claude Code key “default”. Removed the key from the clipboard.", "Start Claude Code"]},
+  {"name": "ls-the-panel-ready", "newSessionSays": ["Claude Code", "API key “default”", "Sign in", "API key “default”", "Stored Claude Code key “default”. Clipboard cleared.", "Start Claude Code"]},
   {"name": "ls-no-login-said-no-more", "newSessionChosen": "Claude Code"},
   {"name": "ls-start-holds-the-keys", "newSessionPrimary": ["Start Claude Code", "on", "holds the keys"]},
   {"name": "ls-the-clipboard-cleared", "pasteboardHolds": ""},

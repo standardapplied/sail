@@ -263,7 +263,8 @@ import Testing
             sheet.answered(try Self.answer(each.answer), clipboard: each.now)
             guard case let .stored(_, cleared) = sheet.stage else { Issue.record("case \(index) not stored"); continue }
             #expect(cleared == each.clears, "case \(index): cleared \(cleared)")
-            #expect(sheet.stored == "Stored Claude Code key “default”." + (each.clears ? " Removed the key from the clipboard." : ""), "case \(index)")
+            #expect(sheet.stored == "Stored Claude Code key “default”." + (each.clears ? " Clipboard cleared." : ""), "case \(index)")
+            #expect(sheet.notUsed == "Start still takes your earlier key: store “default” again to switch." + (each.clears ? " Clipboard cleared." : ""), "case \(index)")
         }
         var refused = try Self.filled()
         _ = refused.store(Self.pasted, clipboard: Clipboard(count: 4, text: Self.pasted))

@@ -563,14 +563,20 @@ extension Driver {
         return nil
     }
 
+    /// What the window shows of `page` on screen, measured apart from the New session panel's own
+    /// measure, so the check checks it: the page's bounds, cut by the window's content.
+    static func shown(_ page: NSView, in window: NSWindow) -> NSRect {
+        window.convertToScreen(page.convert(page.bounds, to: nil)).intersection(window.convertToScreen(window.contentLayoutRect))
+    }
+
     /// Where the Workspaces section stands, every frame in window coordinates: the window's on
-    /// screen, the card's, the section's, the sidebar's, the page's and what shows of it (on screen,
-    /// as the New session panel measures it), the page's direction, the backing scale and the
-    /// panel's box while it is open.
+    /// screen, the card's, the section's, the sidebar's, the page's and what the window shows of it
+    /// (on screen, `shown`), the page's direction, the backing scale and the panel's box while it
+    /// is open.
     var workspacesLayout: String {
         let window = shell.window, pane = shell.workspaces, project = pane.project
         let frame = { (view: NSView?) in view.map { "\($0.convert($0.bounds, to: nil))" } ?? "none" }
-        let shows = NewSessionPanel.shows(project, in: window)
+        let shows = Self.shown(project, in: window)
         return "the window \(window.frame), the card \(frame(pane.superview)), the section \(frame(pane)), the sidebar "
             + (pane.panel.isHidden ? "hidden" : frame(pane.panel)) + ", the page \(frame(project)), what shows of it \(shows), "
             + (project.userInterfaceLayoutDirection == .rightToLeft ? "right to left" : "left to right") + ", scale \(window.backingScaleFactor), the box "
@@ -633,7 +639,7 @@ extension Driver {
             let project = pane.project
             let inPage = { () -> String? in
                 guard panel.isOpen, let window = project.window else { return "the panel is closed" }
-                let page = NewSessionPanel.shows(project, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5), box = panel.popover.frame
+                let page = Self.shown(project, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5), box = panel.popover.frame
                 guard page.contains(box) else { return "the box \(box) leaves the page less 8 pt \(page)" }
                 guard let chosen = panel.view.rows.first(where: \.chosen), panel.view.list.contentView.documentVisibleRect.insetBy(dx: -0.5, dy: -0.5).contains(chosen.frame) else { return "the chosen row is not whole in view" }
                 return nil

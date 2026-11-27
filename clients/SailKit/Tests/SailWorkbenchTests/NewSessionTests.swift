@@ -288,6 +288,15 @@ import Testing
         #expect(NewSessionWords.hint(.signIn, modes: false, typed: "op", fits: room(2)) == "")
     }
 
+    /// With nothing typed, a key that does not fit the foot goes whole from the end, never cut.
+    @Test func withNothingTypedAKeyThatDoesNotFitGoesWhole() {
+        let room = { (room: Int) in { (said: String) in said.count <= room } }
+        #expect(NewSessionWords.hint(.rows, modes: true, fits: room(100)) == "↑↓ choose · ⌘M mode")
+        #expect(NewSessionWords.hint(.rows, modes: true, fits: room(18)) == "↑↓ choose", "⌘M mode kept where it does not fit")
+        #expect(NewSessionWords.hint(.signIn, modes: true, fits: room(6)) == "", "⌘M mode kept where it does not fit")
+        #expect(NewSessionWords.hint(.rows, modes: false, fits: room(8)) == "")
+    }
+
     /// The Shell is a kind like any other: opened last, it is what the panel opens on; a harness
     /// started after it takes that back. The row's quick item, which names the last harness, opens
     /// at that harness all the same.

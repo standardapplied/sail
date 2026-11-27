@@ -286,11 +286,13 @@ public enum NewSessionWords {
     /// menu for it to open (`modes`), whichever of the panel's holds them; none while nothing of the
     /// panel holds them. What was typed is isolated, so right-to-left letters never reorder the
     /// keys, and it alone is cut, at its end, to the first words that `fits`; where not one letter of
-    /// it fits, it is left out and ⌫ is still named whole.
+    /// it fits, it is left out and ⌫ is still named whole. With nothing typed, the keys that do not
+    /// fit go whole from the end; a key is never cut.
     public static func hint(_ holder: Holder, modes: Bool, typed: String = "", fits: (String) -> Bool = { _ in true }) -> String {
         guard holder != .none else { return "" }
         let keys = typed.isEmpty ? (holder == .rows ? ["↑↓ choose"] : []) + (modes ? ["⌘M mode"] : []) : holder == .rows ? ["⌫ widen"] : []
-        let cuts = typed.isEmpty ? [] : [typed] + (1 ..< typed.count).reversed().map { String(typed.prefix($0)) + "…" }
+        guard !typed.isEmpty else { return (0 ... keys.count).reversed().map { keys.prefix($0).joined(separator: " · ") }.first(where: fits) ?? "" }
+        let cuts = [typed] + (1 ..< typed.count).reversed().map { String(typed.prefix($0)) + "…" }
         let said = cuts.map { (["“\u{2068}\($0)\u{2069}”"] + keys).joined(separator: " · ") }
         return said.first(where: fits) ?? keys.joined(separator: " · ")
     }

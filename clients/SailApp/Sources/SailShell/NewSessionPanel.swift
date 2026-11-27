@@ -74,7 +74,8 @@ package final class NewSessionPanel: NSObject {
     /// What it shows.
     package private(set) var content: NewSessionView.Content?
     package private(set) var workspace = ""
-    /// The quiet line over the foot until the panel closes: a key stored, or why none can be.
+    /// The quiet line in Sign in's place, a key stored or why none can be, while the kind and the way
+    /// in it was said for stay chosen (over the foot where nothing starts for the person).
     package private(set) var line: NewSessionView.Line?
     /// Sign in holds the keys (⇥), so Space and ↑ ↓ open its menu.
     package private(set) var signInFocused = false
@@ -172,7 +173,7 @@ package final class NewSessionPanel: NSObject {
     }
 
     /// What the route answers once a key of `harness` was stored, `harness` chosen with `memory`'s
-    /// way in for it, `line` said over the foot until the panel closes, the primary holding the keys;
+    /// way in for it, `line` said in its Sign in's place, the primary holding the keys;
     /// VoiceOver hears it ready on the key where the key is its way in, and hears `line` where the
     /// key is not `inUse`, as a sighted person reads it.
     func show(_ answer: Answer, memory: ModeMemory, stored line: String, harness: String, inUse: Bool) {
@@ -198,7 +199,8 @@ package final class NewSessionPanel: NSObject {
         NSAccessibility.post(element: view, notification: .announcementRequested, userInfo: [.announcement: words, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
-    /// `said` over the foot of what it shows now, until it closes; nil, none.
+    /// `said` in the chosen kind's Sign in place (over the foot where nothing starts for the
+    /// person), while that kind and its way in stay chosen; nil, none.
     func say(_ said: NewSessionView.Line?) {
         guard isOpen else { return }
         line = said
@@ -268,16 +270,16 @@ package final class NewSessionPanel: NSObject {
         case let (.choose(choice), .offered(panel)):
             var chosen = panel
             chosen.choose(choice)
-            self.content = .offered(chosen)
+            showing(chosen)
             signInFocused = false
         case let (.mode(mode), .offered(panel)):
             var chosen = panel
             chosen.choose(mode: mode)
-            self.content = .offered(chosen)
+            showing(chosen)
         case let (.way(way), .offered(panel)):
             var chosen = panel
             chosen.choose(way: way)
-            self.content = .offered(chosen)
+            showing(chosen)
         case let (.storeKey, .offered(panel)):
             guard case let .harness(harness) = panel.chosen, let offer = panel.offer(harness) else { return }
             return onStoreKey(offer)
@@ -292,6 +294,19 @@ package final class NewSessionPanel: NSObject {
             return
         }
         redraw()
+    }
+
+    /// `panel` shown; the line said for one kind and way in goes once another is chosen, so each
+    /// kind's own Sign in words show again.
+    private func showing(_ panel: NewSession) {
+        if case let .offered(shown) = content, Self.standing(shown) != Self.standing(panel) { line = nil }
+        content = .offered(panel)
+    }
+
+    /// The kind chosen and, for a harness, its way in.
+    private static func standing(_ panel: NewSession) -> (NewSession.Choice, Way?) {
+        guard case let .harness(harness) = panel.chosen else { return (panel.chosen, nil) }
+        return (panel.chosen, panel.way(of: harness))
     }
 
     /// The primary: the chosen harness started, or the Shell opened, the person's starts
@@ -330,7 +345,7 @@ package final class NewSessionPanel: NSObject {
             typed = panel.filter + words
         }
         if panel.narrow(to: typed) {
-            content = .offered(panel)
+            showing(panel)
             redraw()
         }
         return true
@@ -361,7 +376,7 @@ package final class NewSessionPanel: NSObject {
             guard case var .offered(panel) = content else { return true }
             let rows = panel.choices.count
             panel.move(by: [115: -rows, 119: rows, 125: 1, 126: -1][event.keyCode] ?? 0)
-            content = .offered(panel)
+            showing(panel)
             signInFocused = false
             redraw()
         case 36, 76:
@@ -429,7 +444,7 @@ final class NewSessionKeys: NSView {
 
 /// The panel's box, on the popover's surface with a strong hairline edge and 8 pt corners: its
 /// title, the stopped workspace's line, the kinds as equal rows, the chosen harness's options under
-/// its name, a key just stored said in one line, and the foot with the keys and the primary; or,
+/// its name, a key just stored said in Sign in's place, and the foot with the keys and the primary; or,
 /// where nothing starts for the person, why, and one button. The rows scroll where the box would
 /// be taller than it may be, the chosen one kept in view; the options and the foot always show.
 /// Built whole by ``show(_:workspace:line:veiled:holder:keys:width:cap:)``, every frame set there,
@@ -491,7 +506,7 @@ package final class NewSessionView: NSView {
     private var warning: NSRect?
     private var lineFailed = false
 
-    /// The quiet line over the foot: a key stored, or why none can be stored now.
+    /// The quiet line in Sign in's place: a key stored, or why none can be stored now.
     package enum Line: Equatable {
         case stored(String)
         case unread(String)
@@ -535,7 +550,8 @@ package final class NewSessionView: NSView {
     }
 
     /// Builds it for `content` in workspace `workspace`, `width` wide and no taller than `cap`, its
-    /// rows scrolling in what the rest leaves, saying `line` over the foot; `veiled` while its sheet
+    /// rows scrolling in what the rest leaves, saying `line` in Sign in's place (over the foot where
+    /// nothing starts for the person); `veiled` while its sheet
     /// asks: its primary outlined, as a row's Open is under the panel, the sheet's Store the one
     /// primary on screen, and the sheet's veil over it. The foot names the keys of `holder`, the
     /// primary wears Return's ring once a key is stored only while `holder` is the rows (nothing
@@ -709,13 +725,14 @@ package final class NewSessionView: NSView {
         return signInWords(offer, way: way, line: line, workspace: workspace, x: after, y: y + 4, width: room) + 14
     }
 
-    /// Under Sign in, a slot as tall as the taller of its two ways' words, one line at least, so
-    /// neither choosing a way nor a key stored changes the box's height: the words of `way`, or,
-    /// while `line` says a key was stored or why none can be, that line after its square in their
-    /// place, cut at its tail where it is longer; where the slot ends.
+    /// Under Sign in, a slot as tall as the taller of its two ways' words and two lines at least, so
+    /// neither choosing a way nor a key stored changes the box's height and a line of ours fits on
+    /// any harness: the words of `way`, or, while `line` says a key was stored or why none can be,
+    /// that line after its square in their place, a server's note past the slot cut at its tail;
+    /// where the slot ends.
     private func signInWords(_ offer: AgentOffer, way: Way, line: Line?, workspace: String, x: Double, y: Double, width: Double) -> Double {
         let helps = [Way.signIn, .key].compactMap { NewSessionWords.signInHelp(offer, way: $0, in: workspace) }
-        let slot = max(helps.map { Self.height(of: quiet($0, width: width), width: width) }.max() ?? 0, Self.about)
+        let slot = max(helps.map { Self.height(of: quiet($0, width: width), width: width) }.max() ?? 0, 2 * Self.about)
         guard let line else {
             if let words = NewSessionWords.signInHelp(offer, way: way, in: workspace) { _ = place(quiet(words, width: width), x: x, y: y, width: width) }
             return y + slot

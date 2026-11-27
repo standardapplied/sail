@@ -302,7 +302,7 @@ import Testing
         case answered, unreachable, refused
     }
 
-    static let notUsed = "Stored Claude Code key “work”, but Sign in still offers your earlier key; store it again to make it the one Start takes."
+    static let notUsed = "Start still takes your earlier key: store “work” again to switch."
 
     /// A key stored beside the default the person already has is made the one in use (`:use`): the
     /// panel's Sign in, its row and VoiceOver say that key, never the old default, and Start takes
@@ -386,7 +386,7 @@ import Testing
         }
         try NewSessionPanelTests.press(sheet.store)
         try #require(await RunnerTabTests.until { view.newSession.stored != nil && !view.busy })
-        let line = "Stored Claude Code key “default”." + (unchanged ? " Removed the key from the clipboard." : "")
+        let line = "Stored Claude Code key “default”." + (unchanged ? " Clipboard cleared." : "")
         #expect(view.newSession.stored == line && view.newSession.view.words.contains(line))
         let left = view.pasteboard.string(forType: .string) == (unchanged ? nil : Self.pasted)
         #expect(left, unchanged ? "the clipboard still holds the key" : "the clipboard changed meanwhile was cleared")
@@ -558,7 +558,7 @@ extension LoginSheetTests {
         try #require(await RunnerTabTests.until { if case .stored = sheet.model.stage { true } else { false } }, "the store never answered")
         if panelOpen {
             try #require(await RunnerTabTests.until { view.newSession.stored != nil && !view.busy })
-            #expect(view.newSession.stored == "Stored Claude Code key “default”. Removed the key from the clipboard.")
+            #expect(view.newSession.stored == "Stored Claude Code key “default”. Clipboard cleared.")
             #expect(view.pasteboard.string(forType: .string) == nil, "the clipboard said cleared still holds the key")
         } else {
             let kept = view.pasteboard.string(forType: .string) == Self.pasted

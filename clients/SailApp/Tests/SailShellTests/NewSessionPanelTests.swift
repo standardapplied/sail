@@ -26,7 +26,7 @@ import Testing
     }
 
     static let claude = AgentStart(harness: "claude-code", display: "Claude Code", mode: "default")
-    static let storedLine = "Stored Claude Code key “default”. Removed the key from the clipboard."
+    static let storedLine = "Stored Claude Code key “default”. Clipboard cleared."
 
     /// harbor listed for uday (dock and pier his, quay ana's), what starts in each answered as
     /// `agents` recorded, `width` wide in `look`.
@@ -779,7 +779,7 @@ import Testing
         view.layoutSubtreeIfNeeded()
         #expect(view.project.narrow)
         let panel = try await Self.open("dock", in: view)
-        let page = NewSessionPanel.shows(view.project, in: window), box = panel.popover.frame
+        let page = Self.shown(view.project, in: window), box = panel.popover.frame
         let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) })
         #expect(near(box.minX, page.minX + NewSessionPanel.inset) && near(box.maxX, page.maxX - NewSessionPanel.inset), "the panel is \(box) on what shows of the page \(page)")
         let content = window.convertToScreen(try #require(window.contentView).frame)
@@ -847,11 +847,17 @@ import Testing
         return (view, window)
     }
 
+    /// What the window shows of `page`, measured apart from the panel's own measure: the page's
+    /// bounds, cut by the window's content.
+    static func shown(_ page: NSView, in window: NSWindow) -> NSRect {
+        window.convertToScreen(page.convert(page.bounds, to: nil)).intersection(window.convertToScreen(window.contentLayoutRect))
+    }
+
     /// What is wrong with `panel` as it stands, `said`: its box out of the page less 8 pt, its top
     /// not `top`, drawn other than it stands, or its chosen row not whole in view.
     static func misplaced(_ panel: NewSessionPanel, in view: WorkspacesView, top: Double, _ said: String) -> [String] {
         guard let window = view.window else { return ["\(said): no window"] }
-        let page = NewSessionPanel.shows(view.project, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
+        let page = Self.shown(view.project, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
         let box = panel.popover.frame, shown = panel.view.list.contentView.documentVisibleRect
         var faults: [String] = []
         if !page.contains(box) { faults.append("\(said): the box \(box) leaves the page \(page)") }
@@ -907,7 +913,7 @@ import Testing
             try Self.mode("Auto", in: panel)
             check("Auto chosen")
             let tall = panel.view.height
-            panel.show(.agents(agents), memory: ModeMemory(modes: ["claude-code": "auto"], ways: ["claude-code": .key]), stored: LoginSheetTests.notUsed + " Removed the key from the clipboard.", harness: "claude-code", inUse: false)
+            panel.show(.agents(agents), memory: ModeMemory(modes: ["claude-code": "auto"], ways: ["claude-code": .key]), stored: LoginSheetTests.notUsed + " Clipboard cleared.", harness: "claude-code", inUse: false)
             #expect(panel.view.words.contains { $0.hasPrefix("Runs everything") } && panel.stored != nil, "\(panel.view.words)")
             #expect(near(panel.view.height, tall), "a key stored took the box from \(tall) pt to \(panel.view.height)")
             check("a key stored")
@@ -954,6 +960,59 @@ import Testing
             let again = try await Self.open("ws-30", in: view)
             #expect(near(again.popover.frame.maxY, claude.maxY), "remembering \(mode) placed its top at \(again.popover.frame.maxY), not \(claude.maxY)")
         }
+    }
+
+    /// A key stored is said for the kind and the way in it was stored for: another kind or way
+    /// chosen takes the line away, and that kind's own Sign in words show again.
+    @Test func theStoredLineGoesWithAnotherKindOrWay() async throws {
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
+        defer { window.orderOut(nil) }
+        let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: try Exchange("workspace-agents-dock").body))
+        let panel = try await Self.open("dock", in: view)
+        let store = { panel.show(.agents(agents), memory: ModeMemory(modes: [:], ways: ["claude-code": .key]), stored: Self.storedLine, harness: "claude-code", inUse: true) }
+        let onKey = "Your Claude account can be chosen here instead.", onAccount = "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."
+        store()
+        #expect(panel.view.words.contains(Self.storedLine) && !panel.view.words.contains(onKey), "\(panel.view.words)")
+        try Self.press(try Self.down(), in: window)
+        let codex = try #require(NewSessionWords.signInHelp(agents.offered[1], way: .signIn, in: "dock"))
+        #expect(panel.line == nil && !panel.view.words.contains(Self.storedLine) && panel.view.words.contains(codex), "Codex CLI chosen: \(panel.view.words)")
+        try Self.press(try Self.up(), in: window)
+        #expect(panel.line == nil && panel.view.words.contains(onKey), "back on Claude Code: \(panel.view.words)")
+        store()
+        try #require(panel.view.signIn?.menu).performActionForItem(at: 0)
+        #expect(panel.line == nil && !panel.view.words.contains(Self.storedLine) && panel.view.words.contains(onAccount), "the account chosen: \(panel.view.words)")
+    }
+
+    /// Each line of ours fits Sign in's slot whole, at 388 pt and at the least window, where the
+    /// workspace holds the sign-in (its words one line) as where it does not; a server's note past
+    /// the slot is cut to it and never reaches the foot.
+    @Test func ourLinesFitSignInsSlotAndANoteIsCutToIt() async throws {
+        let ours = [
+            "Stored Claude Code key “default”. Clipboard cleared.", "Start still takes your earlier key: store “default” again to switch. Clipboard cleared.",
+            "Start still takes your earlier key: store “work-2” again to switch. Clipboard cleared.", StoreLogin.unread(.unreachable("refused"), address: "127.0.0.1:7979"),
+        ]
+        let note = Self.storedLine + String(repeating: " The server says more of the runs on the key this one replaced.", count: 6)
+        var faults: [String] = []
+        for golden in ["workspace-agents-dock", "workspace-agents-dock-signed-in"] {
+            for (width, height) in Self.windows {
+                let answer = try Exchange(golden)
+                let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: answer.body))
+                let (view, window) = try await Self.atTheTop(answer, width: width, height: height)
+                defer { window.orderOut(nil) }
+                let panel = try await Self.open("dock", in: view)
+                for line in ours + [note] {
+                    if line.hasPrefix("Can't") { panel.say(.unread(line)) } else { panel.show(.agents(agents), memory: ModeMemory(modes: [:], ways: ["claude-code": .key]), stored: line, harness: "claude-code", inUse: true) }
+                    let at = "\(golden) at \(width) pt, \(line.prefix(24))"
+                    guard let label = WorkspacesViewTests.found(NSTextField.self, in: panel.view).first(where: { $0.stringValue == line }), let primary = panel.view.primary else {
+                        faults.append("\(at): not shown"); continue
+                    }
+                    let needs = NewSessionView.height(of: label, width: Double(label.frame.width)), foot = Double(panel.view.convert(primary.bounds, from: primary).minY)
+                    if line != note, needs > Double(label.frame.height) + 0.5 { faults.append("\(at): cut, \(needs) pt in \(label.frame.height)") }
+                    if Double(label.frame.maxY) > foot - 14 { faults.append("\(at): reaches \(label.frame.maxY) pt, the foot at \(foot)") }
+                }
+            }
+        }
+        #expect(faults.isEmpty, "\(faults.joined(separator: "\n"))")
     }
 
     /// The panel follows its row or closes: the list scrolled, or drawn again with its row gone or
