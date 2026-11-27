@@ -124,6 +124,41 @@ public struct PasskeySession: Codable, Equatable, Sendable, CustomStringConverti
     }
 }
 
+/// One of the caller's own passkeys: its id, its label, when it was enrolled and last signed in
+/// with (none before its first use), and whether this session was signed in with it.
+public struct OwnPasskey: Codable, Equatable, Sendable {
+    public let id: String
+    public let label: String
+    public let createdAt: Date
+    public let lastUsedAt: Date?
+    public let current: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case id, label, current
+        case createdAt = "created_at"
+        case lastUsedAt = "last_used_at"
+    }
+}
+
+/// The caller's own passkeys, oldest first.
+public struct OwnPasskeys: Codable, Equatable, Sendable {
+    public let passkeys: [OwnPasskey]
+}
+
+extension Endpoint where Response == OwnPasskeys {
+    public static var passkeys: Self {
+        Self(.get, Route.passkeys)
+    }
+}
+
+extension Endpoint where Response == NoContent {
+    /// Removes the caller's passkey `id`, and ends the sessions it signed in; the server refuses the
+    /// last one, the one this session signed in with, and any but a passkey session's call.
+    public static func removePasskey(_ id: String) -> Self {
+        Self(.delete, Route.passkeys + [id])
+    }
+}
+
 /// What a platform or software authenticator made at registration.
 public struct PasskeyRegistration: Equatable, Sendable {
     public let credentialId: Data

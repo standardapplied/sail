@@ -146,6 +146,15 @@ extension Driver {
         view.subviews + view.subviews.flatMap { views(in: $0) }
     }
 
+    /// `root` and every view in it laid out right to left, or left to right.
+    static func direct(_ root: NSView, rightToLeft: Bool) {
+        for view in [root] + views(in: root) {
+            view.userInterfaceLayoutDirection = rightToLeft ? .rightToLeft : .leftToRight
+            view.needsLayout = true
+            view.needsDisplay = true
+        }
+    }
+
     /// ↓ (or another key) pressed until `id` is chosen, at most once for each row.
     private func choose(_ id: String, by name: String, in list: SailList) -> Bool {
         guard let press = Keys.named(name, modifiers: []) else { return false }

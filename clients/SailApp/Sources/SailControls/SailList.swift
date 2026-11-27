@@ -67,7 +67,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         /// How it is drawn whatever its state: the create row, drawn chosen while its field holds the
         /// keys, and in the error's tint once refused.
         public let paint: RowPaint?
-        /// Its content takes the whole row, past the actions column: a row that holds its own buttons.
+        /// Its content takes the whole row, past the actions column: a row that holds its own buttons,
+        /// so the list draws none of its actions on it (its keys, menu and VoiceOver still offer them).
         public let full: Bool
         /// A view after its note among its actions (a spinner).
         public let accessory: NSView?
@@ -982,7 +983,7 @@ final class RowCell: NSView {
         self.item = item
         addSubview(content, positioned: .below, relativeTo: actions)
         sharer?.contentTaken()
-        runs = item.actions.map { Run($0) }
+        runs = item.full ? [] : item.actions.map { Run($0) }
         var buttons: [SailButton] = []
         let onRow = runs.filter { $0.action.onRow }
         first = nil
@@ -1233,18 +1234,18 @@ final class RowMenu: NSMenu, NSMenuDelegate {
 /// An action as a target: buttons and menu items send `go(_:)`, and a menu item is on only while
 /// its action can be done.
 @MainActor
-final class Run: NSObject, NSMenuItemValidation {
-    let action: SailList.Action
+package final class Run: NSObject, NSMenuItemValidation {
+    package let action: SailList.Action
 
-    init(_ action: SailList.Action) {
+    package init(_ action: SailList.Action) {
         self.action = action
     }
 
-    func validateMenuItem(_: NSMenuItem) -> Bool {
+    package func validateMenuItem(_: NSMenuItem) -> Bool {
         action.enabled()
     }
 
-    @objc func go(_: Any?) {
+    @objc package func go(_: Any?) {
         if action.enabled() { action.run() }
     }
 }

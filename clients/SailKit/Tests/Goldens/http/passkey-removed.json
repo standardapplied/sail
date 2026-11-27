@@ -4,7 +4,6 @@
     "path": "/v1/passkeys/Z29sZGVuIGNyZWRlbnRpYWxfaWQgMjQ"
   },
   "response": {
-    "body": {},
     "status": 204
   }
 }

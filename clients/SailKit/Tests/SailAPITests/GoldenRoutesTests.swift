@@ -70,6 +70,14 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-invalid-request-login-long": { _ = try await $0.send(.storeLogin(String(repeating: "k", count: 16 * 1024 + 1), kind: "api-key", harness: "claude-code", name: "default")) },
     "refusal-invalid-request-login-characters": { _ = try await $0.send(.storeLogin("sk-ant-api03 golden fake key", kind: "api-key", harness: "claude-code", name: "default")) },
     "refusal-invalid-request-login-name": { _ = try await $0.send(.storeLogin(goldenKey, kind: "api-key", harness: "claude-code", name: "Work")) },
+    "login-removed": { _ = try await $0.send(.removeLogin(harness: "claude-code", name: "default")) },
+    "agents": { _ = try await $0.send(.knownAgents) },
+    "passkeys": { _ = try await $0.send(.passkeys) },
+    "passkey-removed": { _ = try await $0.send(.removePasskey("Z29sZGVuIGNyZWRlbnRpYWxfaWQgMjQ")) },
+    "refusal-conflict-passkey-current": { _ = try await $0.send(.removePasskey("Z29sZGVuIGNyZWRlbnRpYWxfaWQgNg")) },
+    "refusal-conflict-passkey-last": { _ = try await $0.send(.removePasskey("Z29sZGVuIGNyZWRlbnRpYWxfaWQgNg")) },
+    "refusal-forbidden-passkey-no-passkey-session": { _ = try await $0.send(.removePasskey("Z29sZGVuIGNyZWRlbnRpYWxfaWQgNg")) },
+    "refusal-not-found-passkey-not-yours": { _ = try await $0.send(.removePasskey("Z29sZGVuIGNyZWRlbnRpYWxfaWQgMTU")) },
     "attention": { _ = try await $0.send(.attention(conversation: "harbor-docks")) },
     "changes": { _ = try await $0.send(.changes(since: "golden.0.0")) },
     "board-specs": { _ = try await $0.send(.specs(SpecFilter(project: "harbor"))) },
@@ -567,9 +575,7 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-out-of-scope", "refusal-project-not-created", "refusal-run-on-other-node",
     "refusal-template-admin-only", "refusal-template-read-only", "refusal-template-node",
     "refusal-template-2d-login-not-stored", "refusal-template-2d-no-resources",
-    "refusal-template-2d-runner-not-ready", "refusal-passkey-not-yours", "refusal-passkey-last",
-    "refusal-passkey-current", "refusal-passkey-no-passkey-session",
-    "refusal-project-name-taken",
+    "refusal-template-2d-runner-not-ready", "refusal-project-name-taken",
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.
@@ -578,7 +584,7 @@ let answersOfRoutesNotYetCalled: Set<String> = [
     "template-2c-missing", "template-2d-missing", "template-2e-building", "template-2f-building",
     "template-2f-joined", "template-2g-built", "template-2g-current", "template-2h-failed",
     "template-2h-interrupted", "template-2h-cut-pending",
-    "agents", "passkeys", "passkey-removed", "project-created", "projects-none",
+    "project-created", "projects-none",
 ]
 
 /// The member the golden writer seats in the room.

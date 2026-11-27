@@ -3,10 +3,10 @@ import SailAPI
 import SailControls
 import SailLook
 
-/// The control plane as one line, the same in the user menu and the Account pane: a 6 pt square in
-/// its state's colour (green connected, teal reconnecting, crimson out of reach), the address in mono
-/// in the secondary ink cut in its middle, and the state's word at the line's end in the tertiary ink
-/// (crimson when out of reach). Mirrored right to left.
+/// The control plane as the user menu's line: a 6 pt square in its state's colour (green connected,
+/// teal reconnecting, crimson out of reach), the address in mono in the secondary ink cut in its
+/// middle, and the state's word at the line's end in the tertiary ink (crimson when out of reach), at
+/// the micro step. Mirrored right to left.
 @MainActor
 final class ControlPlaneRow: NSView {
     static let square = 6.0, gap = 8.0
@@ -16,17 +16,15 @@ final class ControlPlaneRow: NSView {
     }
 
     private let mono: LabelFont
-    private let points: Double
+    private let points = Look.Step.micro.points
     private let address = NSTextField(labelWithString: "")
     private let state = NSTextField(labelWithString: "")
     private(set) var plane: UserMenuContent.Plane?
     private(set) var said = ""
 
-    /// A line at `points`: the menu's at the micro step, the pane's larger.
-    init(look: Look, mono: LabelFont, points: Double) {
+    init(look: Look, mono: LabelFont) {
         self.look = look
         self.mono = mono
-        self.points = points
         super.init(frame: .zero)
         for label in [address, state] {
             label.lineBreakMode = .byTruncatingMiddle
@@ -134,7 +132,7 @@ extension ControlPlaneRow: Marked {
 }
 
 extension ControlPlane {
-    /// The control plane as the menu and the Account pane name it: its host, and its port when it
+    /// The control plane as the menu and the Account view name it: its host, and its port when it
     /// has one.
     var named: String {
         url.host().map { host in url.port.map { "\(host):\($0)" } ?? host } ?? url.absoluteString

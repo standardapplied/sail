@@ -32,7 +32,7 @@ import Testing
         let offered = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: try Exchange(agents).body)).offered
         let listed = try Endpoint.logins.decode(HTTPResponse(status: 200, headers: [:], body: try Exchange(logins).body)).logins
         let claude = try #require(offered.first)
-        return try #require(StoreLogin(claude, logins: listed, address: "http://127.0.0.1:7979"))
+        return try #require(StoreLogin(claude.declaration, logins: listed, address: "http://127.0.0.1:7979"))
     }
 
     /// The model at each stage the page draws, by name.

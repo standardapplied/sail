@@ -501,7 +501,7 @@ public final class WorkspacesView: NSView {
             case let .failure(error): return newSession.say(.unread(StoreLogin.unread(error, address: address)))
             }
             if case .unread = newSession.line { newSession.say(nil) }
-            guard let asked = StoreLogin(offer, logins: logins, address: address) else { return }
+            guard let asked = StoreLogin(offer.declaration, logins: logins, address: address) else { return }
             let width = project.narrow ? Double(window.contentLayoutRect.width) - 2 * LoginSheet.inset : LoginSheet.width
             let sheet = LoginSheet(asked, width: width, direction: project.userInterfaceLayoutDirection, look: look, titleFont: titleFont, mono: mono, pasteboard: pasteboard)
             sheet.send = { endpoint in await Self.result { () async throws(SailError) in try await client.send(endpoint) } }
@@ -523,13 +523,22 @@ public final class WorkspacesView: NSView {
         newSession.say(.stored(line))
         byAPerson { [weak self] in
             guard let self else { return }
-            let inUse = await Self.inUse(stored, client)
+            let inUse = await useStored(stored, by: client)
             guard era == self.era else { return }
-            if inUse { memory.choose(.key, for: stored.harness) }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.agents(workspace: place.name, project: place.project)) }
             guard era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true else { return }
             newSession.show(said(answer), memory: memory, stored: inUse ? line : notUsed, harness: stored.harness, inUse: inUse)
         }
+    }
+
+    /// Makes the key just stored the one Start takes where the server did not make it the default
+    /// as it stored it; once it is, and the same person is still signed in, their starts take it as
+    /// the harness's way in. Whether it is. A key stored from the Account view is made so here too.
+    func useStored(_ stored: StoreLogin, by client: SailClient) async -> Bool {
+        let era = self.era
+        let inUse = await Self.inUse(stored, client)
+        if inUse, era == self.era { memory.choose(.key, for: stored.harness) }
+        return inUse
     }
 
     /// Whether the key just stored is the one Start takes: the server made it the default as it

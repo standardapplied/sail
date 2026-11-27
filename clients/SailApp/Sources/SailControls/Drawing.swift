@@ -104,7 +104,7 @@ package enum Draw {
     }
 
     /// `text` set in `font` and `ink`, letter-spaced `tracking` ems, upper-cased when `upper`.
-    static func text(_ text: String, _ font: NSFont, _ ink: Tint, tracking: Double = 0, upper: Bool = false) -> NSAttributedString {
+    package static func text(_ text: String, _ font: NSFont, _ ink: Tint, tracking: Double = 0, upper: Bool = false) -> NSAttributedString {
         NSAttributedString(
             string: upper ? text.uppercased() : text,
             attributes: [.font: font, .foregroundColor: NSColor(ink), .kern: tracking * Double(font.pointSize)]
