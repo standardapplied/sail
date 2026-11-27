@@ -104,9 +104,7 @@ class HostInitCommandTest {
         #!/bin/sh
         case "$*" in
           "storage list --format json") printf '%s\\n' '$POOLS' ;;
-          "profile show singlr-base") echo "name: singlr-base" ;;
-          "profile device list singlr-base") printf 'root\\neth0\\n' ;;
-          "profile device get singlr-base root pool") echo devpool ;;
+          "profile show singlr-base") printf 'devices:\\n  root:\\n    pool: devpool\\n  eth0:\\n    type: nic\\n' ;;
           *) exit 1 ;;
         esac
         """

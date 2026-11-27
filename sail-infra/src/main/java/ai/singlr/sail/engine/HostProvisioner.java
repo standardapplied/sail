@@ -409,14 +409,17 @@ public final class HostProvisioner {
   /**
    * Converges the base profile: its root disk on {@code pool} and its NIC on {@code bridge} when it
    * has none, an existing root disk kept wherever it is. Returns the pool its root disk names,
-   * refused unless Incus has that pool, so what {@code host.yaml} states is what Incus has.
+   * refused unless Incus has that pool, so what {@code host.yaml} states is what Incus has. The
+   * devices are read from {@code incus profile show}, whose YAML holds across Incus releases:
+   * {@code incus profile device list} printed one name a line until 7.7, a table since.
    */
   private IncusStorage.Pool ensureBaseProfile(String pool, PoolSource source, String bridge)
       throws IOException, InterruptedException, TimeoutException {
     step(6, "Creating base profile...");
 
     var profile = HostYaml.DEFAULT_PROFILE;
-    var existed = read(List.of("incus", "profile", "show", profile)).ok();
+    var shown = read(List.of("incus", "profile", "show", profile));
+    var existed = shown.ok();
     if (!existed) {
       var create = shell.exec(List.of("incus", "profile", "create", profile));
       if (!create.ok()) {
@@ -424,24 +427,18 @@ public final class HostProvisioner {
       }
     }
     var held =
-        read(List.of("incus", "profile", "device", "list", profile))
-            .stdout()
-            .lines()
-            .map(String::strip)
-            .toList();
-    if (!held.contains("root")) {
+        existed && YamlUtil.parseMap(shown.stdout()).get("devices") instanceof Map<?, ?> devices
+            ? devices
+            : Map.of();
+    if (!held.containsKey("root")) {
       addDevice(profile, List.of("root", "disk", "path=/", "pool=" + pool), "root disk");
     }
-    if (!held.contains("eth0")) {
+    if (!held.containsKey("eth0")) {
       addDevice(
           profile, List.of("eth0", "nic", "name=eth0", "network=" + bridge, "type=nic"), "NIC");
     }
     var named =
-        held.contains("root")
-            ? read(List.of("incus", "profile", "device", "get", profile, "root", "pool"))
-                .stdout()
-                .strip()
-            : pool;
+        held.get("root") instanceof Map<?, ?> root ? Objects.toString(root.get("pool"), "") : pool;
     var found =
         shell.isDryRun() && named.equals(pool)
             ? Optional.of(planned(pool, source))
