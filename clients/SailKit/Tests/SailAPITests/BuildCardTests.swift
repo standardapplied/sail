@@ -34,6 +34,11 @@ import Testing
         return model
     }
 
+    /// Lighthouse's row's mark in the panel.
+    static func mark(_ model: WorkspacesModel) -> WorkspacesModel.Mark? {
+        model.panel.projects.first { $0.name == "lighthouse" }?.mark
+    }
+
     static func card(_ model: WorkspacesModel) -> WorkspacesModel.Build? {
         guard case let .build(card)? = WorkspacesModelTests.page(model)?.body else { return nil }
         return card
@@ -127,9 +132,11 @@ import Testing
     }
 
     /// The card follows each read: a read with no answer keeps it as it was, saying so quietly; built,
-    /// it gives way to the page of a project with a template, New Workspace offered with no refresh.
+    /// it gives way to the page of a project with a template, New Workspace offered with no refresh;
+    /// the project's row in the panel says each state as read, with no list of the projects asked.
     @Test func theCardFollowsEachRead() throws {
         var model = try Self.model()
+        #expect(Self.mark(model) == .building)
         #expect(WorkspacesModelTests.page(model)?.body == .loading, "a card drawn before the template was read")
         #expect(WorkspacesModelTests.page(model)?.lede == "Workspaces open once the template is ready.")
         model.templateRead("lighthouse", .success(try Self.status("template-2e-building", step: 10)))
@@ -147,7 +154,10 @@ import Testing
         guard case let .shown(panel, _) = model.screen else { return }
         #expect(panel.projects.first { $0.name == "lighthouse" }?.mark == nil, "the pill still says the template is not current")
         model.templateRead("lighthouse", .success(try Self.status("template-2h-failed")))
-        #expect(Self.card(model)?.stage == .failed)
+        #expect(Self.card(model)?.stage == .failed && Self.mark(model) == .buildFailed)
+        model.templateRead("lighthouse", .success(try Self.status("template-2e-building")))
+        #expect(Self.mark(model) == .building)
+        model.templateRead("lighthouse", .success(try Self.status("template-2h-failed")))
         model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "lighthouse", containerStatus: .known(.notCreated), template: .known(.building))], total: 1)))
         #expect(WorkspacesModelTests.page(model)?.body == .loading, "a failed build drawn while the projects listed say it builds")
     }

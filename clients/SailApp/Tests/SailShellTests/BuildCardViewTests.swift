@@ -133,19 +133,30 @@ import Testing
         return (view, window, desk)
     }
 
+    /// Lighthouse's row in the panel as VoiceOver reads it: its name and its pill.
+    static func row(_ view: WorkspacesView) -> String? {
+        view.panel.list.entries.lazy.compactMap { entry -> String? in
+            guard case let .item(item) = entry, item.id == "lighthouse" else { return nil }
+            return item.voice
+        }.first
+    }
+
     static func reads(_ desk: Desk) async -> Int {
         await desk.asked.filter { $0 == Self.read }.count
     }
 
-    /// A building project's page reads its template, then again 2 s after each answer, the card
-    /// following; built, the card gives way to the page of a project with a template, New Workspace
-    /// offered with no refresh, and nothing more is read.
+    /// A building project's page reads its template, then again 2 s after each answer, the card and
+    /// the panel's row following; built, the card gives way to the page of a project with a template,
+    /// New Workspace offered with no refresh, and nothing more is read. The reads ask neither the
+    /// projects nor the workspaces again.
     @Test func aBuildingPageReadsItsTemplateUntilItIsBuilt() async throws {
         let pauses = Pauses()
         let (view, window, desk) = try await Self.section("building", "template-2e-building", pauses)
         defer { window.orderOut(nil) }
         #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && pauses.count == 1 }, "\(view.text)")
         #expect(view.project.newWorkspace.isHidden && view.project.newWorkspaceIcon.isHidden && view.project.listAgain.isHidden, "the page's buttons beside the card")
+        let lists = await desk.asked.filter { $0 != Self.read }
+        #expect(Self.row(view) == "lighthouse, building")
         await desk.answer(try Self.template("template-2e-building", step: 12))
         pauses.letGo()
         #expect(await RunnerTabTests.until { view.text.contains("step 12 of 20") && pauses.count == 2 }, "\(view.text)")
@@ -153,6 +164,8 @@ import Testing
         pauses.letGo()
         #expect(await RunnerTabTests.until { view.text.contains("No workspaces in lighthouse yet") }, "\(view.text)")
         #expect(!view.project.newWorkspace.isHidden && view.project.newWorkspace.isEnabled, "New Workspace not offered once built")
+        #expect(Self.row(view) == "lighthouse", "the panel's row still says \(Self.row(view) ?? "nothing")")
+        #expect(await desk.asked.filter { $0 != Self.read } == lists, "the reads asked for more than the template")
         let reads = await Self.reads(desk)
         #expect(reads == 3 && pauses.asked == [.seconds(2), .seconds(2)])
     }

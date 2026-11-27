@@ -361,6 +361,26 @@ import Testing
         #expect(cell.hitTest(cell.convert(middle, to: cell.superview)) === plus, "a click on the + lands on \(String(describing: cell.hitTest(cell.convert(middle, to: cell.superview))))")
     }
 
+    /// The empty state's Create Project is mirrored right to left: its plus stands before its words in
+    /// reading order, at their right, and at their left left to right. A test of the layout with every
+    /// view laid out right to left, as on a right-to-left Mac, in place of the drive's run-time flip,
+    /// which reaches only the views made before it.
+    @Test(arguments: [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
+    func theEmptyStatesCreateProjectIsMirrored(_ direction: NSUserInterfaceLayoutDirection) throws {
+        let (project, window) = try WorkspacesViewTests.project(width: 800)
+        defer { window.orderOut(nil) }
+        var model = WorkspacesModel(person: BuildCardViewTests.dana)
+        model.projectsListed(.success(ProjectList(projects: [], total: 0)))
+        guard case let .shown(_, .noProjects(empty)) = model.screen else { Issue.record("\(model.screen)"); return }
+        project.renderEmpty(empty)
+        if direction == .rightToLeft { AccountPaneTests.direct(project) }
+        project.layoutSubtreeIfNeeded()
+        let button = try #require(Driverless.button("Create Project", in: project) as? SailButton)
+        let (mark, label, _) = button.arrangement()
+        let plus = try #require(mark)
+        #expect(direction == .rightToLeft ? plus.minX >= label.maxX : plus.maxX <= label.minX, "the plus at \(plus), the words at \(label)")
+    }
+
     /// A project created is listed and chosen before its build is asked, once; a build that got no
     /// answer is said on its card with Build Again, which asks it again, and then the card shows it
     /// building.

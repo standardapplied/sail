@@ -227,7 +227,6 @@
   {"name": "p1-offered-again", "projectCreateOffered": true},
   {"name": "p2-the-agents", "golden": ["GET /v1/agents", "agents"]},
   {"name": "p2-rtl", "workspacesRightToLeft": true},
-  {"name": "p2-rtl-no-project-yet", "shot": "p1-no-project-yet-rtl"},
   {"name": "p2-rtl-create-project", "clickButton": "Create Project"},
   {"name": "p2-rtl-the-sheet", "projectSheetIs": ["open", "Create off", "Medium", "agents Claude Code, Codex CLI checked", "inside the window"]},
   {"name": "p2-rtl-name", "projectSheetType": ["name", "harbor"]},
