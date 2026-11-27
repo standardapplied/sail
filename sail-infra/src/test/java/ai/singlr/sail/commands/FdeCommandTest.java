@@ -1534,6 +1534,24 @@ class FdeCommandTest {
   }
 
   @Test
+  void aWorkstationKeyThatIsNoFileIsRefusedWithTheLineEndingAtItsFix() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    Files.delete(workstationKey());
+    Files.createDirectory(workstationKey());
+
+    assertEquals(1, fde("unpair", "ada"));
+
+    assertEquals(
+        "Could not remove "
+            + workstationKey()
+            + ", which may hold ada's key (Is a directory). Its login is revoked, and its token and"
+            + " record are kept until the key is gone: check that "
+            + workstationKey()
+            + " and its directory are readable and writable by root, then run the command again.",
+        refusal);
+  }
+
+  @Test
   void aWorkstationKeyThatCannotBeReadKeepsTheRecordSoTheNextRunFinishesIt() throws Exception {
     assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
     Files.setPosixFilePermissions(workstationKey(), PosixFilePermissions.fromString("---------"));

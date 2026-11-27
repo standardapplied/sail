@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Actor;
 import java.time.Duration;
 import java.time.Instant;
@@ -85,6 +87,8 @@ public final class SyncScheduler implements AutoCloseable {
   private boolean followUp;
   private boolean attempted;
   private long attemptedAtNanos;
+  private boolean closing;
+  private Thread backingOff;
 
   public SyncScheduler(Reconcile reconcile, Duration debounce, Duration freshenTtl) {
     this(
@@ -167,7 +171,11 @@ public final class SyncScheduler implements AutoCloseable {
     }
   }
 
-  /** As {@link #useHealth(Supplier)}, owning {@code source}: it closes when the scheduler does. */
+  /**
+   * As {@link #useHealth(Supplier)}, owning {@code source}: it closes when the scheduler does. The
+   * source must only be read through, since a failure to close it is only a warning ({@link
+   * #close}); a source whose close could lose a write is closed by its writer, never here.
+   */
   public void useHealth(Supplier<SyncStatus> health, AutoCloseable source) {
     synchronized (freshenLock) {
       this.health = health;
@@ -251,16 +259,38 @@ public final class SyncScheduler implements AutoCloseable {
     }
   }
 
+  /**
+   * Stops the timer and waits for its tick, then waits for the round executor, and only then closes
+   * the health source their reads go through: interrupting a thread inside a native call does not
+   * stop it. Neither the tick nor a round is interrupted, since a round's first step (the round
+   * lock) fails on an interrupted thread. A stop never waits out a backoff: a drain sleeping one is
+   * woken and runs no round, and its write, and any made meanwhile, journaled with it, goes to main
+   * with the next start's first round. A drain in its debounce sends its write before the close
+   * returns, unless it would first have to wait out a backoff. So the close waits at most the
+   * timer's round, then the rest of a debounce and one round, each of which on a dead link the
+   * round's ssh ends ({@code SshSyncChannel}: a 10 s connect timeout, then two unanswered 10 s
+   * keepalives). The source only ever reads, so a failure to close it is a warning naming its
+   * causes, never a failure of the command whose work is done.
+   */
   @Override
   public void close() {
-    if (timer != null) timer.shutdownNow();
+    if (timer != null) {
+      timer.close();
+    }
     if (executor != null) {
+      synchronized (state) {
+        closing = true;
+        if (backingOff != null) backingOff.interrupt();
+      }
       executor.close();
     }
     try {
       healthSource.close();
     } catch (Exception e) {
-      throw new IllegalStateException("Closing the sync health source failed", e);
+      System.getLogger(SyncScheduler.class.getName())
+          .log(
+              System.Logger.Level.WARNING,
+              "Closing the sync health source failed: " + Remedied.told(e, Remedy::plain));
     }
   }
 
@@ -289,22 +319,22 @@ public final class SyncScheduler implements AutoCloseable {
     try {
       runWhenReady();
     } finally {
-      boolean rerun;
       synchronized (state) {
         running = false;
-        rerun = followUp;
-        followUp = false;
-        if (rerun) {
+        if (followUp && !closing) {
           scheduled = true;
+          executor.execute(this::drain);
         }
-      }
-      if (rerun) {
-        executor.execute(this::drain);
+        followUp = false;
       }
     }
   }
 
+  /**
+   * Runs the drain's round once a backoff allows; a drain whose thread is interrupted runs none.
+   */
   private void runWhenReady() {
+    if (Thread.currentThread().isInterrupted()) return;
     while (true) {
       Duration wait;
       synchronized (freshenLock) {
@@ -315,15 +345,26 @@ public final class SyncScheduler implements AutoCloseable {
         }
         wait = backoff.remaining();
       }
-      try {
-        sleeper.sleep(wait);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        synchronized (freshenLock) {
-          runRound();
-        }
+      if (!backOff(wait)) {
         return;
       }
+    }
+  }
+
+  /** Sleeps out a backoff and answers whether to try again: never once a close or an interrupt. */
+  private boolean backOff(Duration wait) {
+    synchronized (state) {
+      if (closing) return false;
+      backingOff = Thread.currentThread();
+    }
+    try {
+      sleeper.sleep(wait);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+    synchronized (state) {
+      backingOff = null;
+      return !closing && !Thread.currentThread().isInterrupted();
     }
   }
 

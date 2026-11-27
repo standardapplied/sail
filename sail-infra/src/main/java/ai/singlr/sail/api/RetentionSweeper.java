@@ -127,8 +127,10 @@ public final class RetentionSweeper implements AutoCloseable {
     e.printStackTrace(System.err);
   }
 
+  /** Stops sweeping and waits for a sweep in flight, so the database it uses can close after. */
   @Override
   public void close() {
     scheduler.shutdownNow();
+    scheduler.close();
   }
 }

@@ -6,6 +6,9 @@
 package ai.singlr.sail.common;
 
 import java.io.IOException;
+import java.nio.file.FileSystemException;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -54,6 +57,55 @@ public interface Remedied {
     return failure instanceof Remedied remedied
         ? remedied.reason()
         : Objects.requireNonNullElse(failure.getMessage(), failure.getClass().getSimpleName());
+  }
+
+  /**
+   * What {@code failure} says on one line, then what each of its causes says, each remedy written
+   * by {@code render}: through every failure that names no fix, ending at the first that does, its
+   * fix included, so a line never runs on past a fix. A cause adds nothing the line already says:
+   * words the line holds, a restatement that begins with it, or no words and a type the line
+   * already names, as "Interrupted while…" names an {@link InterruptedException}. A cause met again
+   * ends the line.
+   */
+  static String told(Throwable failure, Function<Remedy, String> render) {
+    var line = "";
+    var seen = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
+    for (var next = failure; next != null && seen.add(next); next = next.getCause()) {
+      if (!remedyOf(next).isEmpty()) {
+        return followedBy(line, render.apply(whole(next)));
+      }
+      line = followedBy(line, wordsOf(next, line));
+    }
+    return line;
+  }
+
+  private static String wordsOf(Throwable failure, String line) {
+    if (Strings.isNotBlank(failure.getMessage())) {
+      return failure.getMessage();
+    }
+    var type = failure.getClass().getSimpleName();
+    return !line.isEmpty() && line.contains(type.replaceFirst("(Exception|Error)$", ""))
+        ? ""
+        : type;
+  }
+
+  private static String followedBy(String line, String said) {
+    if (line.isEmpty() || line.contains(said)) {
+      return line.isEmpty() ? said : line;
+    }
+    var head = line.endsWith(".") ? line.substring(0, line.length() - 1) : line;
+    return said.startsWith(head + ": ") ? said : head + ": " + said;
+  }
+
+  /**
+   * What a file's failure says, for a line that already names the file: a {@link
+   * FileSystemException}'s reason, never its message, which repeats the path; another failure's
+   * words; else its type, as an {@code AccessDeniedException} the platform gives no reason is said.
+   */
+  static String fileReasonOf(IOException failure) {
+    var words =
+        failure instanceof FileSystemException file ? file.getReason() : failure.getMessage();
+    return Strings.isBlank(words) ? failure.getClass().getSimpleName() : words;
   }
 
   /** What {@code failure} says to do about it; {@link Remedy#NONE} when it names nothing. */

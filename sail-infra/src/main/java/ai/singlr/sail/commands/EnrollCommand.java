@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ClientConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -120,12 +122,12 @@ public final class EnrollCommand implements Runnable {
     try {
       body = YamlUtil.parseMap(stdout);
     } catch (Exception e) {
-      throw new IllegalStateException(unexpectedTicket(stdout), e);
+      throw unexpectedTicket(stdout, e);
     }
     var ticket = Objects.toString(body.get("ticket"), "");
     var fde = Objects.toString(body.get("fde"), "");
     if (Strings.isBlank(ticket) || Strings.isBlank(fde)) {
-      throw new IllegalStateException(unexpectedTicket(stdout));
+      throw unexpectedTicket(stdout, null);
     }
     return new Ticket(ticket, fde);
   }
@@ -152,11 +154,13 @@ public final class EnrollCommand implements Runnable {
         + OperatorCommand.SUDO.sail("fde add <handle> --key \"<your pubkey>\"");
   }
 
-  private static String unexpectedTicket(String stdout) {
-    return "The box returned an unexpected enrollment ticket response:\n"
-        + stdout.strip()
-        + "\n  The box may be running an older sail — upgrade it with: "
-        + OperatorCommand.SUDO.sail("upgrade");
+  private static IllegalStateException unexpectedTicket(String stdout, Exception cause) {
+    return Remedied.state(
+        "The box returned an unexpected enrollment ticket response:\n"
+            + stdout.strip()
+            + "\n  The box may be running an older sail —",
+        Remedy.of("upgrade it with: " + OperatorCommand.SUDO.sail("upgrade")),
+        cause);
   }
 
   private static ClientConfig requireThinClient() throws Exception {

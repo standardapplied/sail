@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -14,11 +15,17 @@ import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.SyncStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.OperatorCommand;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 class NodeSyncTest {
 
@@ -102,6 +109,31 @@ class NodeSyncTest {
             NODE, false, Map.of(NodeSync.DEBOUNCE_ENV, "50"), OperatorCommand.PLAIN)) {
       assertNotNull(scheduler);
     }
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aCommandWhoseWorkSucceededKeepsItsExitWhenItsSyncHealthSourceFailsToClose() {
+    var err = new ByteArrayOutputStream();
+    var worked = new AtomicBoolean();
+
+    assertDoesNotThrow(
+        () ->
+            CliCommand.run(
+                new PrintStream(err, true, StandardCharsets.UTF_8),
+                () -> {
+                  try (var sync = NodeSync.scheduler(NODE, false, Map.of(), () -> {})) {
+                    sync.useHealth(
+                        () -> SyncStatus.unattempted("node", "sail@maindevbox"),
+                        () -> {
+                          throw new IllegalStateException("Session is acquired by 1 clients");
+                        });
+                    worked.set(true);
+                  }
+                }));
+
+    assertTrue(worked.get());
+    assertEquals("", err.toString(StandardCharsets.UTF_8), "nothing is printed as the error");
   }
 
   @Test
