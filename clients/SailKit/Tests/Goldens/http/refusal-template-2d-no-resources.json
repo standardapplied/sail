@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/v1/projects/harbor/template:build"
+    "path": "/v1/projects/harbor/template%3Abuild"
   },
   "response": {
     "body": {

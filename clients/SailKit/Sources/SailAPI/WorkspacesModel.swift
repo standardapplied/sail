@@ -25,12 +25,17 @@ public struct WorkspacesModel: Sendable {
         /// offered belongs to the reach spec (`sail-app-says-when-it-cannot-reach-the-control-plane`).
         public let confirmed: Bool
         public let controlPlane: String
+        /// Their `whoami` names the write capability, which a project's create needs (the journal
+        /// decides it), and the build one, which its template's build needs: a project no one here
+        /// could build would go nowhere.
+        public let creates: Bool
 
-        public init(handle: String, admin: Bool, confirmed: Bool, controlPlane: String) {
+        public init(handle: String, admin: Bool, confirmed: Bool, controlPlane: String, creates: Bool = false) {
             self.handle = handle
             self.admin = admin
             self.confirmed = confirmed
             self.controlPlane = controlPlane
+            self.creates = creates
         }
 
         /// The control plane as a person reads it: its host, and its port when it has one.
@@ -44,7 +49,7 @@ public struct WorkspacesModel: Sendable {
             let whoami = signedIn.flatMap { try? $0.whoami.get() }
             self.init(
                 handle: whoami?.fde ?? signedIn?.fde ?? "", admin: whoami?.role == .known(.admin), confirmed: whoami != nil,
-                controlPlane: signedIn?.controlPlane.description ?? ""
+                controlPlane: signedIn?.controlPlane.description ?? "", creates: whoami.map { [Open<Capability>.known(.write), .known(.build)].allSatisfy($0.capabilities.contains) } ?? false
             )
         }
     }
@@ -78,6 +83,9 @@ public struct WorkspacesModel: Sendable {
         public let emptyLine: String?
         /// What is shown is the last listed, its refresh having failed: the panel is drawn dimmed.
         public let stale: Bool
+        /// Create Project is offered beside the projects listed: wherever the main area does not
+        /// offer it, which it does only with no project and This Mac not shown.
+        public let creates: Bool
     }
 
     public struct Project: Equatable, Sendable {
@@ -224,7 +232,7 @@ public struct WorkspacesModel: Sendable {
     }
 
     public enum EmptyAction: Equatable, Sendable {
-        case newWorkspace, checkAgain
+        case newWorkspace, checkAgain, createProject
     }
 
     public struct Notice: Equatable, Sendable {
@@ -232,12 +240,17 @@ public struct WorkspacesModel: Sendable {
             case warning, error
         }
 
+        /// What its Try Again asks again: the list it could not get, or the build it could not ask.
+        public enum Again: Equatable, Sendable {
+            case list, build
+        }
+
         public let tone: Tone
         public let title: String
         public let line: String
-        public let tryAgain: Bool
+        public let tryAgain: Again?
 
-        public init(tone: Tone, title: String, line: String, tryAgain: Bool) {
+        public init(tone: Tone, title: String, line: String, tryAgain: Again?) {
             self.tone = tone
             self.title = title
             self.line = line
@@ -375,6 +388,12 @@ public struct WorkspacesModel: Sendable {
     private var sessionsAskedCount = 0
     /// The workspace created in this project, chosen once a list shows it.
     private var choosingAfterList: [String: String] = [:]
+    /// The project the person created, chosen when the projects listed next show it.
+    private var created: String?
+    /// What stands over a project's page about its template's build, by project: the refusal, or the
+    /// build that could not be asked, with Try Again; until the build is asked, or the projects
+    /// listed show its template no longer missing.
+    private var builds: [String: Notice] = [:]
 
     /// The chosen project's create row.
     private var create: CreateLine? {
@@ -405,6 +424,14 @@ public struct WorkspacesModel: Sendable {
             projects = list.projects
             projectsFailure = nil
             expanded.formIntersection(list.projects.map(\.name))
+            builds = builds.filter { name, _ in list.projects.contains { $0.name == name && $0.template == .known(.missing) } }
+            if let created {
+                self.created = nil
+                if list.projects.contains(where: { $0.name == created }) {
+                    thisMacChosen = false
+                    return select(created)
+                }
+            }
             guard let name = list.projects.first(where: { $0.name == chosen })?.name ?? list.projects.first?.name else {
                 chosen = nil
                 listing.clear()
@@ -553,6 +580,28 @@ public struct WorkspacesModel: Sendable {
         }
     }
 
+    /// Project `name` was created here: it is chosen, in This Mac's place too, when the projects
+    /// listed next show it.
+    public mutating func projectCreated(_ name: String) {
+        created = name
+    }
+
+    /// The build of project `name`'s template asked: refused, said over its page in the server's
+    /// words and what to do; not answered, said with Try Again, which asks it again.
+    public mutating func built(_ name: String, _ answer: Result<TemplateStatus, SailError>) {
+        switch answer {
+        case .success:
+            builds[name] = nil
+        case let .failure(error):
+            let said = lines(error)
+            builds[name] = if case .refused = error {
+                Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: nil)
+            } else {
+                Notice(tone: .error, title: "Couldn’t start building \(name)’s template", line: said.joined(separator: " "), tryAgain: .build)
+            }
+        }
+    }
+
     // MARK: Stop and delete
 
     /// The question open now; nil when none is. Never replaced while it is open.
@@ -617,7 +666,7 @@ public struct WorkspacesModel: Sendable {
     private mutating func notAsked(_ action: Action, _ name: String, project: String) {
         guard refused[project] == nil else { return }
         let verb = action == .stop ? "Stop" : "Delete"
-        refused[project] = (Notice(tone: .warning, title: "\(name) is not asked about yet: answer the question open, then choose \(verb) again.", line: "", tryAgain: false), listing.latest)
+        refused[project] = (Notice(tone: .warning, title: "\(name) is not asked about yet: answer the question open, then choose \(verb) again.", line: "", tryAgain: nil), listing.latest)
     }
 
     private mutating func open(_ question: Question) -> Question {
@@ -660,7 +709,7 @@ public struct WorkspacesModel: Sendable {
         waiting.removeAll { $0.project == project && !names.contains($0.name) }
         guard let open = asking, open.project == project, !names.contains(open.name) else { return }
         asking = nil
-        refused[project] = (Notice(tone: .warning, title: "\(open.name) is no longer in \(project), so Sail stopped asking about it.", line: "", tryAgain: false), request)
+        refused[project] = (Notice(tone: .warning, title: "\(open.name) is no longer in \(project), so Sail stopped asking about it.", line: "", tryAgain: nil), request)
         askNextWaiting()
     }
 
@@ -701,10 +750,10 @@ public struct WorkspacesModel: Sendable {
             )
             if asking == nil { asking = anyway } else { waiting.append(anyway) }
         case let .failure(.refused(refusal)) where refusal.code == .known(.workspaceHoldsWork):
-            refused[project] = (Notice(tone: .error, title: Self.holdsWork(refusal.message, name).said, line: "", tryAgain: false), since)
+            refused[project] = (Notice(tone: .error, title: Self.holdsWork(refusal.message, name).said, line: "", tryAgain: nil), since)
         case let .failure(error):
             let said = lines(error)
-            refused[project] = (Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: false), since)
+            refused[project] = (Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: nil), since)
         }
         return request
     }
@@ -729,7 +778,8 @@ public struct WorkspacesModel: Sendable {
         return Panel(
             projects: (projects ?? []).map { Project(name: $0.name, mark: Self.mark($0.template), expanded: expanded.contains($0.name), holds: expanded.contains($0.name) ? nest($0.name) : nil) },
             chosen: thisMacChosen ? Self.thisMac : chosen, chosenRow: panelRow, controlPlane: person.named, who: who, listed: projects != nil, emptyLine: emptyLine,
-            stale: projects != nil && (projectsFailure != nil || shownFailed)
+            stale: projects != nil && (projectsFailure != nil || shownFailed),
+            creates: person.creates && projects != nil && (projects?.isEmpty == false || thisMacChosen)
         )
     }
 
@@ -747,10 +797,11 @@ public struct WorkspacesModel: Sendable {
         return listing.rows[chosen]?.contains { $0.name == chosenRow && $0.owner == person.handle } == true ? chosenRow : nil
     }
 
-    /// What the panel says under the control plane's head: none of its projects open to the person,
-    /// or, none ever listed, why they could not be, in words that leave its name to the head.
+    /// What the panel says under the control plane's head: no project listed, none at all to one who
+    /// reads every project, else none of them open to the person; or, none ever listed, why they
+    /// could not be, in words that leave its name to the head.
     private var emptyLine: String? {
-        guard projects == nil else { return projects?.isEmpty == true ? "No project is open to you yet." : nil }
+        guard projects == nil else { return projects?.isEmpty == true ? person.creates ? "No projects yet." : "No project is open to you yet." : nil }
         guard let projectsFailure else { return nil }
         if case .unreachable = projectsFailure { return "Can’t reach the control plane." }
         return "Couldn’t list your projects."
@@ -761,8 +812,15 @@ public struct WorkspacesModel: Sendable {
         if thisMacChosen { return .shown(panel, .thisMac) }
         guard let projects else { return projectsFailure.map { .unreachable(unreachable($0)) } ?? .loading }
         guard let project = projects.first(where: { $0.name == chosen }) else {
+            if person.creates {
+                return .shown(panel, .noProjects(Empty(
+                    title: "Create your first project",
+                    body: "A project holds the repositories, agents and size that every workspace starts from. Create one, and Sail builds its template on the runner.",
+                    line: "\(person.named) · you can create projects as \(person.admin ? "an admin" : "a member")", action: .createProject, missing: false
+                )))
+            }
             let body = person.admin
-                ? "Add a project on \(person.controlPlane), or add yourself to one. It then appears on the left, and you can create your own workspaces in it."
+                ? "Your sign-in may not create projects on \(person.controlPlane). Once one is added, it appears on the left, and you can create your own workspaces in it."
                 : "An admin adds you to a project on \(person.controlPlane). Once they do, it appears on the left, and you can create your own workspaces in it."
             return .shown(panel, .noProjects(Empty(
                 title: "No project is open to you yet", body: body, line: "signed in as \(panel.who) · \(person.controlPlane)", action: .checkAgain, missing: false
@@ -778,7 +836,7 @@ public struct WorkspacesModel: Sendable {
 
     /// The projects' refresh that failed while projects are shown, said over the page.
     private var projectsBanner: Notice? {
-        projectsFailure.map { Notice(tone: .error, title: "Couldn’t list your projects", line: $0.said(at: person.controlPlane), tryAgain: true) }
+        projectsFailure.map { Notice(tone: .error, title: "Couldn’t list your projects", line: $0.said(at: person.controlPlane), tryAgain: .list) }
     }
 
     /// The card when no project could be listed: what is true, in Sail's words with the address and
@@ -846,11 +904,11 @@ public struct WorkspacesModel: Sendable {
     /// says why it waits; only a project with none listed says what is missing in its place.
     private func page(_ project: ProjectSummary) -> Page {
         let name = project.name, listed = listing.rows[name] != nil, unready = Self.unready(project), listFailure = listFailures[name]
-        let banner = refused[name]?.notice ?? listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? projectsBanner
+        let banner = refused[name]?.notice ?? builds[name] ?? listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: .list) } ?? projectsBanner
         let rows = WorkspaceList(project: name, workspaces: listing.rows[name] ?? []).rows(for: person.handle)
         if let unready, rows.isEmpty, listed, listFailure == nil {
             return Page(
-                name: name, lede: unready.lede, canCreate: false, createWhy: unready.why, banner: projectsBanner,
+                name: name, lede: unready.lede, canCreate: false, createWhy: unready.why, banner: banner,
                 body: .empty(Empty(title: unready.title, body: unready.body, line: nil, action: .checkAgain, missing: true)), stale: false, listedAt: nil
             )
         }

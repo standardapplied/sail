@@ -30,7 +30,9 @@ public final class WorkspacesView: NSView {
             guard person != oldValue else { return }
             if person.handle == oldValue.handle, person.controlPlane == oldValue.controlPlane {
                 model.person = person
+                render()
             } else {
+                projectSheet?.withdraw()
                 model = WorkspacesModel(person: person, chosen: lastChosen(person), expanded: lastExpanded(person))
                 memory = remembered(person)
                 model.lastStarted = memory.last?.display
@@ -174,6 +176,7 @@ public final class WorkspacesView: NSView {
             askAgents(name, project: project, client, again: false, inPanel: true)
         }
         panel.onTryAgain = { [weak self] in self?.askAgain(nil) }
+        panel.onCreate = { [weak self] in self?.createProject() }
         project.on = { [weak self] act in self?.act(act) }
         newSession.onStart = { [weak self] start, memory in self?.started(start, memory) }
         newSession.onStoreKey = { [weak self] offer in self?.storeKey(offer) }
@@ -200,6 +203,7 @@ public final class WorkspacesView: NSView {
         panel.look = look
         panelShadow.look = look
         question?.sheet.look = look
+        projectSheet?.look = look
         project.look = look
         local.look = look
         newSession.look = look
@@ -241,7 +245,7 @@ public final class WorkspacesView: NSView {
         switch model.screen {
         case .loading: return "Workspaces"
         case .unreachable: return (["Workspaces"] + cardSaid).joined(separator: "\n")
-        case let .shown(_, .noProjects(empty)): return (["Workspaces", empty.title, empty.body] + (empty.line.map { [$0] } ?? [])).joined(separator: "\n")
+        case let .shown(panel, .noProjects(empty)): return (["Workspaces", panel.emptyLine, empty.title, empty.body, empty.line].compactMap { $0 }).joined(separator: "\n")
         case let .shown(panel, .thisMac):
             let lede = WorkspacesModel.thisMacLede(host: local.macName, controlPlane: panel.controlPlane)
             return (["Workspaces", WorkspacesModel.thisMac, lede] + (LocalProjectView.instead(sessions).map { [$0] } ?? sessions.rows.map(LocalProjectView.said))).joined(separator: "\n")
@@ -423,6 +427,7 @@ public final class WorkspacesView: NSView {
 
     private func act(_ act: ProjectView.Act) {
         guard let client else { return }
+        if act == .createProject { return createProject() }
         guard let projectName = model.chosen else {
             if act == .checkAgain || act == .listAgain { askProjects() }
             return
@@ -472,7 +477,72 @@ public final class WorkspacesView: NSView {
             render()
         case .listAgain, .checkAgain:
             askProjects()
+        case .buildAgain:
+            let era = self.era
+            byAPerson { [weak self] in await self?.build(projectName, era: era) }
+        case .createProject: break
         }
+    }
+
+    /// The New project sheet while it shows.
+    package private(set) var projectSheet: CreateProjectSheet?
+
+    /// Create Project: the server's harnesses asked, then the sheet on the window with each one
+    /// checked; harnesses that could not be listed leave AGENTS saying why with Try Again, and
+    /// Create off. Its Create sends the definition once, and a project created is listed and chosen,
+    /// then has its template built.
+    private func createProject() {
+        guard let client, projectSheet == nil, model.person.creates else { return }
+        let era = self.era, handle = model.person.handle
+        byAPerson { [weak self] in
+            guard let self else { return }
+            let ask: @MainActor () async -> Result<KnownAgents, SailError> = { await Self.result { () async throws(SailError) in try await client.send(.knownAgents) } }
+            let agents = await ask()
+            guard era == self.era, projectSheet == nil, let window, !isHiddenOrHasHiddenAncestor else { return }
+            let address = model.person.controlPlane
+            var asked = NewProject(agents: [])
+            asked.agentsListed(agents, at: address)
+            let (width, room) = Self.sheetRoom(window)
+            let sheet = CreateProjectSheet(asked, width: width, room: room, direction: userInterfaceLayoutDirection, address: address, look: look, titleFont: titleFont, mono: mono)
+            sheet.send = { definition in await client.create(definition, by: handle) }
+            sheet.askAgents = ask
+            sheet.onCreated = { [weak self] name in self?.created(name, era: era) }
+            sheet.onEnd = { [weak self] in self?.projectSheet = nil }
+            projectSheet = sheet
+            window.beginSheet(sheet) { _ in }
+        }
+    }
+
+    /// The sheet's width and the most it may be tall on `window`: 600 pt, or the window less 12 pt
+    /// each side.
+    private static func sheetRoom(_ window: NSWindow) -> (width: Double, room: Double) {
+        let content = window.contentLayoutRect
+        return (min(CreateProjectSheet.width, Double(content.width) - 2 * CreateProjectSheet.inset), Double(content.height) - CreateProjectSheet.inset)
+    }
+
+    /// Project `name` created: the projects listed and it chosen, so it shows at once, then its
+    /// template's build asked; nothing once the person signed out.
+    private func created(_ name: String, era: Int) {
+        byAPerson { [weak self] in
+            guard let self, era == self.era else { return }
+            model.projectCreated(name)
+            await askProjects().value
+            guard era == self.era else { return }
+            if model.chosen == name, !model.thisMacChosen { keepChosen(name, person) }
+            await build(name, era: era)
+        }
+    }
+
+    /// Project `name`'s template's build asked, which the server joins when one is under way; once
+    /// asked, the projects listed again to show it building. A refusal, or no answer with Try
+    /// Again, is said over its page.
+    private func build(_ name: String, era: Int) async {
+        guard let client else { return }
+        let built = await Self.result { () async throws(SailError) in try await client.send(.buildTemplate(project: name)) }
+        guard era == self.era else { return }
+        model.built(name, built)
+        render()
+        if case .success = built { await askProjects().value }
     }
 
     // MARK: New Session
@@ -895,6 +965,10 @@ public final class WorkspacesView: NSView {
     override public func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         arrange()
+        if let window, let projectSheet {
+            let (width, room) = Self.sheetRoom(window)
+            projectSheet.fit(width: width, room: room)
+        }
     }
 
     /// The panel beside the content, put away by ⌃⌘S, or hidden under a narrow card unless shown

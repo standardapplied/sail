@@ -152,7 +152,17 @@ import Testing
                 let none = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [], "total": 0, "schema_version": 1}"#.utf8))
                 let (view, window) = try await WorkspacesReachTests.shown(RecordedServer([none]), width: width, panel: panel, saying: "No project is open")
                 defer { window.orderOut(nil) }
-                return WorkspacesReachTests.outOfReach(in: view)
+                var faults = WorkspacesReachTests.outOfReach(in: view)
+                let host = WorkspacesScrollTests.longHost
+                for creates in [false, true] {
+                    view.person = WorkspacesModel.Person(handle: "ana", admin: creates, confirmed: true, controlPlane: "https://\(host)", creates: creates)
+                    view.shown()
+                    let words = creates ? "Create your first project" : "No project is open"
+                    let said = await RunnerTabTests.until { !view.busy && view.text.contains(words) && view.text.contains(host) }
+                    guard said else { return faults + ["never said \(words) at \(host): \(view.text)"] }
+                    faults += WorkspacesReachTests.outOfReach(in: view) + WorkspacesReachTests.cut(naming: host, in: view)
+                }
+                return faults
             case .unreachable:
                 let (view, window) = try await WorkspacesReachTests.shown(RecordedServer([]), width: width, panel: panel, saying: "did not answer")
                 defer { window.orderOut(nil) }
@@ -260,6 +270,17 @@ import Testing
             guard case let .item(item) = entry else { return nil }
             return item.id
         }
+    }
+
+    /// The line in `root` naming `host`, where it does not show whole: a line it draws wider than
+    /// itself, a dot at a line's start or end, or its frame shorter than its lines.
+    static func cut(naming host: String, in root: NSView) -> [String] {
+        guard let line = LookSwitchTests.views(under: root).compactMap({ $0 as? PartsLine }).first(where: { $0.words.contains(host) && !$0.isHiddenOrHasHiddenAncestor }) else {
+            return ["no line names \(host)"]
+        }
+        let width = Double(line.bounds.width), lines = line.lines(width: width)
+        let whole = lines.allSatisfy { line.width(of: $0) <= width + 0.5 && !$0.hasPrefix("·") && !$0.hasSuffix("·") } && line.height(width: width) <= Double(line.bounds.height) + 0.5
+        return whole ? [] : ["'\(line.words)' drawn as \(lines) in \(line.frame)"]
     }
 
     /// What in `root` a person could see but not reach. A text field's own insides (the field
