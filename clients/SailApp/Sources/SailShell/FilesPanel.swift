@@ -718,20 +718,7 @@ final class TreeRowCell: NSView {
             aligned.draw(with: box, options: [.usesLineFragmentOrigin])
             return
         }
-        if row.kind == .folder {
-            let flip = rightToLeft && !row.expanded
-            let rect = disclosure
-            if flip {
-                let context = NSGraphicsContext.current?.cgContext
-                context?.saveGState()
-                context?.translateBy(x: rect.midX * 2, y: 0)
-                context?.scaleBy(x: -1, y: 1)
-                Draw.icon(.right, in: rect, ink: look.textTertiary)
-                context?.restoreGState()
-            } else {
-                Draw.icon(row.expanded ? .down : .right, in: rect, ink: look.textTertiary)
-            }
-        }
+        if row.kind == .folder { Draw.disclosure(open: row.expanded, in: disclosure, ink: look.textTertiary, rightToLeft: rightToLeft) }
         let name = self.name, freshRoom = (new ? Self.gap + Self.fresh : 0) + (unsaved ? Self.gap + Self.dot : 0)
         let room = max(width - start - freshRoom, 0), drawn = min(Double(name.size().width), room)
         let points = Look.Step.callout.points
@@ -769,7 +756,7 @@ final class TreeRowCell: NSView {
 }
 
 extension TreeRowCell: MarkedRow {
-    package func mark(chosen: Bool, strong _: Bool) {
+    package func mark(chosen: Bool, strong _: Bool, offers _: Bool) {
         guard chosen != strong else { return }
         strong = chosen
         needsDisplay = true

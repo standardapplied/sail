@@ -48,12 +48,10 @@ public final class Pill: NSView {
         self.look = look
         self.mono = mono
         super.init(frame: .zero)
-        dot.wantsLayer = true
         dot.isHidden = plain
         addSubview(dot)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
-        NotificationCenter.default.addObserver(self, selector: #selector(motionChanged), name: Motion.changed, object: nil)
         repaint()
     }
 
@@ -111,35 +109,62 @@ public final class Pill: NSView {
     }
 
     private func repaint() {
-        dot.ink = paint.dot
-        dot.hollow = paint.hollow
+        dot.paint(state, look: look)
         setAccessibilityLabel(said)
         invalidateIntrinsicContentSize()
-        Motion.pulse(dot.layer, state.pulses && window != nil)
         needsDisplay = true
-    }
-
-    override public func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        Motion.pulse(dot.layer, state.pulses && window != nil)
-    }
-
-    @objc private func motionChanged() {
-        Motion.pulse(dot.layer, state.pulses && window != nil)
     }
 }
 
-/// The pill's square dot: filled, or a 1 pt square outline for a stopped workspace.
-final class PillDot: NSView {
-    var ink = Tint(0) {
+/// A state's square, the pill's dot and a workspace row's in the left panel: filled, or a 1 pt
+/// square outline for a stopped workspace; pulsing every 1.2 s while in a window for a state under
+/// way, held still while motion is reduced.
+package final class PillDot: NSView {
+    package private(set) var ink = Tint(0) {
         didSet { needsDisplay = true }
     }
 
-    var hollow = false {
+    package private(set) var hollow = false {
         didSet { needsDisplay = true }
     }
 
-    override func draw(_: NSRect) {
+    var pulses = false {
+        didSet { pulse() }
+    }
+
+    package init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        NotificationCenter.default.addObserver(self, selector: #selector(motionChanged), name: Motion.changed, object: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    /// Drawn as `state`'s dot is in `look`.
+    package func paint(_ state: PillState, look: Look) {
+        let paint = PillPaint(state, look: look)
+        ink = paint.dot
+        hollow = paint.hollow
+        pulses = state.pulses
+    }
+
+    override package func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        pulse()
+    }
+
+    @objc private func motionChanged() {
+        pulse()
+    }
+
+    private func pulse() {
+        Motion.pulse(layer, pulses && window != nil)
+    }
+
+    override package func draw(_: NSRect) {
         guard hollow else {
             NSColor(ink).setFill()
             return NSBezierPath(rect: bounds).fill()

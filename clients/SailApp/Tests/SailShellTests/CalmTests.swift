@@ -124,7 +124,7 @@ import Testing
         let line = try #require(Self.found(WorkspaceLine.self, in: dock.view).first)
         #expect(Self.weight(line.title) == .semibold, "dock's name is not at full weight")
         let project = try #require(Self.found(SidebarRowCell.self, in: harbor.view).first)
-        #expect(harbor.paint.bar && Self.weight(project.label) == .semibold && project.tile.chosen, "harbor, chosen, has no bar, no weight or no ink well")
+        #expect(harbor.paint.bar && Self.weight(project.label) == .semibold && project.tile?.chosen == true, "harbor, chosen, has no bar, no weight or no ink well")
         dock.view.isEmphasized = true
         harbor.view.isEmphasized = false
         #expect(window.makeFirstResponder(view.project.list))

@@ -252,7 +252,7 @@ import Testing
         let row = try Self.row(list, 0)
         row.layoutSubtreeIfNeeded()
         let pill = try #require(cell.pill)
-        let tile = cell.convert(cell.tile.frame, to: row)
+        let tile = cell.convert(try #require(cell.tile).frame, to: row)
         let badge = cell.convert(pill.alignmentRect(forFrame: pill.frame), to: row)
         #expect(near(tile.minX, 31) && near(tile.width, 20) && abs(Double(tile.midY) - 15) <= 0.5, "the tile is at \(tile)")
         let name = try #require(backdrop.ink(in: NSRect(x: 52, y: 2, width: 60, height: 26)))
