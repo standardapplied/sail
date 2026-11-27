@@ -453,6 +453,11 @@ struct Step: Decodable {
     /// This route ("GET /v1/projects") cannot reach the control plane from now on; `proxyFails`
     /// empty clears it.
     var unreachable: String?
+    /// True: the server ends the session from now on, every call asked with it refused as the
+    /// golden `refusal-invalid-bearer-token`; false: sessions are answered again.
+    var endSession: Bool?
+    /// The route was asked this many times since the session last ended (`endSession`).
+    var askedSinceTheEnd: [String]?
     /// The drive's runner door holds this many sessions, within `seconds` (15 by default): the
     /// host's session list.
     var doorLists: Int?
