@@ -4398,43 +4398,65 @@ harness has exactly two ways in, its own sign-in or one stored key (`HarnessCont
 later harness is one adapter and no client change. Each refusal is the API's error shape (`code`,
 `message`, `action`, `remedy`).
 
-**A chat** (`ChatHost` over `ChatLaunch`, `ChatProcess` and `ChatLog`, kept in
-`ChatStore`) is a session the server holds for a person
-with an agent in their own workspace, with no pty. `POST /v1/projects/{p}/workspaces/{w}/chats`
-`{"harness", "mode", "inside"}` answers `201 {"session"}`, an id from `Ids`; it is admitted as a
-pty `Create` of an agent is, through the same `HostPty.admitWorkspace` and `admitAgent`
-(`AgentStarts`, `RunLogins`), so its refusals are theirs word for word, and only a harness with a
-chat form (`Harness.chat`), in one of its chat `modes` (`Harness.Mode.named`). Nothing starts then.
-`POST /v1/sessions/{id}/chat/messages` `{"text"}` logs the message and answers
-`{"seq", "queued"}`: with no process holding the chat's conversation, it starts one as an agent
-start is signed in (`admitAgent`, `enterWorkspace`, `handOver` of the login file the launch reads
-and removes, `withdraw` when the process ends), `AgentProcess` over pipes in `~/workspace` with the
-argv `HarnessChat.argv` gives (never a shell), resuming the conversation the harness last named in
-the mode it last said (its first chat mode when what it said is no mode's name a launch may pass);
-a message said while a turn is open, or while an earlier one waits, is `queued`, held in the log
-past the chat's `handed` mark, and handed when the turn ends (a `delivered` item names it). At most
-one process holds a chat: a message is sent under the chat's lock, and only a message starts one.
+**A chat** (`ChatHost` over `ChatLaunch`, `ChatProcess` and `ChatLog`, kept in `ChatStore`) is a
+session the server holds for a person with an agent in their own workspace, with no pty.
+`POST /v1/projects/{p}/workspaces/{w}/chats` `{"harness", "mode", "inside"}` answers `201
+{"session"}`, an id from `Ids`; it is admitted as a pty `Create` of an agent is, through the same
+`HostPty.admitWorkspace` and `admitAgent` (`AgentStarts`, `RunLogins`), so its refusals are theirs
+word for word, and only a harness with a chat form (`Harness.chat`), in one of its chat `modes`
+(`Harness.Mode.named`). Nothing starts then. `POST /v1/sessions/{id}/chat/messages` `{"text"}`
+(text only in this release) logs the message and answers `{"seq", "queued"}`: with no process
+holding the chat's conversation, it starts one as an agent start is signed in (`admitAgent`,
+`enterWorkspace`, `handOver` of the login file the launch reads and removes, `withdraw` when the
+process ends), `AgentProcess` over pipes in `~/workspace` with the argv `HarnessChat.argv` gives
+(never a shell), resuming the conversation the harness last named in the mode it last said (its
+first chat mode when what it said is no mode's name a launch may pass); a message said while a
+turn is open, while an earlier one waits or while the process is ending is `queued`, held in the
+log past the chat's `handed` mark, and handed when the turn ends (a `delivered` item names it) or by
+the next process. A message is handed at least once: marked handed after the harness took it.
+
+**One conversation, one process.** Every process of a chat writes its pid to one place, the chat's
+own folder (`AgentUnit.chat`, `~/.sail/chats/<session>/`), and the chat is marked `launched` from
+just before its start until its exit is known. Only a send, or the delivery of a waiting message,
+starts a process, under the chat's lock; a chat still marked `launched` that no process of this
+sail holds has its process halted first through that pid file (`ProcessEnd.halted`, which a live
+member left from before a restart is halted by too: signalled, and gone only on the container's
+answer) and nothing starts until it is proved gone (`409 agent_already_running` meanwhile). However
+a process's reading stops, an end of output or a failure, the process is ended (stdin closed, INT,
+TERM) unless its exit is known. At sail's start, before the API serves anything,
+`ChatHost.start` halts every process left over, cuts the turn each held (`told` why, rows closed
+as unread, every request `withdrawn`, `interrupted`), and delivers each chat's waiting messages
+with a process started as its opener (admitted as any start; a refusal is said in its words and
+the messages keep waiting). A process left over that its workspace does not answer for is asked
+again each sweep and before the chat's next start. When a process ends and messages wait, the next
+is started for them if the ended one took any; one that took none says so. A turn's end and a cut
+are each one write with the turn closed, so a crash never logs either twice; a turn's end closes
+its rows with no result and withdraws its requests still open.
+
 `GET /v1/sessions/{id}/chat?after=<seq>` answers `{"items", "ended"}`, each item `{"seq", "at",
 "type", ...its fields}` as `ChatWire` writes a `ChatItem` or Sail's own (`message`, `delivered`,
-`told`), at most 500 after `seq` at once, else as soon as one is logged or 25 seconds pass; it never
-starts a process. `POST /v1/sessions/{id}:end` answers 204: the chat is marked ended (it takes no
-message, `409 conflict`) and its process ended (`ProcessEnd`: stdin closed, then INT and TERM, each
-under `ProcessEnd.Grace`, which the live member's end uses too). Every route declares Enter a
-workspace and is decided on the chat's workspace for its opener alone: any other caller, an admin
-included, and an id of no chat, are `404 not_found` "There is no chat <id> of yours here.", so an
-id grants nothing. Every item is logged (`chat_items`) before it is read; text is gathered over
-`LiveMembers.DELTA_WINDOW` into one item a block. What a turn left open is read from the log since
-the last `turn_ended`: at a turn's end its tool rows with no result are closed as unread; when the
-process ends, sail stops (`ChatHost.close`) or, at its start, finds a turn a restart cut
-(`ChatHost.reclaim`), the turn is cut: `told` why, rows closed, every request `withdrawn` (it died
-with the process; a resume replays none), `interrupted`. A request is held, never answered for the
-person; after five minutes unanswered the process is ended and the turn cut, saying so. A request
-the harness's reader could not read whole is refused at once by its id, or, naming none, the turn
-is stopped (`interrupt`). The sweep (every 60 seconds) ends a process idle past the project's
-`max_idle` with no turn open, and erases chats ended more than 30 days ago. `chat_sessions` and
-`chat_items` are box-local and never synced; a chat goes with its opener (the roster's cascade),
-its workspace (`WorkspaceDoors.delete`, and the command line's) and its project (`project destroy`,
-`Erasure`).
+`told`), at most 500 after `seq`, and past the first at most 1 MiB of them, at once, else as soon
+as one is logged in that chat or 25 seconds pass; it never starts a process. `ended` is true only
+with an ended chat's last item, once its process is known gone, so a reader that stops there has
+everything. An item is at most `ChatStore.MAX_PAYLOAD_CHARS`, which every reader parses within.
+`POST /v1/sessions/{id}:end` answers 204 once the chat is marked ended (it takes no message, `409
+conflict`) and its process ended (`ProcessEnd`: stdin closed, then INT and TERM, each under
+`ProcessEnd.Grace`, which the live member's end uses too); the chat's folder in the workspace goes
+with its process. Every route declares Enter a workspace and is decided on the chat's workspace for
+its opener alone: any other caller, an admin included, and an id of no chat, are `404 not_found`
+"There is no chat <id> of yours here.", so an id grants nothing. Every item is logged
+(`chat_items`) before it is read; text is gathered over `LiveMembers.DELTA_WINDOW` into one item a
+block. A request is held, never answered for the person; after five minutes unanswered its turn is
+stopped (`interrupt`), saying so, and the process kept; a turn that does not stop five minutes
+later has its process ended. A request the harness's reader could not read whole is refused at
+once by its id, or, naming none, the turn is stopped. The sweep (every 60 seconds) erases chats
+ended more than 30 days ago, asks again after processes left over, ends a process whose chat was
+erased, and ends a process idle past the project's `max_idle` with no turn open, deciding and
+closing its stdin in one step under the guard a turn starts under, so no message is handed to it
+and a turn it begins itself after is never cut. `chat_sessions` and `chat_items` are box-local and
+never synced; a chat goes with its opener (the roster's cascade), its workspace
+(`WorkspaceDoors.delete`, and the command line's) and its project (`project destroy`, whether or
+not its container was left, and `Erasure`).
 
 What a command the agent runs can read, measured with fake keys on Claude Code 2.1.327 (its Bash
 tool's `env`, against a stand-in API) and Codex 0.170: a run's key, in `ANTHROPIC_API_KEY`, or an
