@@ -1733,6 +1733,20 @@ class ClientGoldensTest {
           chats.formatted("berth"),
           dana,
           Map.of("harness", "codex", "mode", "full-access"));
+      record(
+          goldens,
+          "refusal-chat-mode-not-offered",
+          "POST",
+          chats.formatted("berth"),
+          dana,
+          Map.of("harness", "claude-code", "mode", "bypassPermissions"));
+      record(
+          goldens,
+          "refusal-chat-inside-invalid",
+          "POST",
+          chats.formatted("berth"),
+          dana,
+          Map.of("harness", "claude-code", "mode", "default", "inside", "yes"));
       var session = "/v1/sessions/" + opened.get("session");
       var messages = session + "/chat/messages";
       record(goldens, "chat-message-sent", "POST", messages, dana, Map.of("text", "hi"));
@@ -1749,6 +1763,8 @@ class ClientGoldensTest {
       record(goldens, "chat-items-after", "GET", session + "/chat?after=5", dana, null);
       record(goldens, "refusal-chat-not-found", "GET", session + "/chat", ana, null);
       record(goldens, "refusal-chat-invalid-id", "GET", "/v1/sessions/nobody/chat", dana, null);
+      record(
+          goldens, "refusal-chat-after-invalid", "GET", session + "/chat?after=last", dana, null);
       record(
           goldens,
           "refusal-chat-attachments-invalid",

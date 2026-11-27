@@ -1,0 +1,21 @@
+{
+  "request": {
+    "body": {
+      "harness": "claude-code",
+      "mode": "bypassPermissions"
+    },
+    "method": "POST",
+    "path": "/v1/projects/harbor/workspaces/berth/chats"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "Claude Code takes no mode 'bypassPermissions' in a workspace; it takes default, acceptEdits, plan."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

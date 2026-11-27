@@ -55,6 +55,9 @@ import java.util.function.Supplier;
  */
 public final class ChatHost implements AutoCloseable {
 
+  /** What a read from no item's seq is told. */
+  static final String AFTER = "after is the seq of the last item read, 0 for none.";
+
   /** The most items one read answers. */
   static final int PAGE = 500;
 
@@ -217,7 +220,7 @@ public final class ChatHost implements AutoCloseable {
    */
   public Read read(String session, long after) {
     if (after < 0) {
-      throw new IllegalArgumentException("after is the seq of the last item read, 0 for none.");
+      throw new IllegalArgumentException(AFTER);
     }
     yours(session);
     var deadline = timing.clock().get().plus(timing.poll());

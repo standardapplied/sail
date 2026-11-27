@@ -590,6 +590,9 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-template-2d-runner-not-ready", "refusal-project-name-taken",
     "refusal-project-name-invalid", "refusal-project-repos-same-path",
     "refusal-project-section-repos-same-path",
+    "refusal-chat-not-your-workspace", "refusal-chat-no-chat-form", "refusal-chat-mode-not-offered",
+    "refusal-chat-inside-invalid", "refusal-chat-not-found", "refusal-chat-invalid-id",
+    "refusal-chat-after-invalid", "refusal-chat-attachments-invalid", "refusal-chat-ended",
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.
@@ -597,6 +600,8 @@ let answersOfRoutesNotYetCalled: Set<String> = [
     "spec-measures", "specs-measures",
     "template-2c-missing", "template-2d-missing", "template-2e-building", "template-2f-building",
     "template-2g-built", "template-2h-failed", "template-2h-interrupted", "template-2h-cut-pending",
+    "chat-opened", "chat-message-sent", "chat-items", "chat-message-again", "chat-message-queued",
+    "chat-items-after", "chat-ended", "chat-items-ended",
 ]
 
 /// The member the golden writer seats in the room.

@@ -17,6 +17,7 @@
         },
         {
           "at": "2026-11-11T09:00:00.656Z",
+          "clipped": false,
           "commands": [
             "sail-portal",
             "spec-board",
@@ -103,7 +104,9 @@
         },
         {
           "at": "2026-11-11T09:00:00.656Z",
+          "clipped": false,
           "detail": {
+            "clipped": false,
             "line": "echo probe-ok",
             "type": "command"
           },
@@ -115,6 +118,7 @@
         },
         {
           "at": "2026-11-11T09:00:00.656Z",
+          "clipped": false,
           "failed": false,
           "id": "toolu_011VvCwXcvkemp321CMEyur6",
           "output": "probe-ok",

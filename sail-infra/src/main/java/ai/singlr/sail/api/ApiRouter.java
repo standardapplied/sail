@@ -802,6 +802,9 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    */
   private ApiResponse openChat(Call call) throws IOException {
     var body = call.body();
+    if (!(body.getOrDefault("inside", false) instanceof Boolean inside)) {
+      throw new IllegalArgumentException("inside must be true or false");
+    }
     return ApiResponse.created(
         operations
             .chats()
@@ -810,13 +813,18 @@ public final class ApiRouter implements HttpHandler, RouteTable {
                 call.param("workspace"),
                 text(body, "harness"),
                 text(body, "mode"),
-                Boolean.TRUE.equals(body.get("inside"))));
+                inside));
   }
 
   /** {@code GET /v1/sessions/{id}/chat?after=<seq>}: the items after {@code seq}, long-polled. */
   private ApiResponse readChat(Call call) {
-    var after = Objects.requireNonNullElse(call.query().get("after"), "0");
-    return ApiResponse.ok(operations.chats().read(call.param("session"), Long.parseLong(after)));
+    long after;
+    try {
+      after = Long.parseLong(Objects.requireNonNullElse(call.query().get("after"), "0"));
+    } catch (NumberFormatException notASeq) {
+      throw new IllegalArgumentException(ChatHost.AFTER, notASeq);
+    }
+    return ApiResponse.ok(operations.chats().read(call.param("session"), after));
   }
 
   /** {@code POST /v1/sessions/{id}/chat/messages} with {@code {"text", "attachments"?}}. */

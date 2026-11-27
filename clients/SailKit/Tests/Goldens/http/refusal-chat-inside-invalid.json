@@ -1,0 +1,22 @@
+{
+  "request": {
+    "body": {
+      "harness": "claude-code",
+      "inside": "yes",
+      "mode": "default"
+    },
+    "method": "POST",
+    "path": "/v1/projects/harbor/workspaces/berth/chats"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "inside must be true or false"
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}
