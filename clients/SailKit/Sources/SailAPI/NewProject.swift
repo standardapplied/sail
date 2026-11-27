@@ -75,6 +75,8 @@ public struct NewProject: Equatable, Sendable {
     public private(set) var agents: [Agent]
     /// Why the server's harnesses could not be listed, said under AGENTS; nil when they were.
     public private(set) var agentsUnlisted: String?
+    /// Try Again is offered under that line.
+    public private(set) var agentsTryAgain: Bool
     public private(set) var size = Size.medium
     /// Custom's fields as typed, digits only, starting at the size chosen before.
     public private(set) var custom: [Part: String] = [.cores: "4", .memory: "8", .disk: "50"]
@@ -91,6 +93,7 @@ public struct NewProject: Equatable, Sendable {
     public init(agents: [Agent], unlisted: String? = nil) {
         self.agents = agents
         agentsUnlisted = unlisted
+        agentsTryAgain = unlisted != nil
     }
 
     /// Create is offered: a name is typed, the agents were listed, every path typed has a URL to
@@ -107,8 +110,10 @@ public struct NewProject: Equatable, Sendable {
         case let .success(known):
             agents = known.agents.map { Agent(name: $0.name, display: $0.displayName) }
             agentsUnlisted = nil
+            agentsTryAgain = false
         case let .failure(error):
             agentsUnlisted = "Sail could not list the agents: \(error.said(at: address))"
+            agentsTryAgain = error.mayTryAgain
         }
     }
 

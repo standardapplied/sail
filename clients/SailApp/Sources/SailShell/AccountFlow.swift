@@ -47,6 +47,12 @@ public final class AccountFlow {
     /// How many times who is signed in was set: a check that began before the latest answers too
     /// late to be shown.
     private var shown = 0
+    /// How many times a person signed in here: a call tells of its session's end only while the
+    /// sign-in it was asked under stands.
+    private var signIns = 0
+    /// The sign-in a call found ended while a check (which may have asked before the end) or a
+    /// person's action was under way: once it ends, who is signed in is asked while it still stands.
+    private var endedMeanwhile: Int?
     /// A check's answer that came while a person's action was under way, taken once it ends.
     private var heldAnswer: (@MainActor () -> Void)?
 
@@ -83,9 +89,41 @@ public final class AccountFlow {
         return .signedIn(handle: whoami?.fde ?? standing.fde, address: standing.controlPlane.named, whoami: whoami, unreachable: unreachable, refreshing: checks > 0)
     }
 
-    /// The API as the person signed in, nil when no one is or the vault cannot say.
+    /// The API as the person signed in, nil when no one is or the vault cannot say. Whichever of its
+    /// calls finds the session ended has who is signed in asked (``sessionEnded(_:)``).
     func client() -> SailClient? {
-        standing.flatMap { try? account.client(at: $0.controlPlane) }
+        guard let standing else { return nil }
+        let signIn = signIns
+        return try? account.client(at: standing.controlPlane) { [weak self] in
+            Task { @MainActor in self?.sessionEnded(signIn) }
+        }
+    }
+
+    /// The check a call that found the session ended asked: what a test awaits.
+    package private(set) var ending: Task<Void, Never>?
+
+    /// A call asked under the `signIn`-th sign-in found the session ended: who is signed in is asked
+    /// while that sign-in stands, once however many calls found it together. A check or a person's
+    /// action already under way ends first, and is followed by a check only if it leaves that
+    /// sign-in standing. The check's answer goes where every check's goes: an ended session to the
+    /// welcome.
+    private func sessionEnded(_ signIn: Int) {
+        guard standing != nil, signIn == signIns, ending == nil else { return }
+        guard !busy else {
+            endedMeanwhile = signIn
+            return
+        }
+        ending = Task {
+            await refresh()
+            ending = nil
+        }
+    }
+
+    /// A check or a person's action ended: a session a call found ended meanwhile is asked about now.
+    private func askIfEndedMeanwhile() {
+        guard let signIn = endedMeanwhile else { return }
+        endedMeanwhile = nil
+        sessionEnded(signIn)
     }
 
     /// Asks the server who this Mac is signed in as at the control plane it last reached, when it
@@ -99,6 +137,7 @@ public final class AccountFlow {
         defer {
             checks -= 1
             onChange()
+            askIfEndedMeanwhile()
         }
         _ = await run(byAPerson: false) { () async throws(AccountRefusal) in
             let until: Date?
@@ -208,6 +247,7 @@ public final class AccountFlow {
     /// `landing`, as a person's sign-in, which opens Workspaces.
     private func signIn(at plane: ControlPlane, landing: Bool = true) async throws(AccountRefusal) {
         let signedIn = try await account.signIn(at: plane)
+        signIns += 1
         let whoami = try? signedIn.whoami.get()
         let name = [whoami?.displayName, whoami?.name].compactMap { $0 }.first { !$0.isEmpty }
         memory.signedIn(RememberedSignIn(handle: whoami?.fde ?? signedIn.fde, name: name), at: plane)
@@ -231,13 +271,17 @@ public final class AccountFlow {
         onChange()
     }
 
-    /// A person's action ends: a check's answer that came meanwhile is taken.
+    /// A person's action ends: a check's answer that came meanwhile is taken, then a session a call
+    /// found ended meanwhile is asked about.
     private func end() {
         acting -= 1
         onChange()
-        guard acting == 0, let held = heldAnswer else { return }
-        heldAnswer = nil
-        held()
+        guard acting == 0 else { return }
+        if let held = heldAnswer {
+            heldAnswer = nil
+            held()
+        }
+        askIfEndedMeanwhile()
     }
 
     /// Runs `act`, a person's action (``begin()`` already called) or (not `byAPerson`) a check;

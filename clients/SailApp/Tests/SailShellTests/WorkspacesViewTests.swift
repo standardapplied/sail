@@ -23,11 +23,11 @@ import Testing
     static let uday = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "127.0.0.1")
     static let ana = WorkspacesModel.Person(handle: "ana", admin: false, confirmed: true, controlPlane: "127.0.0.1")
 
-    static func view(_ transport: any Transport, width: Double = 1000, chosenLast: String? = nil) throws -> (WorkspacesView, KeyWindow) {
+    static func view(_ transport: any Transport, width: Double = 1000, chosenLast: String? = nil, ended: Told = Told()) throws -> (WorkspacesView, KeyWindow) {
         let view = WorkspacesView(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try LabelFont(directory: LookTests.fonts))
         view.lastChosen = { _ in chosenLast }
         view.person = Self.uday
-        view.client = SailClient(transport: transport, token: "tok")
+        view.client = SailClient(transport: transport, token: "tok", ended: ended.tell)
         let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = view
         window.orderFront(nil)

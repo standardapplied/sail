@@ -262,23 +262,23 @@ import Testing
 
     /// A read the server refused is no missed answer: its words stand on the card and the reads stop
     /// there, with no pause after it. A project gone (404) asks for the projects again; an ended
-    /// session (401) is handed to the check that says it, with nothing said on the card.
+    /// session (401) says nothing on the card: the welcome says it.
     @MainActor @Test(arguments: [
-        ("refusal-forbidden", ["Enrollment ticket is invalid or expired."], nil),
-        ("refusal-project-not-in-catalog-sessions", ["Project 'harbor' is not in the catalog."], WorkspacesModel.AfterRead.listProjects),
-        ("refusal-missing-bearer-token", [], .sessionEnded),
-    ] as [(String, [String], WorkspacesModel.AfterRead?)])
-    func aRefusedReadIsSaidAndStopsTheReads(_ golden: String, _ said: [String], _ after: WorkspacesModel.AfterRead?) async throws {
+        ("refusal-forbidden", ["Enrollment ticket is invalid or expired."], false),
+        ("refusal-project-not-in-catalog-sessions", ["Project 'harbor' is not in the catalog."], true),
+        ("refusal-missing-bearer-token", [], false),
+    ] as [(String, [String], Bool)])
+    func aRefusedReadIsSaidAndStopsTheReads(_ golden: String, _ said: [String], _ listsProjects: Bool) async throws {
         let reads = Reads([.success(try Exchange("template-2e-building")), .success(try Exchange(golden)), .success(try Exchange("template-2e-building"))])
         var model = try Self.model()
         let slept = Mutex<[Duration]>([])
-        var followed: [WorkspacesModel.AfterRead?] = []
+        var followed: [Bool] = []
         await SailClient(transport: reads, token: "tok").readTemplate("lighthouse", sleep: { duration in slept.withLock { $0.append(duration) } }) { answer in
             followed.append(model.templateRead("lighthouse", answer))
             return model.readsAgain("lighthouse")
         }
         let asked = await reads.asked
-        #expect(asked == 2 && slept.withLock { $0 } == [.seconds(2)] && followed == [nil, after], "\(followed)")
+        #expect(asked == 2 && slept.withLock { $0 } == [.seconds(2)] && followed == [false, listsProjects], "\(followed)")
         let card = try #require(Self.card(model))
         #expect(card.missed == nil && card.stage == .building, "a refusal said as no answer")
         #expect(Array(card.refusal.prefix(said.count)) == said && card.refusal.isEmpty == said.isEmpty, "\(card.refusal)")
@@ -314,7 +314,8 @@ import Testing
     /// and a read with no answer there is asked again.
     @Test func aProjectListedAwayForgetsItsTemplate() throws {
         var model = try Self.read(try Self.status("template-2e-building", step: 9))
-        #expect(model.templateRead("lighthouse", WorkspacesModelTests.answer(.template(project: "lighthouse"), "refusal-project-not-in-catalog-sessions")) == .listProjects)
+        let listsProjects = model.templateRead("lighthouse", WorkspacesModelTests.answer(.template(project: "lighthouse"), "refusal-project-not-in-catalog-sessions"))
+        #expect(listsProjects)
         let harbor = ProjectSummary(name: "harbor", containerStatus: .known(.notCreated), template: .known(.ready))
         _ = model.projectsListed(.success(ProjectList(projects: [harbor], total: 1)), request: model.askingProjects())
         let back = ProjectList(projects: [harbor, ProjectSummary(name: "lighthouse", containerStatus: .known(.notCreated), template: .known(.building))], total: 2)
@@ -346,8 +347,8 @@ import Testing
     }
 
     /// A build asked with a session that has ended, by Build Again or the first one after Create, says
-    /// nothing on the card: the ended session is handed to the check that says it, as a read's is,
-    /// and what an earlier build was told goes with the build asked again.
+    /// nothing on the card: the welcome says it, as for a read, and what an earlier build was told
+    /// goes with the build asked again.
     @Test(arguments: [TemplateState.failed, .missing])
     func aBuildAskedWithAnEndedSessionIsHandedOver(_ state: TemplateState) throws {
         var model = try Self.model(Self.dana, state)
@@ -357,9 +358,9 @@ import Testing
             model.built("lighthouse", WorkspacesModelTests.answer(.buildTemplate(project: "lighthouse"), "refusal-template-read-only"))
         }
         _ = model.asksBuild("lighthouse")
-        let after = model.built("lighthouse", WorkspacesModelTests.answer(.buildTemplate(project: "lighthouse"), "refusal-missing-bearer-token"))
+        model.built("lighthouse", .failure(.signIn(.ended)))
         let page = try #require(WorkspacesModelTests.page(model))
-        #expect(after == .sessionEnded && page.banner == nil && model.templateShown == (state == .failed ? "lighthouse" : nil))
+        #expect(page.banner == nil && model.templateShown == (state == .failed ? "lighthouse" : nil))
         if state == .failed {
             let card = try #require(Self.card(model))
             #expect(card.stage == .failed && card.refusal.isEmpty && !card.asking, "\(card.refusal)")

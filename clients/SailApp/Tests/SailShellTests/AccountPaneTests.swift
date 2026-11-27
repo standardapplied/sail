@@ -366,11 +366,13 @@ final class MemoryVaultOf: TokenVault, Sendable {
 
 
 /// A control plane answering each route as the server recorded it, the answers changed as a test
-/// goes; a route held answers once released, or fails as out of reach once the task waiting on it
-/// is cancelled, as URLSession's does. Each hold is a hold of its own.
+/// goes; a route held answers once released, as it was asked to or else as the route is answered
+/// then, or fails as out of reach once the task waiting on it is cancelled, as URLSession's does.
+/// Each hold is a hold of its own.
 actor Desk: Transport {
     private var answers: [String: HTTPResponse] = [:]
     private var holding: String?
+    private var heldAnswer: HTTPResponse?
     private var gate = Gate(), arrival = Gate()
     private(set) var asked: [String] = []
 
@@ -401,9 +403,11 @@ actor Desk: Transport {
         answers[route] = nil
     }
 
-    /// The next request of `route` is held until ``release()``.
-    func hold(_ route: String) {
+    /// The next request of `route` is held until ``release()``, then answered as `answering` was,
+    /// when given.
+    func hold(_ route: String, answering: Exchange? = nil) {
         holding = route
+        heldAnswer = answering.map { HTTPResponse(status: $0.status, headers: $0.headers, body: $0.body) }
         gate = Gate()
         arrival = Gate()
     }
@@ -421,10 +425,11 @@ actor Desk: Transport {
         asked.append(request.route)
         if request.route == holding {
             holding = nil
-            let gate = gate
+            let gate = gate, held = heldAnswer
             arrival.open()
             await gate.wait()
             if Task.isCancelled { throw .unreachable("cancelled") }
+            if let held { return held }
         }
         guard let answer = answers[request.route] else { throw .unreachable("The network connection was lost.") }
         return answer
@@ -669,9 +674,9 @@ actor Desk: Transport {
         #expect(Self.names(pane.passkeyList).count == 2)
     }
 
-    /// A group's call that finds the session ended is not drawn: it hands over to the check at once,
-    /// which a hide meanwhile does not stop; no one is signed in, and the ended session is told
-    /// where every check tells it.
+    /// A group's call that finds the session ended says so in Sail's words, nothing of the server's,
+    /// and has the flow ask its check once, which a hide meanwhile does not stop; no one is signed
+    /// in, and the ended session is told where every check tells it.
     @Test func aGroupsCallFindingTheSessionEndedSignsOut() async throws {
         let desk = try Desk(Self.goldens)
         let (pane, window) = try await Self.signedIn(desk)
@@ -683,13 +688,15 @@ actor Desk: Transport {
         var told: Date?
         pane.flow.onChecked = { _, endedOn in told = endedOn }
         pane.load()
-        await desk.arrived(during: Task { await pane.loading?.value; await pane.acting?.value })
-        #expect(pane.passkeys.failure == nil && pane.flow.standing != nil, "the ended session was said in the group: \(pane.text)")
+        await pane.loading?.value
+        let ending = try #require(pane.flow.ending, "the check was not asked")
+        await desk.arrived(during: ending)
+        #expect(pane.passkeys.failure == ["Your sign-in ended."] && !pane.text.lowercased().contains("bearer") && pane.flow.standing != nil, "\(pane.text)")
         pane.isHidden = true
         await desk.release()
-        await pane.loading?.value
-        await pane.acting?.value
-        #expect(pane.flow.standing == nil && told != nil, "the check was stopped: \(String(describing: pane.flow.standing?.whoami))")
+        await ending.value
+        let checks = await desk.asked.filter { $0 == "GET /v1/whoami" }.count
+        #expect(pane.flow.standing == nil && told != nil && checks == 2, "the check was stopped or asked again: \(checks) checks")
     }
 
     /// ⋯ ▸ Remove asks first in the library's sheet, Remove destructive and Cancel the default;
@@ -766,8 +773,8 @@ actor Desk: Transport {
         #expect(pane.refusals[mine.id] == ["You are signed in with this passkey.", "Sign in with another passkey to remove this one."], "\(pane.refusals)")
     }
 
-    /// A removal whose call finds the session ended says nothing under its row: it hands over to
-    /// the check at once, which says so where every check does.
+    /// A removal whose call finds the session ended says so under its row in Sail's words, nothing
+    /// of the server's, and has the flow ask its check, which says so where every check does.
     @Test func aRemovalFindingTheSessionEndedHandsOverAtOnce() async throws {
         let desk = try Desk(Self.goldens)
         let (pane, window) = try await Self.signedIn(desk)
@@ -778,11 +785,12 @@ actor Desk: Transport {
         await desk.answer(ended)
         await desk.hold("GET /v1/whoami")
         _ = try await Self.removed("Sail for iPhone", in: pane)
-        await desk.arrived(during: pane.acting)
-        #expect(pane.refusals.isEmpty && pane.flow.standing != nil, "the ended session was said under the row: \(pane.refusals)")
+        let ending = try #require(pane.flow.ending, "the check was not asked")
+        await desk.arrived(during: ending)
+        #expect(pane.refusals[phone.id] == ["Your sign-in ended."] && !pane.text.lowercased().contains("bearer") && pane.flow.standing != nil, "\(pane.refusals)")
         await desk.release()
-        await pane.acting?.value
-        #expect(pane.flow.standing == nil, "the check was not asked")
+        await ending.value
+        #expect(pane.flow.standing == nil, "the check did not end the sign-in")
     }
 
     /// A removal under way is said on its row, which takes no second Remove meanwhile, by ⋯ or by

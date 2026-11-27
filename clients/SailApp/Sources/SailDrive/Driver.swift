@@ -450,7 +450,7 @@ final class Driver {
         }
         if let wanted = step.attached {
             let reached = await waitUntil(step.seconds ?? 20) { (self.pane?.session?.state.phase == .attached) == wanted }
-            return (reached, "the session is \(pane?.session.map { "\($0.state.phase)" } ?? "none")")
+            return (reached, "the session is \(pane?.session.map { "\($0.state.phase)" } ?? "none"); \(arrangementSaid)")
         }
         return (false, "the step names no action")
     }

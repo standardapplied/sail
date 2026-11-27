@@ -117,6 +117,21 @@ import Testing
         session.close()
     }
 
+    /// A ticket the API refuses because the session ended ends the terminal as a sign-in it needs, in
+    /// the welcome's words: nothing of the server's, and nothing tried again on its own.
+    @Test(arguments: ["refusal-missing-bearer-token", "refusal-invalid-bearer-token"])
+    func anEndedSessionEndsTheTerminalAsASignInInTheWelcomesWords(_ golden: String) async throws {
+        let ended = try Exchange(golden)
+        let server = RecordedServer([Exchange(method: "POST", path: "/v1/terminal/tickets", status: ended.status, body: ended.body)])
+        let session = TerminalSession(open: create, door: .runner(SailClient(transport: server, token: "tok")), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
+        let watch = Watch(session)
+        session.start()
+        try await watch.until("ended") { session.state.phase == .ended(.signIn(.ended)) }
+        #expect(SessionEnd.signIn(.ended).said == ["Your sign-in ended.", "Your sessions on the runner kept running.", "Sign in again with your passkey."])
+        #expect(await server.requests.count == 1)
+        session.close()
+    }
+
     /// T3: output reaches the screen in order, and a resize lands after the bytes before it.
     @Test func outputAndResizesReachTheScreenInTheOrderTheyCame() async throws {
         let (host, session, peer, watch) = try await attachedLocally(columns: 10, rows: 3)

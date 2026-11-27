@@ -150,6 +150,23 @@ import Testing
         #expect(desk.requests.count == 2 && heard.phases.contains { if case .reconnecting = $0 { true } else { false } })
     }
 
+    /// A files ticket the API refuses because the session ended is said in the line in the welcome's
+    /// words, nothing of the server's, and nothing is tried again on its own.
+    @Test(arguments: ["refusal-missing-bearer-token", "refusal-invalid-bearer-token"])
+    func anEndedSessionIsSaidInTheWelcomesWords(_ golden: String) async throws {
+        let ended = try Exchange(golden)
+        let server = RecordedServer([Exchange(method: "POST", path: "/v1/terminal/tickets", status: ended.status, body: ended.body)])
+        let session = FilesSession(project: "harbor", workspace: "dock", door: .runner(SailClient(transport: server, token: "tok")), waits: Self.waits, timeout: Patience.answer) { _ in
+            try Task.checkCancellation()
+        }
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.phases.last == .refused(SignIn.ended.lines) }, "\(heard.phases)")
+        #expect(FilesLine.state(of: .refused(SignIn.ended.lines), workspace: "dock") == "Your sign-in ended. Your sessions on the runner kept running. Sign in again with your passkey.")
+        #expect(await server.requests.count == 1)
+    }
+
     /// #510's endings: a sweep that finds the workspace given to another ends it in its words; one
     /// connection over a cap is said with Try Again and not tried on its own; a handover's
     /// `terminal_unavailable` is a drop, tried again at once.

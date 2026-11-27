@@ -389,7 +389,8 @@ import Testing
     func aCreatedProjectIsChosenThenBuilt(_ ended: Bool) async throws {
         let build = "POST /v1/projects/lighthouse/template%3Abuild"
         let desk = try Desk(["projects-none", "agents"])
-        let (view, window) = try WorkspacesViewTests.view(desk)
+        let handed = Told()
+        let (view, window) = try WorkspacesViewTests.view(desk, ended: handed)
         defer {
             window.attachedSheet.map { window.endSheet($0) }
             window.orderOut(nil)
@@ -397,8 +398,6 @@ import Testing
         let pauses = Pauses()
         view.pause = { try await pauses.pause($0) }
         view.person = BuildCardViewTests.dana
-        var handed = 0
-        view.onSessionEnded = { handed += 1 }
         view.shown()
         #expect(await RunnerTabTests.until { Driverless.button("Create Project", in: view.project) != nil }, "\(view.text)")
         await desk.answer(try Exchange("project-created").altered(at: ["name"], to: "lighthouse"))
@@ -420,7 +419,7 @@ import Testing
             let joined = try Exchange("template-2f-joined"), refusal = try Exchange("refusal-missing-bearer-token")
             await desk.answer(Exchange(method: joined.method, path: joined.path, status: refusal.status, body: refusal.body))
             await desk.release()
-            #expect(await RunnerTabTests.until { handed == 1 }, "the ended session was not handed over: \(view.text)")
+            #expect(await RunnerTabTests.until { handed.times == 1 && !view.busy }, "the ended session was not told: \(view.text)")
             let reads = await BuildCardViewTests.reads(desk)
             #expect(!view.text.lowercased().contains("bearer") && !view.text.contains("did not start") && reads == 0, "\(view.text)")
             return
