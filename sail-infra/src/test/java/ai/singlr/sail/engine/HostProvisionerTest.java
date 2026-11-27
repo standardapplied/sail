@@ -1312,8 +1312,8 @@ class HostProvisionerTest {
   private static final String BARE_PROFILE = "name: singlr-base\ndevices: {}\n";
 
   /**
-   * {@code incus profile show singlr-base} on the fleet's eng box, Incus 7.7, 2026-11-27: its root
-   * disk on devpool, its NIC on incusbr0.
+   * {@code incus profile show singlr-base} as Incus 7.7 prints the profile the fleet's eng box held
+   * on 2026-11-27: its root disk on devpool, its NIC on incusbr0, acme on it.
    */
   private static final String PROFILE_ON_DEVPOOL =
       """
@@ -1330,7 +1330,7 @@ class HostProvisionerTest {
           type: disk
       name: singlr-base
       used_by:
-        - /1.0/instances/acme
+      - /1.0/instances/acme
       project: default
       """;
 

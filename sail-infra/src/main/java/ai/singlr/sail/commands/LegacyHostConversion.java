@@ -8,6 +8,8 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -103,10 +105,8 @@ final class LegacyHostConversion {
     }
 
     private boolean down(String project) throws Exception {
-      var info = shell.exec(List.of("incus", "info", "--", project));
-      return info.ok()
-          ? info.stdout().lines().anyMatch(line -> line.strip().equals("Status: STOPPED"))
-          : info.stderr().contains("Instance not found");
+      var state = new ContainerManager(shell).queryState(project);
+      return state instanceof ContainerState.Stopped || state instanceof ContainerState.NotCreated;
     }
 
     @Override
