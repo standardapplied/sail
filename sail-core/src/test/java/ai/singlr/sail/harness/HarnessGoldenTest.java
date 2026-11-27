@@ -462,13 +462,15 @@ class HarnessGoldenTest {
 
   @Test
   void claudeCodeChatIsTheLineItWasRecordedAskingUnder() {
-    var asksFirst = recordedChat("02b-relay-stdio");
-    asksFirst.addAll(List.of("--permission-mode", "manual"));
     assertEquals(
-        asksFirst,
-        CLAUDE_CODE_CHAT.argv(new HarnessChat.Launch("default", "haiku", null)),
-        "Asks first is named, so no workspace default overrides it: as manual, the name its"
-            + " --help gives Claude Code's default (00-claude-help.txt)");
+        List.of(
+            Recorded.parsed("01a-mode-manual", 1).get("argv"),
+            Recorded.parsed("01c-mode-manual-over-workspace-acceptEdits", 1).get("argv")),
+        List.of(
+            CLAUDE_CODE_CHAT.argv(new HarnessChat.Launch("default", "haiku", null)),
+            CLAUDE_CODE_CHAT.argv(new HarnessChat.Launch("default", "haiku", null))),
+        "Asks first is named, as manual, the name --help gives Claude Code's default, so no"
+            + " workspace default overrides it: probe 3 launched exactly this line (01a, 01c)");
     assertEquals(
         recordedChat("03b-plan-exit-plan-mode"),
         CLAUDE_CODE_CHAT.argv(new HarnessChat.Launch("plan", "haiku", null)));

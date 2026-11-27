@@ -81,18 +81,20 @@ final class ClaudeCodeChat implements HarnessChat {
 
   /**
    * Claude Code's own permission modes that were recorded working in a chat: its {@code default}
-   * first, named at the start as {@code manual}, the name its {@code --help} lists for it (it lists
-   * no {@code default}), so a workspace's own default never overrides the person's choice. The mode
-   * a chat is in is the one Claude Code says ({@code init}, {@code status}). In plan mode the
-   * recorded turns ran on a model other than the one {@code --model} named, until the plan was
-   * approved. Never asks ({@code bypassPermissions}) is not offered: it was never recorded at a
-   * chat's start or as a switch. Each mode's words say only what a recording shows it doing
-   * (asserted, line by line, in {@code LiveChatTest.everyModeWordIsARecordedDecision}): Asks first
-   * asked before a Write and a command, and ran {@code sleep} and {@code echo} unasked; Edits
-   * freely ran a Write and {@code rm}, {@code mv}, {@code cp}, {@code sed -i} and {@code nice rm}
-   * inside the workspace unasked, and asked before {@code rm} outside it. "Any folder you let it
-   * work in" is its documentation's {@code additionalDirectories}: said so as never to say less
-   * than it grants.
+   * first, named at the start as {@code manual}, the name its {@code --help} lists for it, so a
+   * workspace's own default never overrides the person's choice: probe 3 recorded the launch taken,
+   * {@code init} then saying {@code default}, and an edit and a command each asking in a workspace
+   * whose settings default to {@code acceptEdits} (01a, 01c). {@code --permission-mode default},
+   * which {@code --help} does not list, was taken the same way (01d). The mode a chat is in is the
+   * one Claude Code says ({@code init}, {@code status}). In plan mode the recorded turns ran on a
+   * model other than the one {@code --model} named, until the plan was approved. Never asks ({@code
+   * bypassPermissions}) is not offered: it was never recorded at a chat's start or as a switch.
+   * Each mode's words say only what a recording shows it doing (asserted, line by line, in {@code
+   * LiveChatTest.everyModeWordIsARecordedDecision}): Asks first asked before a Write and a command,
+   * and ran {@code sleep} and {@code echo} unasked; Edits freely ran a Write and {@code rm}, {@code
+   * mv}, {@code cp}, {@code sed -i} and {@code nice rm} inside the workspace unasked, and asked
+   * before {@code rm} outside it. "Any folder you let it work in" is its documentation's {@code
+   * additionalDirectories}: said so as never to say less than it grants.
    */
   @Override
   public List<Harness.Mode> modes() {

@@ -270,7 +270,9 @@ class LiveChatTest {
             "01-always-rule-wrappers:260",
             "03a-read-deny-abs:13",
             "04a-subagent-permission-request:45",
-            "04b-accept-edits-shell:160")) {
+            "04b-accept-edits-shell:160",
+            "01c-mode-manual-over-workspace-acceptEdits:40",
+            "01c-mode-manual-over-workspace-acceptEdits:68")) {
       var at = line.split(":");
       recorded.put(line, always(at[0], Integer.parseInt(at[1])));
     }
@@ -303,7 +305,13 @@ class LiveChatTest {
             List.of(
                 List.of(
                     "Allow this exact command: `rm /home/dev/scratch-outside.txt`" + EXACT,
-                    "Let it work in the folder `/home/dev`, for this session only."))),
+                    "Let it work in the folder `/home/dev`, for this session only.")),
+            List.of(List.of(EDITS_FREELY)),
+            List.of(
+                List.of(
+                    "Allow this exact command: `touch probe-m.txt`" + EXACT,
+                    FOLDER,
+                    EDITS_FREELY))),
         List.copyOf(recorded.values()),
         recorded.keySet().toString());
   }
@@ -491,6 +499,54 @@ class LiveChatTest {
                 true,
                 false)),
         shown("03b-read-deny-double-slash", 14));
+  }
+
+  /**
+   * Each way probe 3 recorded Claude Code refusing a call itself is a failed row, and its {@code
+   * system/permission_denied} line, when there is one, shows nothing more: a Read a rule denies
+   * comes with none (R, 03a-ro-dbl-ssh-Read:14); a {@code cat} the same rule denies (B,
+   * 03a-ro-dbl-ssh-cat:26-27) and a call with no one to ask (N, 03c-ro-single-ssh-Read:14-15) come
+   * with one.
+   */
+  @Test
+  void eachRefusalClaudeCodeMakesItselfIsAFailedRow() {
+    assertEquals(
+        List.of(
+            new Step.Other("system/permission_denied"), new Step.Other("system/permission_denied")),
+        List.of(
+            LiveStream.read(Recorded.line("03a-ro-dbl-ssh-cat", 26)),
+            LiveStream.read(Recorded.line("03c-ro-single-ssh-Read", 14))));
+    assertEquals(List.of(), shown("03a-ro-dbl-ssh-cat", 26));
+    assertEquals(List.of(), shown("03c-ro-single-ssh-Read", 14));
+    assertEquals(
+        List.of(
+            List.of(
+                new ChatItem.ToolDone(
+                    null,
+                    "toolu_01YT47LXdLKqP7mATs42wAXj",
+                    "<tool_use_error>File is in a directory that is denied by your permission"
+                        + " settings.</tool_use_error>",
+                    true,
+                    false)),
+            List.of(
+                new ChatItem.ToolDone(
+                    null,
+                    "toolu_0151mafKMWdhmgpUTmPJL65d",
+                    "Permission to use Bash with command cat /home/dev/.ssh/probe-secret.txt has"
+                        + " been denied.",
+                    true,
+                    false))),
+        List.of(shown("03a-ro-dbl-ssh-Read", 14), shown("03a-ro-dbl-ssh-cat", 27)));
+    assertEquals(
+        List.of(
+            new ChatItem.ToolDone(
+                null,
+                "toolu_01RRsFyFXe9qk2tuwBpNKyfX",
+                (String) Recorded.parsed("03c-ro-single-ssh-Read", 14).get("message"),
+                true,
+                false)),
+        shown("03c-ro-single-ssh-Read", 15),
+        "the result says what its permission_denied line said");
   }
 
   @Test

@@ -1,0 +1,1 @@
+{"type":"system","subtype":"permission_denied","tool_name":"Bash","tool_use_id":"toolu_0151mafKMWdhmgpUTmPJL65d","decision_reason_type":"subcommandResults","message":"Permission to use Bash with command cat /home/dev/.ssh/probe-secret.txt has been denied.","uuid":"0878d039-9a8a-4d3f-a5b0-f137c1ea3fc8","session_id":"58253c2b-a2f9-45e9-8064-997241a5dde5"}

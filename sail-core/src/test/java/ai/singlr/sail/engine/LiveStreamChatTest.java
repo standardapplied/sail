@@ -179,6 +179,27 @@ class LiveStreamChatTest {
   }
 
   /**
+   * Asks first, launched as {@code --permission-mode manual} (probe 3): Claude Code says it is in
+   * {@code default}, the chat mode's own name, and an edit and a command each ask, even in a
+   * workspace whose settings make {@code acceptEdits} its default (01c:2).
+   */
+  @Test
+  void asksFirstLaunchedAsManualIsDefaultAndAsksOverAWorkspaceDefault() {
+    var recording = "01c-mode-manual-over-workspace-acceptEdits";
+
+    assertEquals(
+        "{\"permissions\": {\"defaultMode\": \"acceptEdits\"}}",
+        Recorded.parsed(recording, 2).get("content"));
+    assertEquals(
+        List.of("default", "default", "Edit", "Bash"),
+        List.of(
+            ((Step.Init) read("01a-mode-manual", 4)).mode(),
+            ((Step.Init) read(recording, 4)).mode(),
+            ((Step.Permission) read(recording, 40)).tool(),
+            ((Step.Permission) read(recording, 68)).tool()));
+  }
+
+  /**
    * A subagent's request comes as any other, with no {@code parent_tool_use_id}, naming the agent
    * that asks ({@code agent_id}, probe 2's 04a:45), which the subagent's own lines name beside the
    * call that started it (04a:44): so a host draws the request under that call's row.
