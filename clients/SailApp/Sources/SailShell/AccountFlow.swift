@@ -47,6 +47,12 @@ public final class AccountFlow {
     /// How many times who is signed in was set: a check that began before the latest answers too
     /// late to be shown.
     private var shown = 0
+    /// How many times a person signed in here: a call tells of its session's end only while the
+    /// sign-in it was asked under stands.
+    private var signIns = 0
+    /// The sign-in a call found ended while a check was under way, which may have asked before the
+    /// end: once that check is shown, who is signed in is asked again while it still stands.
+    private var endedDuringACheck: Int?
     /// A check's answer that came while a person's action was under way, taken once it ends.
     private var heldAnswer: (@MainActor () -> Void)?
 
@@ -84,23 +90,28 @@ public final class AccountFlow {
     }
 
     /// The API as the person signed in, nil when no one is or the vault cannot say. Whichever of its
-    /// calls finds the session ended has who is signed in asked (``sessionEnded(since:)``).
+    /// calls finds the session ended has who is signed in asked (``sessionEnded(_:)``).
     func client() -> SailClient? {
         guard let standing else { return nil }
-        let seen = shown
+        let signIn = signIns
         return try? account.client(at: standing.controlPlane) { [weak self] in
-            Task { @MainActor in self?.sessionEnded(since: seen) }
+            Task { @MainActor in self?.sessionEnded(signIn) }
         }
     }
 
     /// The check a call that found the session ended asked: what a test awaits.
     package private(set) var ending: Task<Void, Never>?
 
-    /// A call asked with the sign-in shown `seen`-th found the session ended: who is signed in is
-    /// asked, once however many calls found it together, and never for a sign-in shown since. The
+    /// A call asked under the `signIn`-th sign-in found the session ended: who is signed in is asked
+    /// while that sign-in stands, once however many calls found it together. A check already under
+    /// way answers first, and is followed by one more only if it leaves that sign-in standing. The
     /// check's answer goes where every check's goes: an ended session to the welcome.
-    private func sessionEnded(since seen: Int) {
-        guard seen == shown, ending == nil else { return }
+    private func sessionEnded(_ signIn: Int) {
+        guard standing != nil, signIn == signIns, ending == nil else { return }
+        guard checks == 0 else {
+            endedDuringACheck = signIn
+            return
+        }
         ending = Task {
             await refresh()
             ending = nil
@@ -118,6 +129,10 @@ public final class AccountFlow {
         defer {
             checks -= 1
             onChange()
+            if let signIn = endedDuringACheck {
+                endedDuringACheck = nil
+                sessionEnded(signIn)
+            }
         }
         _ = await run(byAPerson: false) { () async throws(AccountRefusal) in
             let until: Date?
@@ -227,6 +242,7 @@ public final class AccountFlow {
     /// `landing`, as a person's sign-in, which opens Workspaces.
     private func signIn(at plane: ControlPlane, landing: Bool = true) async throws(AccountRefusal) {
         let signedIn = try await account.signIn(at: plane)
+        signIns += 1
         let whoami = try? signedIn.whoami.get()
         let name = [whoami?.displayName, whoami?.name].compactMap { $0 }.first { !$0.isEmpty }
         memory.signedIn(RememberedSignIn(handle: whoami?.fde ?? signedIn.fde, name: name), at: plane)
