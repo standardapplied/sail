@@ -6,6 +6,8 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -597,10 +599,9 @@ public final class Sqlite implements AutoCloseable {
     try {
       return SymbolLookup.libraryLookup(libName, arena);
     } catch (IllegalArgumentException e) {
-      throw new SqliteException(
-          "The SQLite library "
-              + libName
-              + " could not be loaded. On Ubuntu: sudo apt-get install -y libsqlite3-0",
+      throw Remedied.state(
+          "The SQLite library " + libName + " could not be loaded (" + e.getMessage() + ").",
+          Remedy.of("On Ubuntu: sudo apt-get install -y libsqlite3-0"),
           e);
     }
   }

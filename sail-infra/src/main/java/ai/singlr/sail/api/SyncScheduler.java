@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Actor;
 import java.time.Duration;
 import java.time.Instant;
@@ -168,7 +169,11 @@ public final class SyncScheduler implements AutoCloseable {
     }
   }
 
-  /** As {@link #useHealth(Supplier)}, owning {@code source}: it closes when the scheduler does. */
+  /**
+   * As {@link #useHealth(Supplier)}, owning {@code source}: it closes when the scheduler does. The
+   * source must only be read through, since a failure to close it is only a warning ({@link
+   * #close}); a source whose close could lose a write is closed by its writer, never here.
+   */
   public void useHealth(Supplier<SyncStatus> health, AutoCloseable source) {
     synchronized (freshenLock) {
       this.health = health;
@@ -253,10 +258,14 @@ public final class SyncScheduler implements AutoCloseable {
   }
 
   /**
-   * Stops the timer and waits for it, then for the round executor, and only then closes the health
-   * source their reads go through: interrupting a thread inside a native call does not stop it. The
-   * source only ever reads, so a failure to close it loses nothing and is a warning naming its
-   * cause, never a failure of the command whose work is done.
+   * Stops the timer and waits for its tick, then interrupts the round executor and waits for it,
+   * and only then closes the health source their reads go through: interrupting a thread inside a
+   * native call does not stop it. A drain waiting out its debounce or a backoff runs its pending
+   * round at once, so either wait is at most one round, which on a dead link the round's ssh ends
+   * ({@code SshSyncChannel}: a 10 s connect timeout, then two unanswered 10 s keepalives). A round
+   * cut short loses nothing: every write is journaled with it, and the next round offers it. The
+   * source only ever reads, so a failure to close it is a warning naming its causes, never a
+   * failure of the command whose work is done.
    */
   @Override
   public void close() {
@@ -265,6 +274,7 @@ public final class SyncScheduler implements AutoCloseable {
       timer.close();
     }
     if (executor != null) {
+      executor.shutdownNow();
       executor.close();
     }
     try {
@@ -273,7 +283,7 @@ public final class SyncScheduler implements AutoCloseable {
       System.getLogger(SyncScheduler.class.getName())
           .log(
               System.Logger.Level.WARNING,
-              "Closing the sync health source failed: " + Remedied.reasonOf(e));
+              "Closing the sync health source failed: " + Remedied.told(e, Remedy::plain));
     }
   }
 

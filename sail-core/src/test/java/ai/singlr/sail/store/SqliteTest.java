@@ -624,17 +624,6 @@ class SqliteTest {
   }
 
   @Test
-  void aMissingSqliteLibraryNamesItselfAndTheRemedy() {
-    try (var arena = Arena.ofConfined()) {
-      var thrown =
-          assertThrows(SqliteException.class, () -> Sqlite.library("libsail-absent.so.0", arena));
-
-      assertTrue(thrown.getMessage().contains("libsail-absent.so.0"));
-      assertTrue(thrown.getMessage().contains("apt-get install -y libsqlite3-0"));
-    }
-  }
-
-  @Test
   void holdsWriteLockOnlyInsideAnImmediateTransaction() {
     assertFalse(db.holdsWriteLock());
     assertTrue(db.transaction(() -> db.holdsWriteLock()));

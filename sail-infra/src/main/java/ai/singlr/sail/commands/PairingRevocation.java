@@ -17,7 +17,6 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.util.List;
@@ -151,7 +150,7 @@ final class PairingRevocation {
     } catch (NoSuchFileException missing) {
       return false;
     } catch (IOException failure) {
-      throw new UncheckedIOException(
+      throw Remedied.state(
           "Could not remove "
               + box.workstationKey()
               + ", which may hold "
@@ -159,12 +158,13 @@ final class PairingRevocation {
               + "'s key ("
               + failure.getClass().getSimpleName()
               + "). "
-              + KEPT_UNTIL_THE_KEY_IS_GONE
-              + " check that "
-              + box.workstationKey()
-              + " and its directory are readable and writable by "
-              + box.operator()
-              + ", then run the command again.",
+              + KEPT_UNTIL_THE_KEY_IS_GONE,
+          Remedy.of(
+              "check that "
+                  + box.workstationKey()
+                  + " and its directory are readable and writable by "
+                  + box.operator()
+                  + ", then run the command again."),
           failure);
     }
   }

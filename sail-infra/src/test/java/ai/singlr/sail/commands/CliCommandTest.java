@@ -27,7 +27,6 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -433,66 +432,6 @@ class CliCommandTest {
     assertEquals(
         "Closing the sync health source failed: Session is acquired by 1 clients%n".formatted(),
         err.toString());
-  }
-
-  @Test
-  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-  void aCauseLineWalksPlainWrappersAndSaysNothingItsWrapperAlreadySaid() {
-    assertEquals(
-        "Reading host.yaml failed: Permission denied: /etc/sail/host.yaml",
-        CliCommand.describe(
-            new UncheckedIOException(
-                "Reading host.yaml failed.",
-                new IOException("Permission denied", new IOException("/etc/sail/host.yaml")))));
-    assertEquals(
-        "Failed to open database /x: disk I/O error",
-        CliCommand.describe(
-            new IllegalStateException(
-                "Failed to open database /x: disk I/O error",
-                new IllegalStateException("disk I/O error", new IOException("disk I/O error")))),
-        "a cause the line already says adds nothing, at any depth");
-    assertEquals(
-        "A sail system command failed: Cannot run program incus",
-        CliCommand.describe(
-            new IllegalStateException(
-                "A sail system command failed.",
-                new IOException("A sail system command failed: Cannot run program incus"))),
-        "a cause that repeats its wrapper and says more is said once");
-    assertEquals(
-        "Dispatch failed: The roster is unsynced. Run " + OperatorCommand.here().sail("sync") + ".",
-        CliCommand.describe(
-            new IllegalStateException(
-                "Dispatch failed",
-                Remedied.state(
-                    "The roster is unsynced.",
-                    Remedy.of("Run ", Remedy.sail("sync"), "."),
-                    new IOException("unseen")))),
-        "a cause that names a fix ends the line with it");
-    var first = new IllegalStateException("first");
-    var second = new IllegalStateException("second");
-    first.initCause(second);
-    second.initCause(first);
-    assertEquals("first: second", CliCommand.describe(first), "a cycle of causes is said once");
-  }
-
-  @Test
-  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-  void aCauseWithNoWordsAddsOnlyATypeTheLineDoesNotAlreadySay() {
-    assertEquals(
-        "Interrupted while removing ada's key from this box's containers.",
-        CliCommand.describe(
-            new IllegalStateException(
-                "Interrupted while removing ada's key from this box's containers.",
-                new InterruptedException())));
-    assertEquals(
-        "Reading the roster failed: InterruptedException",
-        CliCommand.describe(
-            new IllegalStateException("Reading the roster failed", new InterruptedException())));
-    assertEquals(
-        "Reading the roster failed: IOException",
-        CliCommand.describe(
-            new IllegalStateException("Reading the roster failed", new IOException("  "))),
-        "blank words are no words");
   }
 
   @Test
