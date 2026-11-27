@@ -27,15 +27,6 @@ public struct UserMenuContent: Equatable, Sendable {
     public enum Item: String, Equatable, Sendable, CaseIterable {
         case account = "Account", keys = "Keys", signOut = "Sign Out", signIn = "Sign In"
 
-        /// Keys waits for its own spec; the menu shows it, and says why it cannot be chosen.
-        public var enabled: Bool {
-            self != .keys
-        }
-
-        public var why: String? {
-            self == .keys ? "Keys come in a later version of Sail." : nil
-        }
-
         /// The key that chooses it with ⌘ from anywhere.
         public var key: String? {
             self == .account ? "," : nil
@@ -49,6 +40,10 @@ public struct UserMenuContent: Equatable, Sendable {
 
     public let name: String
     public let disc: Disc?
+    /// `@handle` and the role, when someone is signed in: the menu says them as `detail`, the
+    /// Account view's header apart.
+    public let handle: String?
+    public let role: String?
     public let detail: String?
     public let address: String?
     public let plane: Plane?
@@ -56,12 +51,12 @@ public struct UserMenuContent: Equatable, Sendable {
 
     /// No one signed in: the control plane `lastUsed` here, or "no control plane yet".
     public static func signedOut(lastUsed: String?) -> Self {
-        Self(name: "Not signed in", disc: .person, detail: lastUsed ?? "no control plane yet", address: nil, plane: nil, items: [.signIn])
+        Self(name: "Not signed in", disc: .person, handle: nil, role: nil, detail: lastUsed ?? "no control plane yet", address: nil, plane: nil, items: [.signIn])
     }
 
     /// Who is signed in at `address` not yet known: the app is asking.
     public static func checking(at address: String) -> Self {
-        Self(name: "Checking", disc: nil, detail: address, address: nil, plane: nil, items: [.account])
+        Self(name: "Checking", disc: nil, handle: nil, role: nil, detail: address, address: nil, plane: nil, items: [.account])
     }
 
     /// Signed in as `handle` at `address`; `whoami` as it last answered, `unreachable` when the
@@ -74,8 +69,8 @@ public struct UserMenuContent: Equatable, Sendable {
         }
         let plane = Plane(unreachable: unreachable, refreshing: refreshing)
         return Self(
-            name: name, disc: name.first.map { .initial(String($0).uppercased()) }, detail: "@\(handle)" + (role.map { " · \($0)" } ?? ""),
-            address: address, plane: plane, items: [.account, .keys, .signOut]
+            name: name, disc: name.first.map { .initial(String($0).uppercased()) }, handle: "@\(handle)", role: role,
+            detail: "@\(handle)" + (role.map { " · \($0)" } ?? ""), address: address, plane: plane, items: [.account, .keys, .signOut]
         )
     }
 }

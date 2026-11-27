@@ -166,9 +166,11 @@ import Testing
             try Self.press(code, in: shell)
             walked.append(Self.highlighted(view))
         }
-        #expect(walked == ["Account", "Appearance", "Sign Out", "Account", "Sign Out"], "the keys walk \(walked), not top to bottom")
+        #expect(walked == ["Account", "Keys", "Appearance", "Sign Out", "Appearance"], "the keys walk \(walked), not top to bottom")
+        try Self.press(Self.down, in: shell)
         shell.window.sendEvent(try Self.key(48, "\t"))
         #expect(Self.highlighted(view) == "Account" && shell.userMenu.isOpen && shell.window.firstResponder is MenuKeys, "Tab left the menu, or moved to \(Self.highlighted(view))")
+        try Self.press(Self.down, in: shell)
         try Self.press(Self.down, in: shell)
         try Self.press(Self.left, in: shell)
         #expect(view.chosenLook == .dark && Appearance.stored(in: shell.defaults) == .dark && Self.appearance(of: shell) == .darkAqua && shell.userMenu.isOpen)
@@ -195,8 +197,8 @@ import Testing
     }
 
     /// The button opens the menu and, again, closes it; a click outside it closes it, as does the
-    /// window giving up the keys; Keys, which cannot be chosen, says why when clicked or pointed
-    /// at and leaves the menu open; Account shows the Account pane; an Appearance leaves it open.
+    /// window giving up the keys; Keys shows the Account view at its keys; Account shows the Account
+    /// view; an Appearance leaves it open.
     @Test func thePointerWorksTheMenu() throws {
         let shell = try Self.shell()
         defer { shell.window.orderOut(nil) }
@@ -216,14 +218,14 @@ import Testing
         NotificationCenter.default.post(name: shell.userMenu.popover.keysLeft, object: shell.window)
         #expect(!shell.userMenu.isOpen, "the window giving up the keys left it open")
         try Self.open(shell)
-        let logins = try #require(view.items.first { $0.item == .keys })
-        #expect(view.tip.text == "Keys come in a later version of Sail." && view.tip.anchor === logins && !view.tip.isShown, "the Keys tooltip says \(view.tip.text)")
-        logins.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: logins.bounds.midX, y: logins.bounds.midY), in: logins))
-        #expect(shell.userMenu.isOpen && view.tip.isShown && logins.accessibilityHelp() == UserMenuContent.Item.keys.why, "Keys did not say why")
-        #expect(logins.drawn.fill == nil && logins.drawn.ink == shell.look.textTertiary, "Keys is drawn as one that can be chosen")
+        let keys = try #require(view.items.first { $0.item == .keys })
+        #expect(keys.drawn.ink == shell.look.text, "Keys is drawn dimmed, as one that cannot be chosen")
+        keys.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: keys.bounds.midX, y: keys.bounds.midY), in: keys))
+        #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "Keys showed \(shell.rail.selected?.rawValue ?? "nothing")")
+        try Self.open(shell)
         let account = try #require(view.items.first { $0.item == .account })
         account.mouseEntered(with: try Self.mouse(.mouseMoved, at: .zero, in: account))
-        #expect(!view.tip.isShown && account.highlighted && account.drawn.fill == shell.look.menuHighlight.fill, "pointing at Account did not highlight it")
+        #expect(account.highlighted && account.drawn.fill == shell.look.menuHighlight.fill, "pointing at Account did not highlight it")
         let dark = view.segments.rects[1]
         view.segments.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: dark.midX, y: dark.midY), in: view.segments))
         #expect(shell.userMenu.isOpen && Appearance.stored(in: shell.defaults) == .dark && Self.appearance(of: shell) == .darkAqua)
@@ -281,9 +283,9 @@ import Testing
         #expect(taken == .some(nil) && Self.appearance(of: shell) == nil && Appearance.stored(in: shell.defaults) == .auto, "Auto set an appearance of the app's own")
     }
 
-    /// VoiceOver hears a menu named Account, its items as menu items by their titles (Keys
-    /// dimmed, saying why), and Appearance as a group of three choices, the chosen one on; pressing
-    /// Account by VoiceOver chooses it.
+    /// VoiceOver hears a menu named Account, its items as menu items by their titles, and
+    /// Appearance as a group of three choices, the chosen one on; pressing Account by VoiceOver
+    /// chooses it.
     /// The window giving up the keys closes the menu, by the window's own notice: the one test whose
     /// shell keeps the real name (no other test's window can close a menu it does not hold open).
     @Test func theWindowGivingUpTheKeysClosesTheMenu() throws {
@@ -314,13 +316,11 @@ import Testing
         try Self.open(shell)
         let view = shell.userMenu.view
         #expect(view.accessibilityRole() == .menu && view.accessibilityLabel() == "Account")
-        #expect(view.items.allSatisfy { $0.accessibilityRole() == .menuItem && $0.accessibilityLabel() == $0.item.rawValue && $0.isAccessibilityEnabled() == $0.item.enabled })
+        #expect(view.items.allSatisfy { $0.accessibilityRole() == .menuItem && $0.accessibilityLabel() == $0.item.rawValue && $0.isAccessibilityEnabled() })
         let segments = view.segments
         #expect(segments.accessibilityRole() == .radioGroup && segments.accessibilityLabel() == "Appearance")
         let said = segments.buttons.map { "\($0.accessibilityLabel() ?? "?")=\($0.accessibilityValue() as? Int ?? -1)" }
         #expect(said == ["Light=0", "Dark=0", "Auto=1"], "Appearance says \(said)")
-        let logins = try #require(view.items.first { $0.item == .keys })
-        #expect(!logins.isAccessibilityEnabled() && logins.accessibilityHelp() == "Keys come in a later version of Sail.")
         let button = try #require(shell.rail.button(.account))
         #expect(button.accessibilityRole() == .menuButton && button.accessibilityHelp()?.contains("Opens a menu") == true, "the rail's button does not say it opens a menu")
         let keys = try #require(shell.window.firstResponder as? MenuKeys)
@@ -330,6 +330,7 @@ import Testing
         try Self.press(Self.down, in: shell)
         let account = try #require(view.items.first { $0.item == .account })
         #expect(account.isAccessibilitySelected() && keys.accessibilityFocusedUIElement as? MenuRow === account, "the highlight is not the selected, focused element")
+        try Self.press(Self.down, in: shell)
         try Self.press(Self.down, in: shell)
         #expect(!account.isAccessibilitySelected() && segments.isAccessibilitySelected() && keys.accessibilityFocusedUIElement as? MenuSegments === segments)
         #expect(account.accessibilityPerformPress() && !shell.userMenu.isOpen && shell.rail.selected == .account)
@@ -534,6 +535,7 @@ import Testing
         let rects = view.segments.rects
         try #require(rects.count == 3, "the segments are \(rects)")
         #expect(rects[0].minX > rects[1].minX && rects[1].minX > rects[2].minX, "the segments run \(rects)")
+        try Self.press(Self.down, in: shell)
         try Self.press(Self.down, in: shell)
         try Self.press(Self.left, in: shell)
         #expect(view.chosenLook == .auto, "← at Auto, the last, moved to \(view.chosenLook)")

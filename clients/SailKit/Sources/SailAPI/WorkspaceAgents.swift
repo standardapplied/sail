@@ -98,7 +98,14 @@ extension [RemedyPart] {
     }
 }
 
-extension AgentOffer {
+/// A harness as it declares itself wherever the server names it: its name, what it is called, and
+/// the kinds of login it takes. A workspace's offer and the server's list of harnesses both carry
+/// it, so whatever is built from it is the same from either.
+public struct AgentDeclaration: Equatable, Sendable {
+    public let harness: String
+    public let display: String
+    public let kinds: [AgentLoginKind]
+
     /// The kind a person stores from the app: the first the server names whose how names no
     /// command, so the app says how to make it and stores what is pasted; nil when every kind is
     /// made by running something.
@@ -107,12 +114,9 @@ extension AgentOffer {
     }
 }
 
-extension Endpoint where Response == WorkspaceAgents {
-    /// What can start in workspace `name` of `project` for the caller, its owner or an admin;
-    /// refused another member, as every workspace door is, and not found where the runner holds no
-    /// such workspace.
-    public static func agents(workspace name: String, project: String) -> Self {
-        Self(.get, Route.workspace(name, project: project) + ["agents"])
+extension AgentOffer {
+    public var declaration: AgentDeclaration {
+        AgentDeclaration(harness: harness, display: display, kinds: kinds)
     }
 }
 
@@ -129,6 +133,10 @@ public struct KnownAgent: Codable, Equatable, Sendable {
         case displayName = "display_name"
         case signIn = "sign_in"
     }
+
+    public var declaration: AgentDeclaration {
+        AgentDeclaration(harness: name, display: displayName, kinds: kinds)
+    }
 }
 
 /// Every harness the server knows, in its order.
@@ -139,5 +147,14 @@ public struct KnownAgents: Codable, Equatable, Sendable {
 extension Endpoint where Response == KnownAgents {
     public static var knownAgents: Self {
         Self(.get, Route.agents)
+    }
+}
+
+extension Endpoint where Response == WorkspaceAgents {
+    /// What can start in workspace `name` of `project` for the caller, its owner or an admin;
+    /// refused another member, as every workspace door is, and not found where the runner holds no
+    /// such workspace.
+    public static func agents(workspace name: String, project: String) -> Self {
+        Self(.get, Route.workspace(name, project: project) + ["agents"])
     }
 }

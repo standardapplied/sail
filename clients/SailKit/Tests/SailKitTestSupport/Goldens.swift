@@ -109,7 +109,8 @@ public enum Goldens {
     }
 }
 
-/// One request the server's test sent and the answer its router gave, as `http/<name>.json` holds.
+/// One request the server's test sent and the answer its router gave, as `http/<name>.json` holds:
+/// an answer that sent no bytes (a 204) records no body, and is read as an empty one.
 public struct Exchange: Sendable {
     public let method: String
     public let path: String
@@ -125,8 +126,7 @@ public struct Exchange: Sendable {
               let response = golden["response"] as? [String: Any],
               let method = request["method"] as? String,
               let path = request["path"] as? String,
-              let status = response["status"] as? Int,
-              let body = response["body"]
+              let status = response["status"] as? Int
         else {
             throw GoldenError(reason: "http/\(name).json is not a request and its response")
         }
@@ -135,7 +135,7 @@ public struct Exchange: Sendable {
         self.status = status
         self.headers = response["headers"] as? [String: String] ?? [:]
         self.requestBody = try request["body"].map { try JSONSerialization.data(withJSONObject: $0) }
-        self.body = try JSONSerialization.data(withJSONObject: body)
+        self.body = try response["body"].map { try JSONSerialization.data(withJSONObject: $0) } ?? Data()
     }
 
     /// A recorded answer given to another request: a refusal one route recorded, as another route

@@ -245,6 +245,7 @@ final class Driver {
         "press", "modifiers", "menuItem", "contextMenu", "choose", "arrangement", "at", "fontPoints", "items", "seconds", "name",
         "pasteLogin", "loginSheetSays", "loginSheetIs", "loginSheetClick", "pasteboardHolds", "setPasteboard", "holdAnswers", "unreachable",
         "projectSheetType", "projectSheetClick", "projectSheetIs", "projectSheetReturnTwice", "goldenRenamed", "createAsked", "projects", "noRows", "window", "leastWindow",
+        "accountShot", "accountSays",
     ]
 
     /// The step's keys that are set.

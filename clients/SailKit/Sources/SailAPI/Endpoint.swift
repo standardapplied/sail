@@ -12,10 +12,17 @@ public struct Endpoint<Response: Decodable & Sendable>: Sendable {
         self.request = request
     }
 
-    /// The answer `response` gives: its body on success, the server's refusal otherwise.
+    /// The answer `response` gives: its body on success, the server's refusal otherwise. A route
+    /// that answers nothing is done on any success, its body never read.
     public func decode(_ response: HTTPResponse) throws(SailError) -> Response {
-        try SailJSON.decode(response, route: request.route)
+        if let done = NoContent() as? Response, (200 ..< 300).contains(response.status) { return done }
+        return try SailJSON.decode(response, route: request.route)
     }
+}
+
+/// What a route that sends no bytes back answers (a 204): that it was done.
+public struct NoContent: Decodable, Equatable, Sendable {
+    public init() {}
 }
 
 /// The API's paths, each spelled once, as the segments a request escapes.
@@ -30,6 +37,7 @@ package enum Route {
     package static let terminalTickets = ["v1", "terminal", "tickets"]
     package static let attention = ["v1", "attention"]
     package static let logins = ["v1", "logins"]
+    package static let passkeys = ["v1", "passkeys"]
     package static let agents = ["v1", "agents"]
     package static let registerStart = ["v1", "auth", "register", "start"]
     package static let registerFinish = ["v1", "auth", "register", "finish"]

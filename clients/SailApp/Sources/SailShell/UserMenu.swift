@@ -4,8 +4,8 @@ import SailControls
 import SailLook
 
 /// The menu behind the rail's user button (`calm-accent-mockup.html`, in Paper and ink): who is
-/// signed in and the control plane with its state; Account (⌘,), Keys (not yet usable, saying
-/// why), Appearance Light / Dark / Auto, and Sign Out apart; signed out, Not signed in, Sign In and
+/// signed in and the control plane with its state; Account (⌘,), Keys (the Account view at its
+/// keys), Appearance Light / Dark / Auto, and Sign Out apart; signed out, Not signed in, Sign In and
 /// Appearance. It is drawn by us, not an `NSMenu`, whose highlight is the system's accent: 260 pt,
 /// its leading edge on the button's, its foot 8 pt above it, on the popover's surface and shadow.
 /// Opened by the pointer it highlights nothing, as a Mac menu does; opened by the keys or VoiceOver
@@ -80,7 +80,6 @@ package final class UserMenu: NSObject {
     package func close() {
         guard isOpen else { return }
         view.letGo()
-        view.tip.hide()
         popover.close()
         NSAccessibility.post(element: keys, notification: NSAccessibility.Notification(rawValue: "AXMenuClosed"))
         keys.setAccessibilityElement(false)
@@ -104,7 +103,7 @@ package final class UserMenu: NSObject {
     /// A press let go after the menu closed (Escape or another app while the mouse was held) chooses
     /// nothing: Sign Out acts at once.
     private func choose(_ item: UserMenuContent.Item) {
-        guard item.enabled, isOpen else { return }
+        guard isOpen else { return }
         close()
         onChoose(item)
     }
@@ -202,16 +201,14 @@ package final class UserMenuView: NSView {
     /// The control plane's line, the Account pane's own.
     let planeRow: ControlPlaneRow
     private let appearanceLabel = NSTextField(labelWithString: "Appearance")
-    package let tip: Tooltip
-    /// What the keys move through: the enabled items, then Appearance.
+    /// What the keys move through: the items, then Appearance.
     package private(set) var highlighted: Int?
 
     init(look: Look, mono: LabelFont) {
         self.look = look
         self.mono = mono
         segments = MenuSegments(look: look)
-        tip = Tooltip(UserMenuContent.Item.keys.why ?? "", look: look, mono: nil)
-        planeRow = ControlPlaneRow(look: look, mono: mono, points: Look.Step.micro.points)
+        planeRow = ControlPlaneRow(look: look, mono: mono)
         super.init(frame: .zero)
         for label in [name, detail] {
             label.lineBreakMode = .byTruncatingTail
@@ -253,10 +250,10 @@ package final class UserMenuView: NSView {
         }
     }
 
-    /// The rows the keys stop at, top to bottom: the enabled items above Appearance, Appearance
-    /// (index `items.count`), then Sign Out under it.
+    /// The rows the keys stop at, top to bottom: the items above Appearance, Appearance (index
+    /// `items.count`), then Sign Out under it.
     private var stops: [Int] {
-        let above = items.indices.filter { items[$0].item.enabled && items[$0].item != .signOut }
+        let above = items.indices.filter { items[$0].item != .signOut }
         return above + [items.count] + items.indices.filter { items[$0].item == .signOut }
     }
 
@@ -292,7 +289,6 @@ package final class UserMenuView: NSView {
             addSubview(row)
             return row
         }
-        if let logins = items.first(where: { $0.item == .keys }) { tip.attach(to: logins, saying: logins.item.why ?? "") }
         segments.chosen = appearance
         if fresh {
             highlight(highlightingFirst ? stops.first : nil)
@@ -312,7 +308,6 @@ package final class UserMenuView: NSView {
         }
         segments.highlighted = index == items.count
         segments.setAccessibilitySelected(index == items.count)
-        if let index, items.indices.contains(index), items[index].item == .keys { tip.show() } else { tip.hide() }
         onHighlight(highlightedElement)
     }
 
@@ -428,7 +423,6 @@ package final class UserMenuView: NSView {
         appearanceLabel.attributedStringValue = line("Appearance", .systemFont(ofSize: Look.Step.body.points), look.text)
         items.forEach { $0.look = look }
         segments.look = look
-        tip.look = look
         needsLayout = true
         needsDisplay = true
     }
@@ -504,7 +498,7 @@ extension UserMenuView: Marked {
 }
 
 /// One item of the menu: its title, ⌘ and its key at its end when it has one; turned over to ink
-/// under the keys or the pointer; dimmed and said why when it cannot be chosen.
+/// under the keys or the pointer.
 @MainActor
 package final class MenuRow: NSView {
     package let item: UserMenuContent.Item
@@ -536,8 +530,7 @@ package final class MenuRow: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.menuItem)
         setAccessibilityLabel(item.rawValue)
-        setAccessibilityEnabled(item.enabled)
-        if let why = item.why { setAccessibilityHelp(why) }
+        setAccessibilityEnabled(true)
     }
 
     @available(*, unavailable)
@@ -549,10 +542,9 @@ package final class MenuRow: NSView {
         true
     }
 
-    /// The highlight's fill and the words' ink: turned over while highlighted and enabled.
+    /// The highlight's fill and the words' ink: turned over while highlighted.
     var drawn: (fill: Tint?, ink: Tint) {
-        guard item.enabled else { return (nil, look.textTertiary) }
-        return highlighted ? (look.menuHighlight.fill, look.menuHighlight.ink) : (nil, look.text)
+        highlighted ? (look.menuHighlight.fill, look.menuHighlight.ink) : (nil, look.text)
     }
 
     package override func draw(_: NSRect) {
@@ -587,13 +579,13 @@ package final class MenuRow: NSView {
         onLeave()
     }
 
-    /// A click chooses it; on one that cannot be chosen it says why, as pointing at it does.
+    /// A click chooses it.
     package override func mouseUp(with event: NSEvent) {
         ups += 1
         pressed = false
         defer { onRelease() }
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-        if item.enabled { onChoose() } else { onHover() }
+        onChoose()
     }
 
     package override func mouseDown(with _: NSEvent) {
@@ -611,7 +603,6 @@ package final class MenuRow: NSView {
     }
 
     package override func accessibilityPerformPress() -> Bool {
-        guard item.enabled else { return false }
         onChoose()
         return true
     }

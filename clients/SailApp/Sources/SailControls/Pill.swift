@@ -205,19 +205,34 @@ public final class Keycap: NSView {
     }
 }
 
-/// A person's initial in a 20 pt circle on the hover fill, ringed by a hairline.
+/// A person's initial in a circle drawn as `mark` (`Look.avatar`, a hairline ring, unless given):
+/// 20 pt in a caption, or as large as a header asks in its own face and mark.
 @MainActor
 public final class Initial: NSView {
     public var look: Look {
         didSet { needsDisplay = true }
     }
 
-    private let name: String
+    public var name: String {
+        didSet {
+            setAccessibilityLabel(name)
+            needsDisplay = true
+        }
+    }
 
-    public init(_ name: String, look: Look) {
+    private let side: Double
+    private let font: NSFont
+    private let mark: KeyPath<Look, InkMark>
+
+    public init(
+        _ name: String, side: Double = 20, font: NSFont = .systemFont(ofSize: Look.Step.caption.points, weight: .semibold), mark: KeyPath<Look, InkMark> = \.avatar, look: Look
+    ) {
         self.name = name
         self.look = look
-        super.init(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+        self.side = side
+        self.font = font
+        self.mark = mark
+        super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         setAccessibilityLabel(name)
@@ -233,11 +248,16 @@ public final class Initial: NSView {
     }
 
     override public var intrinsicContentSize: NSSize {
-        NSSize(width: 20, height: 20)
+        NSSize(width: side, height: side)
+    }
+
+    /// The mark as it is drawn in its look.
+    package var drawn: InkMark {
+        look[keyPath: mark]
     }
 
     override public func draw(_: NSRect) {
-        let mark = look.avatar
+        let mark = drawn
         if let fill = mark.fill {
             NSColor(fill).setFill()
             NSBezierPath(ovalIn: bounds).fill()
@@ -248,13 +268,13 @@ public final class Initial: NSView {
             ring.lineWidth = 1
             ring.stroke()
         }
-        let letter = Draw.text(String(name.prefix(1)).uppercased(), .systemFont(ofSize: Look.Step.caption.points, weight: .semibold), mark.ink)
+        let letter = Draw.text(String(name.prefix(1)).uppercased(), font, mark.ink)
         letter.draw(at: NSPoint(x: ((bounds.width - letter.size().width) / 2).rounded(), y: ((bounds.height - letter.size().height) / 2).rounded()))
     }
 }
 
 extension Initial: Marked {
     package var drawnMarks: [Mark] {
-        look.marks(fill: look.avatar.fill, area: Double(bounds.width * bounds.height))
+        look.marks(fill: drawn.fill, area: Double(bounds.width * bounds.height))
     }
 }

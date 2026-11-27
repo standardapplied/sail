@@ -178,6 +178,14 @@ public final class AccountFlow {
         act { () async throws(AccountRefusal) in try await self.signIn(at: plane) } refused: { refused($0) }
     }
 
+    /// Sign In Again, from the Account view: the ceremony at the control plane signed in to, the
+    /// view left where it is. False when no one is signed in or another action is under way.
+    @discardableResult
+    func signInAgain(refused: @escaping @MainActor (AccountRefusal) -> Void) -> Bool {
+        guard let plane = standing?.controlPlane else { return false }
+        return act { () async throws(AccountRefusal) in try await self.signIn(at: plane, landing: false) } refused: { refused($0) }
+    }
+
     /// Signs out at once, asking nothing: what the sign-in opened on the runner lives on there, for
     /// the same person's next sign-in. The refusal when the vault would not forget it.
     func signOut() -> AccountRefusal? {
@@ -196,13 +204,14 @@ public final class AccountFlow {
         }
     }
 
-    /// Signed in at `plane`: the session kept, the person remembered for the next welcome there.
-    private func signIn(at plane: ControlPlane) async throws(AccountRefusal) {
+    /// Signed in at `plane`: the session kept, the person remembered for the next welcome there;
+    /// `landing`, as a person's sign-in, which opens Workspaces.
+    private func signIn(at plane: ControlPlane, landing: Bool = true) async throws(AccountRefusal) {
         let signedIn = try await account.signIn(at: plane)
         let whoami = try? signedIn.whoami.get()
         let name = [whoami?.displayName, whoami?.name].compactMap { $0 }.first { !$0.isEmpty }
         memory.signedIn(RememberedSignIn(handle: whoami?.fde ?? signedIn.fde, name: name), at: plane)
-        show(signedIn, byAPerson: true)
+        show(signedIn, byAPerson: landing)
     }
 
     /// Starts `work`, a person's action, before the click or Return that started it returns: a

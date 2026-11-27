@@ -60,10 +60,11 @@ import Testing
     }
 
     /// Paper and ink in the tokens, on a warm chrome: the chrome's text reads at 15:1 and more; the
-    /// only neutral fills are the pressed one and the loading placeholders; the wells and a person's
-    /// initial are outlines and ink, never filled, and the rail's chosen item stands on the chrome's
-    /// wash alone; the card has an outline only in dark; the accent's only tints are the focus halo
-    /// and selected text; errors are crimson, at least 20 degrees of hue from the accent.
+    /// only neutral fills are the pressed one, the loading placeholders and the Account view's header
+    /// disc; the wells and a person's initial beside a handle are outlines and ink, never filled, and
+    /// the rail's chosen item stands on the chrome's wash alone; the card has an outline only in
+    /// dark; the accent's only tints are the focus halo and selected text; errors are crimson, at
+    /// least 20 degrees of hue from the accent.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark), ("light contrasted", Look.light.contrasted()), ("dark contrasted", Look.dark.contrasted())])
     func paperAndInkFillNothingAtRest(_ name: String, _ look: Look) {
         #expect(Self.contrast(look.text.rgb, look.chrome) >= 15, "\(name): text on the chrome is \(Self.contrast(look.text.rgb, look.chrome)):1")
@@ -93,6 +94,13 @@ import Testing
         #expect(selection.background == Self.over(look.textSelection, look.palette.background) && selection.foreground == look.palette.foreground)
         #expect(Self.contrast(selection.foreground, selection.background) >= 4.5, "\(name) selected text is \(Self.contrast(selection.foreground, selection.background)):1")
         #expect(look.palette.idleCursor == Self.over(look.textTertiary, look.palette.background))
+    }
+
+    /// The Account view's header disc, as the page's `.av` draws it: the one initial on the hover
+    /// fill (`--hover`, the skeleton's) under a hairline ring (`--sep`), the initial in ink.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func theAccountsHeaderDiscIsTheHoverFillUnderAHairline(_ name: String, _ look: Look) {
+        #expect(look.headerAvatar == InkMark(fill: look.skeleton, ink: look.text, edge: look.separator), "\(name): \(look.headerAvatar)")
     }
 
     /// The user menu's turned-over marks (its highlight, its avatar, the chosen Appearance): ink on
