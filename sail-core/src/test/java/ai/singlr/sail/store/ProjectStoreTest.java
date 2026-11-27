@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -22,6 +23,7 @@ import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,14 +52,75 @@ class ProjectStoreTest {
   void noProjectIsCreatedUnderANameKeptForATemplate() {
     var failure =
         assertThrows(
-            IllegalArgumentException.class,
+            FieldsRefused.class,
             () -> store.create(TestDefinitions.yaml("name: acme--tmpl\nimage: ubuntu/24.04\n")));
 
     assertEquals(
         "Invalid project name: 'acme--tmpl'. A name ending '--tmpl' is kept for a project's"
             + " template; give the project another name.",
         failure.getMessage());
+    assertEquals(Map.of("name", failure.getMessage()), failure.fields());
     assertTrue(store.findByName("acme--tmpl").isEmpty());
+  }
+
+  /**
+   * A definition stored with two repositories at one path, as a release before the rule wrote it or
+   * a node on one pushes it, is still read, listed, repaired, deleted and synced: the rule is held
+   * where a definition is written, never where it is read.
+   */
+  @Test
+  void aDefinitionStoredWithTwoRepositoriesAtOnePathStaysReadableRepairableDeletableAndSynced() {
+    store.upsert(TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\n"));
+    db.execute(
+        "UPDATE projects SET definition = ? WHERE name = 'acme'",
+        "{\"name\": \"acme\", \"repos\": ["
+            + "{\"url\": \"https://github.com/acme/app.git\", \"path\": \"app\"},"
+            + " {\"url\": \"https://github.com/acme/web.git\", \"path\": \"app\"}]}");
+
+    assertEquals(2, store.findByName("acme").orElseThrow().definition().repos().size());
+    assertEquals(
+        List.of("acme"), store.list().stream().map(ProjectStore.ProjectRow::name).toList());
+    var repaired =
+        store.writeSection(
+            "acme",
+            Section.REPOS,
+            "[{\"url\": \"https://github.com/acme/app.git\", \"path\": \"app\"}]",
+            null);
+    assertEquals(
+        List.of("app"), repaired.definition().repos().stream().map(r -> r.path()).toList());
+    assertTrue(store.delete("acme"));
+    assertTrue(store.findByName("acme").isEmpty());
+
+    var pushed = new LinkedHashMap<String, Object>();
+    pushed.put("name", "beta");
+    pushed.put(
+        "repos",
+        "[{\"url\": \"https://github.com/acme/app.git\", \"path\": \"app\"},"
+            + " {\"url\": \"https://github.com/acme/web.git\", \"path\": \"app/\"}]");
+    store.applyRevision("beta", pushed, "r-1");
+    assertEquals(2, store.findByName("beta").orElseThrow().definition().repos().size());
+  }
+
+  @Test
+  void aSectionThatClonesTwoRepositoriesToOnePathIsRefusedAndNothingIsWritten() {
+    store.upsert(TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\n"));
+    var held = store.findByName("acme").orElseThrow().document();
+    var repos =
+        "[{\"url\": \"https://github.com/acme/app.git\", \"path\": \"app\"},"
+            + " {\"url\": \"https://github.com/acme/web.git\", \"path\": \"app\"}]";
+
+    var refused =
+        assertThrows(
+            FieldsRefused.class, () -> store.writeSection("acme", Section.REPOS, repos, null));
+
+    assertEquals(
+        Map.of(
+            "repos[0].path",
+            "More than one repository is cloned to app: give each its own path.",
+            "repos[1].path",
+            "More than one repository is cloned to app: give each its own path."),
+        refused.fields());
+    assertEquals(held, store.findByName("acme").orElseThrow().document());
   }
 
   @Test

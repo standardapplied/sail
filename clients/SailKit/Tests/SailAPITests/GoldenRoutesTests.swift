@@ -151,7 +151,7 @@ func answer<Response>(
         #expect(whoami.displayName == "Uday")
         #expect(whoami.email == "uday@example.com")
         #expect(whoami.role == .known(.admin))
-        #expect(whoami.capabilities == [.known(.read), .known(.write), .known(.admin)])
+        #expect(whoami.capabilities == [.known(.read), .known(.write), .known(.admin), .unknown("build")])
     }
 
     @Test func aTerminalTicketReadsTheTicketWhereToPresentItAndWhenItLapses() throws {
@@ -588,6 +588,8 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-template-admin-only", "refusal-template-read-only", "refusal-template-node",
     "refusal-template-2d-login-not-stored", "refusal-template-2d-no-resources",
     "refusal-template-2d-runner-not-ready", "refusal-project-name-taken",
+    "refusal-project-name-invalid", "refusal-project-repos-same-path",
+    "refusal-project-section-repos-same-path",
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.

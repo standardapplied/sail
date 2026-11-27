@@ -50,17 +50,15 @@ public final class DefinitionEdits {
     return config.withServices(services.isEmpty() ? null : Collections.unmodifiableMap(services));
   }
 
-  /** Returns a copy of {@code config} with the repo added. Throws if its path already exists. */
+  /**
+   * Returns a copy of {@code config} with the repo added after those it holds; one at a path held
+   * already is refused when the edit is checked whole.
+   */
   public static ProjectDefinition addRepo(ProjectDefinition config, ProjectDefinition.Repo repo) {
     var repos =
         config.repos() != null
             ? new ArrayList<>(config.repos())
             : new ArrayList<ProjectDefinition.Repo>();
-    for (var existing : repos) {
-      if (existing.path().equals(repo.path())) {
-        throw new IllegalStateException("Repo with path '" + repo.path() + "' already exists.");
-      }
-    }
     repos.add(repo);
     return config.withRepos(List.copyOf(repos));
   }
