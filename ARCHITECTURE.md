@@ -4398,7 +4398,8 @@ harness has exactly two ways in, its own sign-in or one stored key (`HarnessCont
 later harness is one adapter and no client change. Each refusal is the API's error shape (`code`,
 `message`, `action`, `remedy`).
 
-**A chat** (`ChatHost`, `ChatProcess`, `ChatStore`) is a session the server holds for a person
+**A chat** (`ChatHost` over `ChatLaunch`, `ChatAttachments`, `ChatProcess` and `ChatLog`, kept in
+`ChatStore`) is a session the server holds for a person
 with an agent in their own workspace, with no pty. `POST /v1/projects/{p}/workspaces/{w}/chats`
 `{"harness", "mode", "inside"}` answers `201 {"session"}`, an id from `Ids`; it is admitted as a
 pty `Create` of an agent is, through the same `HostPty.admitWorkspace` and `admitAgent`
@@ -4414,7 +4415,7 @@ a message said while a turn is open, or while an earlier one waits, is `queued`,
 past the chat's `handed` mark, and handed when the turn ends (a `delivered` item names it). At most
 one process holds a chat: a message is sent under the chat's lock, and only a message starts one.
 An attachment is a path the files door wrote in the workspace, read as the dev user by
-`FileScripts.image` (the path on its input, resolved inside `~/workspace`, a link's target
+`FileScripts.IMAGE_COMMAND` (the path on its input, resolved inside `~/workspace`, a link's target
 included, at most 3,840 KiB, a png, jpeg, gif or webp by name) into the harness's image block.
 `GET /v1/sessions/{id}/chat?after=<seq>` answers `{"items", "ended"}`, each item `{"seq", "at",
 "type", ...its fields}` as `ChatWire` writes a `ChatItem` or Sail's own (`message`, `delivered`,
