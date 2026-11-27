@@ -471,11 +471,13 @@ public final class ChatHost implements AutoCloseable {
       throw new IllegalArgumentException(
           "'" + session + "' is not a chat's id: use the session its open answered.", malformed);
     }
-    return store.find(session).filter(launch::opens).orElseThrow(() -> unknown(session));
-  }
-
-  private static ApiException unknown(String session) {
-    return new ApiException(ErrorCode.NOT_FOUND, "There is no chat " + session + " of yours here.");
+    return store
+        .find(session)
+        .filter(launch::opens)
+        .orElseThrow(
+            () ->
+                new ApiException(
+                    ErrorCode.NOT_FOUND, "There is no chat " + session + " of yours here."));
   }
 
   private ChatLog log(String session) {
