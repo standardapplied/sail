@@ -23,7 +23,7 @@ public final class WorkspacesView: NSView {
     var client: SailClient?
     /// Who is signed in: someone else, or another control plane, starts the section afresh; their
     /// role confirmed or changed keeps what is shown and under way.
-    var person = WorkspacesModel.Person(handle: "", admin: false, confirmed: false, controlPlane: "") {
+    package var person = WorkspacesModel.Person(handle: "", admin: false, confirmed: false, controlPlane: "") {
         didSet {
             guard person != oldValue else { return }
             if person.handle == oldValue.handle, person.controlPlane == oldValue.controlPlane {

@@ -152,4 +152,22 @@ extension NSAttributedString {
         cut.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: cut.length))
         return cut
     }
+
+    /// These words whole where they are at most `width` wide, else cut in their middle with one
+    /// ellipsis, keeping as much of both ends as fits (a host is known by its ends); nothing where
+    /// not even the ellipsis fits. Measured, not left to the line's drawing, so what is drawn is
+    /// what was fitted.
+    package func cutInTheMiddle(to width: Double) -> NSAttributedString {
+        guard Double(size().width) > width else { return self }
+        let characters = Array(string), attributes = length > 0 ? attributes(at: 0, effectiveRange: nil) : [:]
+        func keeping(_ kept: Int) -> NSAttributedString {
+            NSAttributedString(string: String(characters.prefix((kept + 1) / 2)) + "\u{2026}" + String(characters.suffix(kept / 2)), attributes: attributes)
+        }
+        var fits = -1, over = characters.count
+        while over - fits > 1 {
+            let kept = (fits + over) / 2
+            if Double(keeping(kept).size().width) <= width { fits = kept } else { over = kept }
+        }
+        return fits < 0 ? NSAttributedString() : keeping(fits)
+    }
 }

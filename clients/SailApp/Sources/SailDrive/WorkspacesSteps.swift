@@ -550,6 +550,11 @@ extension Driver {
             let found = await waitUntil(step.seconds ?? 10) { !pane.panel.isHidden && heads() == wanted }
             return (found, "the panel's heads: \(heads())")
         }
+        if let host = step.panelHost {
+            let signedIn = WorkspacesModel.Person(shell.flow.standing)
+            pane.person = host.isEmpty ? signedIn : WorkspacesModel.Person(handle: signedIn.handle, admin: signedIn.admin, confirmed: signedIn.confirmed, controlPlane: host, creates: signedIn.creates)
+            return (!signedIn.handle.isEmpty, "Workspaces is \(signedIn.handle)'s at \(pane.person.controlPlane)")
+        }
         if let title = step.chooseSession {
             let list = pane.local.list, chosen = await chooseSession(title)
             return (chosen, "chosen: \(list.chosen ?? "none"), the list \(list.window?.firstResponder === list ? "holding" : "not holding") the keys; the pane says: "
