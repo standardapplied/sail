@@ -550,13 +550,13 @@ extension Driver {
             return (opened, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"); \(arrangementSaid)")
         }
         if step.nothingNamesThisMac == true {
-            let host = WorkbenchView.hostName, asked = await GoldenDesk.shared.asked
+            let names = [WorkbenchView.hostName, pane.local.macName].filter { !$0.isEmpty }, asked = await GoldenDesk.shared.asked
             let named = asked.filter { request in
                 [request.path, String(decoding: request.body ?? Data(), as: UTF8.self)].contains { sent in
-                    ["This Mac", "This%20Mac", "This+Mac"].contains { sent.contains($0) } || !host.isEmpty && sent.contains(host)
+                    (["This Mac", "This%20Mac", "This+Mac"] + names).contains { sent.contains($0) }
                 }
             }
-            return (named.isEmpty, "of \(asked.count) requests, these name This Mac or this Mac's host: \(named.map(\.route))")
+            return (named.isEmpty, "of \(asked.count) requests, these name This Mac or this Mac's host or name: \(named.map(\.route))")
         }
         if let wanted = step.chooseRow {
             guard await clickRow(wanted, in: pane.project.list) else { return (false, "no row \(wanted) to click") }

@@ -61,8 +61,8 @@ public final class WorkspacesView: NSView {
             render()
         }
     }
-    /// This Mac's terminals now, which its page lists while it is shown.
-    var sessions: [LocalSession] = [] {
+    /// This Mac's terminals now, which its page lists while it is shown; being listed until told.
+    var sessions: LocalProjectView.Terminals = .listing {
         didSet { if sessions != oldValue { showThisMac() } }
     }
 
@@ -227,8 +227,8 @@ public final class WorkspacesView: NSView {
         case .unreachable: return (["Workspaces"] + cardSaid).joined(separator: "\n")
         case let .shown(_, .noProjects(empty)): return (["Workspaces", empty.title, empty.body] + (empty.line.map { [$0] } ?? [])).joined(separator: "\n")
         case let .shown(panel, .thisMac):
-            let lede = WorkspacesModel.thisMacLede(host: WorkbenchView.hostName, controlPlane: panel.controlPlane)
-            return (["Workspaces", WorkspacesModel.thisMac, lede] + (sessions.isEmpty ? [LocalProjectView.noShell] : sessions.map(LocalProjectView.said))).joined(separator: "\n")
+            let lede = WorkspacesModel.thisMacLede(host: local.macName, controlPlane: panel.controlPlane)
+            return (["Workspaces", WorkspacesModel.thisMac, lede] + (LocalProjectView.instead(sessions).map { [$0] } ?? sessions.rows.map(LocalProjectView.said))).joined(separator: "\n")
         case let .shown(_, .project(page)):
             var lines = ["Workspaces", page.name, page.lede] + (page.banner.map { [$0.title, $0.line] } ?? [])
             switch page.body {

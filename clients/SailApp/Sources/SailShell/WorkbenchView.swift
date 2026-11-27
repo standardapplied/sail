@@ -31,8 +31,8 @@ public final class WorkbenchView: NSView {
     var onSignIn: @MainActor () -> Void = {}
     /// A runner tab in a workspace attached or went, so what counts its sessions counts again.
     var onRunnerTabs: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
-    /// This Mac's terminals changed (one opened, went, was titled, moved folder or ended), which
-    /// This Mac's page lists (``localSessions``).
+    /// This Mac's terminals changed (one opened, went, was titled, moved folder or ended) or could
+    /// not be listed, which This Mac's page says (``terminals``).
     var onSessions: @MainActor () -> Void = {}
     /// How each of this Mac's panes whose session ended, the pane kept, ended ("exited 3 · 11:02").
     private var endings: [PaneID: String] = [:]
@@ -65,6 +65,8 @@ public final class WorkbenchView: NSView {
     static let keepDelay = 0.3
     /// The arrangement is the person's from here on: restored, so worth keeping.
     private(set) var restored = false
+    /// The last restore could not list what lives: This Mac's page says so.
+    private(set) var unlisted = false
     /// Workspaces asked to open, and sessions asked to start, before the first restore, done in turn
     /// once it has replaced the model; a session only for the person who asked for it there.
     private var pending: [@MainActor () -> Void] = []
@@ -148,6 +150,12 @@ public final class WorkbenchView: NSView {
         Task { await restore() }
     }
 
+    /// This Mac's terminals as its page knows them: being listed until the first restore lists
+    /// them, unlisted while it could not.
+    var terminals: LocalProjectView.Terminals {
+        restored ? .listed(localSessions) : unlisted ? .unlisted : .listing
+    }
+
     /// This Mac's terminals as its page lists them, a row each.
     var localSessions: [LocalSession] {
         model.localSessions(ended: endings, hostNames: [Self.hostName], home: NSHomeDirectory())
@@ -165,11 +173,14 @@ public final class WorkbenchView: NSView {
             try await host.ensureServing { [weak self] sentence in await self?.tell(sentence) }
             listed = try await SessionListing.sessions(at: host.address)
         } catch {
+            unlisted = true
+            onSessions()
             banner.show(Said.sentence("\(error)"), tone: .error, button: "Try Again") { [weak self] in
                 Task { await self?.restore() }
             }
             return
         }
+        unlisted = false
         if banner.shown != told { banner.hide() }
         let kept = defaults.data(forKey: Self.arrangementKey).flatMap { try? JSONDecoder().decode(Arrangement.self, from: $0) }
         let person = signedIn()?.handle
@@ -543,12 +554,17 @@ public final class WorkbenchView: NSView {
         openTab(in: newPlace())
     }
 
-    /// Workspace `name` of `project` beside this Mac's terminals: a tab attached to each of the
-    /// person's live sessions there that no tab holds, newest first, or a tab with a new one when
-    /// there are none (or they cannot be listed); before the first restore, once it is done.
+    /// Workspace `name` of `project` beside this Mac's terminals, shown for it: a tab attached to
+    /// each of the person's live sessions there that no tab holds, newest first, or a tab with a new
+    /// one when there are none (or they cannot be listed); before the first restore, once it is done.
     func openWorkspace(project: String, name: String) {
+        showForATab()
+        openInWorkspace(project: project, name: name)
+    }
+
+    private func openInWorkspace(project: String, name: String) {
         let place = Place.workspace(project: project, name: name)
-        guard restored else { return pending.append({ [weak self] in self?.openWorkspace(project: project, name: name) }) }
+        guard restored else { return pending.append({ [weak self] in self?.openInWorkspace(project: project, name: name) }) }
         guard let reached = signedIn() else { return openTab(in: place) }
         Task { [weak self] in
             let listed = try? await reached.tickets.sessions(in: project, workspace: name)
@@ -581,22 +597,28 @@ public final class WorkbenchView: NSView {
 
     /// A new runner tab with a new session in workspace `name` of `project`, whatever its tabs
     /// hold already: `agent`, whose command the host composes and signs in, the tab titled by its
-    /// harness and workspace, or a shell when it is nil. Asked before the first restore (the section
-    /// never shown yet), it opens once that is done, for the person who asked alone.
+    /// harness and workspace, or a shell when it is nil, shown for it. Asked before the first restore
+    /// (the section never shown yet), it opens once that is done, for the person who asked alone.
     func startSession(_ agent: AgentStart?, project: String, name: String) {
+        showForATab()
+        startInWorkspace(agent, project: project, name: name)
+    }
+
+    private func startInWorkspace(_ agent: AgentStart?, project: String, name: String) {
         guard restored else {
             let askedBy = asker
             return pending.append({ [weak self] in
                 guard let self, askedBy == asker else { return }
-                startSession(agent, project: project, name: name)
+                startInWorkspace(agent, project: project, name: name)
             })
         }
         openTab(in: .workspace(project: project, name: name), agent: agent)
     }
 
+    /// A shell in a new tab, shown; asked before the first restore, once it is done, beside what it restores.
     @objc public func newTab(_: Any?) {
         showForATab()
-        guard restored else { return }
+        guard restored else { return pending.append({ [weak self] in self?.openTab() }) }
         openTab()
     }
 

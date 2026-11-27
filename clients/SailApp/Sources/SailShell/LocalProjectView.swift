@@ -4,6 +4,7 @@ import SailAPI
 import SailControls
 import SailLook
 import SailWorkbench
+import SystemConfiguration
 
 /// This Mac's page in Workspaces, as the approved design draws it: "This Mac" with its plain
 /// "Local · not synced" pill, the line saying which Mac it is and that nothing here reaches the
@@ -19,7 +20,17 @@ package final class LocalProjectView: NSView {
     }
 
     static let endSession = "End Session", noteGap = 22.0, hintGap = 16.0, noteWidth = 520.0
-    static let noShell = "No shell is open on this Mac."
+    static let noShell = "No shell is open on this Mac.", unlisted = "Couldn’t list this Mac’s terminals."
+
+    /// This Mac's terminals as the page knows them: still being listed, listed, or their listing failed.
+    enum Terminals: Equatable {
+        case listing, listed([LocalSession]), unlisted
+
+        /// The terminals listed; none until they are.
+        var rows: [LocalSession] {
+            if case let .listed(sessions) = self { sessions } else { [] }
+        }
+    }
 
     /// The program a shell of this Mac runs: the person's login shell, as this Mac's terminal host
     /// reads it from the account database.
@@ -27,6 +38,19 @@ package final class LocalProjectView: NSView {
         guard let account = getpwuid(getuid()), let shell = account.pointee.pw_shell else { return "sh" }
         return URL(filePath: String(cString: shell)).lastPathComponent
     }()
+
+    /// This Mac as its person knows it: `computer`, its name as System Settings shows it ("Uday’s
+    /// MacBook Pro"), or `host` when it has none.
+    static func name(computer: String?, host: String) -> String {
+        guard let computer, !computer.trimmingCharacters(in: .whitespaces).isEmpty else { return host }
+        return computer
+    }
+
+    /// The name the lede says, read from the system's configuration, never asked of the network,
+    /// and sent nowhere.
+    package var macName = LocalProjectView.name(computer: SCDynamicStoreCopyComputerName(nil, nil) as String?, host: WorkbenchView.hostName) {
+        didSet { redraw() }
+    }
 
     var on: @MainActor (Act) -> Void = { _ in }
     var look: Look {
@@ -40,7 +64,7 @@ package final class LocalProjectView: NSView {
     package let newShell: SailButton
     let newShellIcon: SailButton
     let note = NSTextField(wrappingLabelWithString: "")
-    /// Under SESSIONS while this Mac has no terminal, in a row's place.
+    /// Under SESSIONS in a row's place: no terminal is open, or none could be listed.
     let empty = NSTextField(labelWithString: "")
     /// The keys that act on the chosen row, shown only while they do.
     let keys = NSStackView()
@@ -51,7 +75,9 @@ package final class LocalProjectView: NSView {
     private let mono: LabelFont
     private let titleFont: TitleFont
     /// What it was told last: drawn again in a new look or width.
-    private var shown: (sessions: [LocalSession], controlPlane: String)?
+    private var shown: (terminals: Terminals, controlPlane: String)?
+    /// The program's column: as wide as the longest program or ending a row says, 104 pt at least.
+    private var programColumn = WorkspaceLine.ownerColumn
     private(set) var narrow = false {
         didSet { if narrow != oldValue { redraw() } }
     }
@@ -92,26 +118,48 @@ package final class LocalProjectView: NSView {
     /// Drawn narrow or wide by its own width, drawn again only when that changes.
     override public func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        if newSize.width > 0 { narrow = Double(newSize.width) < wide }
+        fit()
+    }
+
+    private func fit() {
+        if bounds.width > 0 { narrow = Double(bounds.width) < wide }
     }
 
     /// The least width drawn wide: the wide row's columns, insets and frame, and 150 pt for a name.
     private var wide: Double {
-        2 * ProjectView.padding.sides + 2 + RowStyle.list.leading + RowStyle.list.trailing + WorkspaceLine.pillColumn + WorkspaceLine.ownerColumn
-            + columns.wide + 150
+        2 * ProjectView.padding.sides + 2 + RowStyle.list.leading + RowStyle.list.trailing + WorkspaceLine.pillColumn + programColumn + columns.wide + 150
     }
 
-    /// Draws `sessions`, This Mac's terminals now, kept from `controlPlane`; the same again draws nothing.
-    func render(_ sessions: [LocalSession], controlPlane: String) {
-        guard shown.map({ $0.sessions != sessions || $0.controlPlane != controlPlane }) ?? true else { return }
-        shown = (sessions, controlPlane)
-        redraw()
+    /// Draws `terminals`, This Mac's now, kept from `controlPlane`; the same again draws nothing.
+    func render(_ terminals: Terminals, controlPlane: String) {
+        guard shown.map({ $0.terminals != terminals || $0.controlPlane != controlPlane }) ?? true else { return }
+        shown = (terminals, controlPlane)
+        programColumn = terminals.rows.reduce(WorkspaceLine.ownerColumn) { widest, session in
+            max(widest, Double(WorkspaceLine.secondary(Self.program(session), look: look).intrinsicContentSize.width).rounded(.up))
+        }
+        let was = narrow
+        fit()
+        if narrow == was { redraw() }
+    }
+
+    /// What stands under SESSIONS in a row's place: why no row does, nothing while they are listed or listing.
+    static func instead(_ terminals: Terminals) -> String? {
+        switch terminals {
+        case .listing: nil
+        case .unlisted: Self.unlisted
+        case let .listed(sessions): sessions.isEmpty ? Self.noShell : nil
+        }
     }
 
     /// A session as a person reads it: its title, its state, its folder, and its program or how it
     /// ended ("This Mac · running · ~/workspace/sail · zsh").
     static func said(_ session: LocalSession) -> String {
-        [session.title, state(session).label.lowercased(), session.folder, session.ended ?? program].joined(separator: " · ")
+        [session.title, state(session).label.lowercased(), session.folder, program(session)].joined(separator: " · ")
+    }
+
+    /// What a session runs, or how it ended.
+    private static func program(_ session: LocalSession) -> String {
+        session.ended ?? program
     }
 
     private static func state(_ session: LocalSession) -> PillState {
@@ -123,21 +171,23 @@ package final class LocalProjectView: NSView {
         title.attributedStringValue = NSAttributedString(string: WorkspacesModel.thisMac, attributes: [
             .font: titleFont.font(.title1) as NSFont, .foregroundColor: NSColor(look.text), .kern: -0.012 * Look.Step.title1.points,
         ])
-        lede.attributedStringValue = NSAttributedString(string: WorkspacesModel.thisMacLede(host: WorkbenchView.hostName, controlPlane: shown.controlPlane), attributes: [
+        lede.attributedStringValue = NSAttributedString(string: WorkspacesModel.thisMacLede(host: macName, controlPlane: shown.controlPlane), attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(look.textSecondary),
         ])
         note.attributedStringValue = NSAttributedString(string: WorkspacesModel.thisMacNote, attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),
         ])
-        empty.attributedStringValue = NSAttributedString(string: Self.noShell, attributes: [
+        let instead = Self.instead(shown.terminals), sessions = shown.terminals.rows
+        empty.attributedStringValue = NSAttributedString(string: instead ?? "", attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(look.textTertiary),
         ])
-        empty.isHidden = !shown.sessions.isEmpty
+        empty.isHidden = instead == nil
         newShell.isHidden = narrow
         newShellIcon.isHidden = !narrow
         list.actionsColumn = narrow ? columns.narrow : columns.wide
         list.returnKeyShown = !narrow
-        let entries: [SailList.Entry] = [.head("Sessions", count: shown.sessions.count)] + shown.sessions.map { .item(item($0)) }
+        let count = if case .listed = shown.terminals { sessions.count } else { Int?.none }
+        let entries: [SailList.Entry] = [.head("Sessions", count: count)] + sessions.map { .item(item($0)) }
         list.entries = entries
         frameView.height = entries.indices.reduce(empty.isHidden ? 0.0 : RowStyle.list.height) { $0 + Double(list.tableView(list, heightOfRow: $1)) }
         showKeys()
@@ -145,10 +195,9 @@ package final class LocalProjectView: NSView {
 
     private func item(_ session: LocalSession) -> SailList.Item {
         let narrow = narrow, look = look, mono = mono, pane = session.pane
-        let program = session.ended ?? Self.program
         let line = WorkspaceLine(
-            session.title, below: narrow ? "\(session.folder) · \(program)" : session.folder, cut: .byTruncatingMiddle, pill: Self.state(session),
-            whose: WorkspaceLine.secondary(program, look: look), ownerTip: nil, narrow: narrow, look: look, mono: mono
+            session.title, below: session.folder, cut: .byTruncatingMiddle, pill: Self.state(session), whose: WorkspaceLine.secondary(Self.program(session), look: look),
+            whoseWidth: programColumn, ownerTip: nil, narrow: narrow, look: look, mono: mono
         )
         let actions = [
             SailList.Action("Open") { [weak self] in self?.on(.open(pane)) },
@@ -249,13 +298,11 @@ package final class LocalProjectView: NSView {
         ])
     }
 
-    /// The widest actions a row shows, Open (with ⏎ when `returnKey`) and ⋯, measured.
+    /// The widest actions a row shows, Open (with ⏎ when `returnKey`) and ⋯, measured with the gap before them.
     private func actionsColumn(returnKey: Bool) -> Double {
         let open = SailButton("Open", kind: .primary, size: .small, look: look, target: nil, action: nil)
         if returnKey { open.shortcut("\r", mono: mono) }
-        let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
-        let boxes = [open, more].map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
-        return (boxes.reduce(0, +) + ProjectView.buttonGap).rounded(.up)
+        return WorkspaceLine.actionsColumn([open, SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)])
     }
 
     /// New Shell, its icon or ⌘T: a shell at once, in Terminals, with no chooser.

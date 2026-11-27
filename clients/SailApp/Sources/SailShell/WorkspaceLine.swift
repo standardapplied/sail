@@ -37,10 +37,11 @@ final class WorkspaceLine: NSStackView {
     }
 
     /// A row of `name` over `below` in mono (cut as `cut` says), `pill`, and `whose` in the owner's
-    /// column while wide: a workspace's, or one of This Mac's terminals (its folder, its program).
+    /// column, `whoseWidth` wide, while wide: a workspace's, or one of This Mac's terminals (its
+    /// folder, its program).
     init(
-        _ name: String, below: String, cut: NSLineBreakMode, pill state: PillState, whose column: NSView?, ownerTip: Tooltip?, narrow: Bool, look: Look,
-        mono: LabelFont
+        _ name: String, below: String, cut: NSLineBreakMode, pill state: PillState, whose column: NSView?, whoseWidth: Double = WorkspaceLine.ownerColumn,
+        ownerTip: Tooltip?, narrow: Bool, look: Look, mono: LabelFont
     ) {
         Self.made += 1
         title = NSTextField(labelWithAttributedString: Self.name(name, strong: false, look: look))
@@ -51,7 +52,7 @@ final class WorkspaceLine: NSStackView {
         placeTip = Self.tip(below, look: look)
         pill = Pill(state, look: look, mono: mono)
         self.ownerTip = ownerTip
-        whose = narrow ? nil : Self.column(column, width: Self.ownerColumn)
+        whose = narrow ? nil : Self.column(column, width: whoseWidth)
         super.init(frame: .zero)
         for (label, tip) in [(title, titleTip), (place, placeTip)] {
             label.lineBreakMode = .byTruncatingTail
@@ -142,6 +143,14 @@ final class WorkspaceLine: NSStackView {
             view.centerYAnchor.constraint(equalTo: column.centerYAnchor), column.heightAnchor.constraint(greaterThanOrEqualTo: view.heightAnchor),
         ])
         return column
+    }
+
+    /// The actions column a list of these rows keeps clear at its end: `buttons`, the widest a row
+    /// shows, side by side the design's 6 pt apart, and the design system's 8 pt between the row's
+    /// words and them, as the narrow frame's row sets its columns apart.
+    static func actionsColumn(_ buttons: [SailButton]) -> Double {
+        let boxes = buttons.map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
+        return (boxes.reduce(0, +) + Double(max(buttons.count - 1, 0)) * ProjectView.buttonGap + Look.Space.s).rounded(.up)
     }
 
     /// Words in the owner's column, as a person's handle is set there.

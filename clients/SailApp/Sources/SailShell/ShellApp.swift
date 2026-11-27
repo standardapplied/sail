@@ -566,23 +566,18 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         thisMac.onRunnerTabs = { [weak self] project, name in self?.workspaces.recount(project: project, name: name) }
         thisMac.onSessions = { [weak self] in
             guard let self else { return }
-            workspaces.sessions = thisMac.localSessions
+            workspaces.sessions = thisMac.terminals
         }
         workspaces.onThisMacShown = { [weak self] in self?.thisMac.restoreOnce() }
         workspaces.local.on = { [weak self] act in self?.onThisMac(act) }
-        workspaces.onOpen = { [weak self] project, name in
-            self?.thisMac.showForATab()
-            self?.thisMac.openWorkspace(project: project, name: name)
-        }
+        workspaces.onOpen = { [weak self] project, name in self?.thisMac.openWorkspace(project: project, name: name) }
         workspaces.remembered = { [defaults] person in ModeMemory.stored(in: defaults, for: person) }
         workspaces.memory = workspaces.remembered(workspaces.person)
         workspaces.keep = { [defaults] memory, person in memory.store(in: defaults, for: person) }
         workspaces.lastChosen = { [defaults] person in defaults.string(forKey: Self.chosenKey(person)) }
         workspaces.keepChosen = { [defaults] name, person in defaults.set(name, forKey: Self.chosenKey(person)) }
         workspaces.onStart = { [weak self] start, project, name in
-            guard let self else { return }
-            thisMac.showForATab()
-            thisMac.startSession(start, project: project, name: name)
+            self?.thisMac.startSession(start, project: project, name: name)
         }
         thisMac.onShow = { [weak self] in
             guard let self, rail.selected != .terminals else { return }

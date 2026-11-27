@@ -339,8 +339,10 @@ import Testing
         }
         let empty = try Self.unshown(at: door)
         empty.restoreOnce()
+        #expect(empty.terminals == .listing)
         try #require(await RunnerTabTests.until(10) { empty.restored }, "the restore never ended")
         #expect(empty.model.tabs.isEmpty && door.createsReceived == 0, "the page's restore started a shell nobody asked for")
+        #expect(empty.terminals == .listed([]))
         let kept = Place.thisMac(folder: "/").newSessionName
         door.hold(kept)
         let restored = try Self.unshown(at: door)
@@ -349,6 +351,7 @@ import Testing
         #expect(restored.localSessions.map(\.title) == ["This Mac"] && restored.model.panes.values.map(\.session) == [kept], "\(restored.localSessions)")
         let shown = try Self.unshown(at: other)
         shown.shown()
+        #expect(shown.model.tabs.isEmpty, "a shell opened before the restore")
         #expect(await RunnerTabTests.until(10) { shown.restored && shown.model.tabs.count == 1 }, "the terminals shown first opened no tab")
     }
 
@@ -376,6 +379,62 @@ import Testing
         #expect(asked.model.tabs.count == 1, "New Shell opened \(asked.model.tabs.count) shells")
     }
 
+    /// A workspace's Open and a New Session's Start show Terminals for their own tab: after This
+    /// Mac's page restored none, that showing, Terminals' first, opens no shell beside it; Start's
+    /// tab opens at once, Open's once the runner lists the workspace's sessions.
+    @Test func openAndStartShowTerminalsForTheirTabAlone() async throws {
+        let (door, other, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer {
+            door.stop()
+            other.stop()
+            runner.stop()
+        }
+        let tickets = DoorTickets(runner)
+        for (bench, act) in [(try Self.unshown(at: door), "Start"), (try Self.unshown(at: other), "Open")] {
+            bench.signedIn = { ("uday", tickets) }
+            var showings = 0
+            bench.onShow = { [weak bench] in
+                showings += 1
+                bench?.shown()
+            }
+            bench.restoreOnce()
+            try #require(await RunnerTabTests.until(10) { bench.restored }, "the restore never ended")
+            if act == "Start" { bench.startSession(nil, project: "harbor", name: "dock") } else { bench.openWorkspace(project: "harbor", name: "dock") }
+            let titles = { bench.model.tabs.map { bench.model.title(of: $0.id) } }
+            #expect(showings == 1 && titles() == (act == "Start" ? ["harbor · dock"] : []), "\(act): shown \(showings) times, the tabs are \(titles())")
+            #expect(await RunnerTabTests.until(10) { titles() == ["harbor · dock"] }, "\(act): the tabs are \(titles())")
+        }
+    }
+
+    /// New Shell pressed while the restore lists what lives opens its shell once the restore is
+    /// done, beside the shells it brings back.
+    @Test func newShellDuringTheRestoreOpensOneBesideWhatLives() async throws {
+        let door = try FakeRunnerDoor(thisMac: true)
+        defer { door.stop() }
+        let kept = Place.thisMac(folder: "/").newSessionName
+        door.hold(kept)
+        let bench = try Self.unshown(at: door)
+        bench.onShow = { [weak bench] in bench?.shown() }
+        bench.restoreOnce()
+        bench.newTab(nil)
+        #expect(bench.model.tabs.isEmpty, "a shell opened before the restore")
+        try #require(await RunnerTabTests.until(10) { bench.restored }, "the restore never ended")
+        #expect(bench.model.tabs.count == 2 && bench.model.panes.values.contains { $0.session == kept }, "\(bench.model.tabs.count) tabs after the restore")
+    }
+
+    /// A restore that cannot reach this Mac's terminal host tells This Mac's page so: its terminals
+    /// are unlisted, not listed empty.
+    @Test func aRestoreThatCannotListSaysSo() async throws {
+        let door = try FakeRunnerDoor(thisMac: true)
+        let bench = try Self.unshown(at: door)
+        door.stop()
+        var told: [LocalProjectView.Terminals] = []
+        bench.onSessions = { [weak bench] in bench.map { told.append($0.terminals) } }
+        bench.restoreOnce()
+        #expect(await RunnerTabTests.until(10) { told.last == .unlisted }, "told \(told)")
+        #expect(!bench.restored && bench.terminals == .unlisted)
+    }
+
     /// End Session asks by its row's terminal, which Workspaces does not show, never Close's own
     /// "Close this terminal?"; cancelled, the terminal stays.
     @Test func endSessionAsksByTheRowsTerminal() async throws {
@@ -393,7 +452,7 @@ import Testing
         let words = WorkspacesViewTests.found(NSTextField.self, in: try #require(sheet.contentView)).map(\.stringValue)
         #expect(words.contains("Close This Mac 2?"), "End Session asked \(words)")
         window.endSheet(sheet, returnCode: .alertSecondButtonReturn)
-        #expect(bench.panes[second] != nil && door.sessions.count == 2, "cancelled, the terminal went")
+        #expect(bench.panes[second]?.isEnding == false, "cancelled, the terminal is ending")
     }
 
     /// A pane of this Mac kept after its session ended is said Ended on This Mac's page, as its host

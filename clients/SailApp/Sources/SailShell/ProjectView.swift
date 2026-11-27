@@ -56,15 +56,14 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     private let frameView: ListFrame
 
     /// The narrow rows' actions column: the widest actions a narrow row shows (Start and Open with
-    /// no keycap, which narrow rows drop; + and ⋯ beside it), measured, so every list's pills stand at
-    /// one x and a row's name keeps the rest; a note ("Only uday or an admin opens it") is cut within it.
-    lazy var narrowActionsColumn: Double = {
-        let start = SailButton("Start and Open", kind: .primary, size: .small, look: look, target: nil, action: nil)
-        let plus = SailButton(icon: .plus, label: NewSessionWords.newSession, size: .small, look: look, target: nil, action: nil)
-        let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
-        let boxes = [start, plus, more].map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
-        return (boxes.reduce(0, +) + 2 * Self.buttonGap).rounded(.up)
-    }()
+    /// no keycap, which narrow rows drop; + and ⋯ beside it), measured with the gap before them, so
+    /// every list's pills stand at one x, clear of the actions, and a row's name keeps the rest; a
+    /// note ("Only uday or an admin opens it") is cut within it.
+    lazy var narrowActionsColumn = WorkspaceLine.actionsColumn([
+        SailButton("Start and Open", kind: .primary, size: .small, look: look, target: nil, action: nil),
+        SailButton(icon: .plus, label: NewSessionWords.newSession, size: .small, look: look, target: nil, action: nil),
+        SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil),
+    ])
     /// The project whose rows the list last held: its rows drawn again keep the person's scroll;
     /// another project's, or anyone's after a change of person, start at the top.
     private var filled: String?
