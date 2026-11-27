@@ -26,7 +26,7 @@ final class ListFrame: NSView {
     /// Holding a view whose height follows its width alone (the build card, whose lines wrap): that
     /// height at a width, which the frame's own follows by its intrinsic size at each new width,
     /// never by a constraint changed in a layout pass (#502); nil, ``height`` holds.
-    private let following: ((Double) -> Double)?
+    private let following: (@MainActor (Double) -> Double)?
 
     init(look: Look) {
         self.look = look
@@ -35,7 +35,7 @@ final class ListFrame: NSView {
         super.init(frame: .zero)
     }
 
-    init(scrolling list: NSView, look: Look, following: ((Double) -> Double)? = nil) {
+    init(scrolling list: NSView, look: Look, following: (@MainActor (Double) -> Double)? = nil) {
         self.look = look
         let scroll = QuietScrollView(look: look)
         self.scroll = scroll

@@ -132,10 +132,10 @@ final class BuildCard: NSView {
             let flip = { (rect: NSRect) in NSRect(x: width - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height)) }
             var laid = self
             laid.mark = flip(mark)
-            laid.texts = texts.map { ($0.text, flip($0.rect)) }
+            laid.texts = texts.map { (text: $0.text, rect: flip($0.rect)) }
             laid.bar = bar.map(flip)
             laid.filled = filled.map(flip)
-            laid.icons = icons.map { ($0.mark, flip($0.rect)) }
+            laid.icons = icons.map { (mark: $0.mark, rect: flip($0.rect)) }
             laid.box = box.map(flip)
             laid.again = again.map(flip)
             laid.refusalMark = refusalMark.map(flip)

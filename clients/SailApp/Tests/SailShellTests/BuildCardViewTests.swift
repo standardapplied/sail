@@ -110,9 +110,9 @@ import Testing
                 #expect(Double(other.frame.minX) > width / 2, "\(other.frame) stays at the leading side")
             }
             let left = ltr.laid(width: width, now: now), right = rtl.laid(width: width, now: now)
-            #expect(right.texts.map(\.text.string) == left.texts.map(\.text.string))
-            #expect(right.texts.map(\.rect) == left.texts.map { mirror($0.rect) }, "a text not mirrored: \(right.texts.map(\.rect))")
-            #expect(right.icons.map(\.rect) == left.icons.map { mirror($0.rect) } && right.icons.map(\.mark) == left.icons.map(\.mark), "an icon not mirrored")
+            #expect(right.texts.map { $0.text.string } == left.texts.map { $0.text.string })
+            #expect(right.texts.map { $0.rect } == left.texts.map { mirror($0.rect) }, "a text not mirrored: \(right.texts.map { $0.rect })")
+            #expect(right.icons.map { $0.rect } == left.icons.map { mirror($0.rect) } && right.icons.map { $0.mark } == left.icons.map { $0.mark }, "an icon not mirrored")
             #expect(right.mark == mirror(left.mark) && right.bar == left.bar.map(mirror) && right.box == left.box.map(mirror), "the mark, the bar or the box not mirrored")
             #expect(right.again == left.again.map(mirror) && right.refusalMark == left.refusalMark.map(mirror), "Build Again or the refusal's mark not mirrored")
             let bar = try #require(right.bar), filled = try #require(right.filled)
@@ -128,9 +128,8 @@ import Testing
         let (view, window, desk) = try await Self.section("building", "template-2e-building", pauses)
         defer { window.orderOut(nil) }
         #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && pauses.count == 1 }, "\(view.text)")
-        let card = view.project.buildCard, tracking = CFRunLoopMode(RunLoop.Mode.eventTracking.rawValue as CFString)
-        let ticks = try #require(card.ticks)
-        #expect(CFRunLoopContainsTimer(CFRunLoopGetMain(), unsafeBitCast(ticks, to: CFRunLoopTimer.self), tracking), "the time stops while a scroll tracks")
+        let card = view.project.buildCard, ticks = try #require(card.ticks)
+        #expect(CFRunLoopContainsTimer(CFRunLoopGetMain(), unsafeBitCast(ticks, to: CFRunLoopTimer.self), .commonModes), "the time stops while a scroll tracks")
         view.away = true
         #expect(await RunnerTabTests.until { pauses.cancelled == 1 }, "a read went on off screen")
         #expect(card.ticks == nil, "the time ticked off screen")
@@ -138,6 +137,31 @@ import Testing
         #expect(await RunnerTabTests.until { pauses.count == 2 }, "not read again back on screen")
         let reads = await Self.reads(desk)
         #expect(card.ticks != nil && reads == 2)
+    }
+
+    /// The shell tells Workspaces when the window goes off screen and comes back, wherever it tells
+    /// the files; and an ended session Workspaces finds goes to the check that every section's does.
+    @Test func theShellTellsWorkspacesTheWindowAndTheSession() async throws {
+        let desk = try Desk(["whoami"])
+        let shell = try WelcomeViewTests.shell(desk, defaults: ReattachTests.defaults(), vault: OneSession(fde: "uday", lasts: AccountPaneTests.month))
+        defer { shell.window.orderOut(nil) }
+        _ = shell.windowShouldClose(shell.window)
+        #expect(shell.workspaces.away, "the window closed")
+        _ = shell.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false)
+        #expect(!shell.workspaces.away, "the window open again")
+        shell.windowDidMiniaturize(Notification(name: NSWindow.didMiniaturizeNotification))
+        #expect(shell.workspaces.away, "the window in the Dock")
+        shell.windowDidDeminiaturize(Notification(name: NSWindow.didDeminiaturizeNotification))
+        #expect(!shell.workspaces.away, "the window back from the Dock")
+        shell.applicationDidHide(Notification(name: NSApplication.didHideNotification))
+        #expect(shell.workspaces.away, "the app hidden")
+        shell.applicationDidUnhide(Notification(name: NSApplication.didUnhideNotification))
+        #expect(!shell.workspaces.away, "the app shown again")
+        await shell.checking?.value
+        let checks = await desk.asked.filter { $0 == "GET /v1/whoami" }.count
+        shell.workspaces.onSessionEnded()
+        await shell.account.acting?.value
+        #expect(await desk.asked.filter { $0 == "GET /v1/whoami" }.count == checks + 1, "the ended session was not checked")
     }
 
     /// A read the server refused stops the reads where it is, never said as no answer: a refusal in

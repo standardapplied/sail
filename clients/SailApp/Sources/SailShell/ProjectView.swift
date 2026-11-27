@@ -95,7 +95,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
 
     /// The build card's frame, as tall as the card at its width, which scrolls it where the window is
     /// too short for it.
-    private(set) lazy var buildFrame = ListFrame(scrolling: buildCard, look: look) { [buildCard] in buildCard.height(width: $0) }
+    private(set) lazy var buildFrame = ListFrame(scrolling: buildCard, look: look) { [card = self.buildCard] in card.height(width: $0) }
     private var page: WorkspacesModel.Page?
     /// The empty state drawn alone, centred, when no project is open.
     private var centred: NSView?
