@@ -154,12 +154,14 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         relist()
     }
 
-    /// Gone from view, the load under way is stopped and the refusals said are done with: shown
-    /// again, the groups are asked again, and a refusal that came while it was hidden is said.
+    /// Gone from view, the load under way is stopped and the refusals and what storing a key said
+    /// are done with: shown again, the groups are asked again, and what came while it was hidden is
+    /// said.
     override public func viewDidHide() {
         super.viewDidHide()
         loading?.cancel()
         refusals = [:]
+        storedLine = nil
     }
 
     // MARK: What it says
@@ -376,8 +378,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         window.beginSheet(sheet)
     }
 
-    /// A key the sheet stored, by `client`: said under the keys until the groups are asked again
-    /// after the ask it starts.
+    /// A key the sheet stored, by `client`: said under the keys until the view is left or the groups
+    /// are asked again after the ask it starts.
     package func stored(_ stored: StoreLogin, by client: SailClient) {
         if case .stored(_, clearsClipboard: true) = stored.stage { pasteboard.clearContents() }
         storedLine = stored.stored
@@ -552,11 +554,10 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     /// The room a list keeps for its rows' own buttons, so its rows' words wrap at one width: the
-    /// widest row's (`titles`, then ⋯) as the list packs them, 6 pt apart, and the 8 pt before them.
+    /// widest row's (`titles`, then ⋯), as Workspaces measures its own.
     private func actionsColumn(_ titles: [String]) -> Double {
         let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
-        let buttons = titles.map { SailButton($0, kind: .secondary, size: .small, look: look, target: nil, action: nil) } + [more]
-        return buttons.reduce(0.0) { $0 + Double($1.intrinsicContentSize.width) } + Double(buttons.count - 1) * 6 + 8
+        return WorkspaceLine.actionsColumn(titles.map { SailButton($0, kind: .secondary, size: .small, look: look, target: nil, action: nil) } + [more])
     }
 
     /// The refusal of row `id`'s removal, as words under its words, wrapped to the row, that the
@@ -832,7 +833,7 @@ final class AccountRowView: NSView {
 
     /// Where a row's words and controls stand in it, left to right: the words' width and top, each
     /// control's box, and the row's height less its padding.
-    struct Fit: Equatable {
+    struct Fit {
         let words: Double
         let top: Double
         let controls: [NSRect]
@@ -878,6 +879,7 @@ final class AccountRowView: NSView {
         style.alignment = direction == .rightToLeft ? .right : .left
         let ink = warns ? Tint(look.warning) : look.textTertiary
         detail.attributedStringValue = NSAttributedString(string: said, attributes: [.font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(ink), .paragraphStyle: style])
+        detail.isSelectable = false
         [title, detail].forEach(addSubview)
         setAccessibilityElement(false)
     }
@@ -891,10 +893,11 @@ final class AccountRowView: NSView {
         true
     }
 
-    /// `button` its one control, `keeping` what it runs.
+    /// `button` its one control, in its direction, `keeping` what it runs.
     func offer(_ button: SailButton, keeping run: AnyObject) {
         offered = button
         keep = run
+        button.userInterfaceLayoutDirection = userInterfaceLayoutDirection
         addSubview(button)
         controls = [button.intrinsicContentSize]
     }

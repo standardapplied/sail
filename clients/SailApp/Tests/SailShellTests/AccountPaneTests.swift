@@ -1067,8 +1067,20 @@ actor Desk: Transport {
         #expect(offered == ["Add Key"], "hovered, the row with no key shows \(offered)")
     }
 
-    /// What storing a key said goes once it may no longer be true: when a key is removed, and when
-    /// the groups are asked again after Sign In Again.
+    /// A row's words are no text to select, so the pointer over them stays the arrow and a click
+    /// on them leaves the keys with the list.
+    @Test func aRowsWordsAreNoTextToSelect() async throws {
+        let (pane, window) = try await Self.signedIn(try Desk(Self.goldens))
+        defer { window.orderOut(nil) }
+        let rows = try Self.rows(pane)
+        try #require(rows.count == 6, "\(pane.text)")
+        for row in rows {
+            #expect(!row.title.isSelectable && !row.detail.isSelectable, "\(row.title.stringValue)'s words can be selected")
+        }
+    }
+
+    /// What storing a key said goes once it may no longer be true: when a key is removed, when the
+    /// groups are asked again after Sign In Again, and when the view is left, as a refusal does.
     @Test func whatStoringAKeySaidGoesWhenTheGroupsAreAskedAgain() async throws {
         let desk = try Desk(Self.goldens + ["login-removed", "passkey-login-start", "passkey-login-finish"])
         let (pane, window) = try await Self.signedIn(desk)
@@ -1103,6 +1115,12 @@ actor Desk: Transport {
         await pane.acting?.value
         await pane.loading?.value
         #expect(!pane.text.contains(said), "after Sign In Again the view still says the key was stored: \(pane.text)")
+        try await store()
+        pane.isHidden = true
+        pane.isHidden = false
+        pane.shown()
+        await pane.loading?.value
+        #expect(!pane.text.contains(said), "left and shown again, the view still says the key was stored: \(pane.text)")
     }
 
     /// Where a row's words are cut short: its title wider than its frame, or its detail taller.
@@ -1122,7 +1140,8 @@ actor Desk: Transport {
     /// sign-in line read whole for the longest host, signed in for long, ending soon or ended, left
     /// to right and right to left: a row's own controls stand under its words where beside them its
     /// title would be cut, its second line wraps, and the row grows to hold it. Each row's words
-    /// stand on the far side of its tile, and nothing overlaps, a row hovered or not.
+    /// stand on the far side of its tile, its own button drawn in its direction, and nothing
+    /// overlaps, a row hovered or not.
     @Test(arguments: ["connected", "ends soon", "ended"], [false, true])
     func atTheLeastWindowEveryRowIsReadWhole(_ state: String, _ rightToLeft: Bool) async throws {
         let host = try ControlPlane(address: "https://sail.standardapplied.com")
@@ -1147,6 +1166,7 @@ actor Desk: Transport {
             let tile = row.tileBox, title = row.title.frame, detail = row.detail.frame
             let far = rightToLeft ? title.maxX <= tile.minX && detail.maxX <= tile.minX && abs(tile.maxX - row.bounds.width) < 0.5 : title.minX >= tile.maxX && detail.minX >= tile.maxX && tile.minX == 0
             #expect(far, "\(row.title.stringValue)'s words at \(title) and \(detail), its tile at \(tile) in \(row.bounds)")
+            #expect(row.offered.map { $0.userInterfaceLayoutDirection == row.userInterfaceLayoutDirection } != false, "\(row.title.stringValue)'s own button is drawn in the other direction")
         }
         var faults = WorkspacesReachTests.outOfReach(in: pane)
         window.setContentSize(NSSize(width: width, height: 1600))
