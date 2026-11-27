@@ -1,0 +1,1 @@
+{"type":"system","subtype":"task_started","task_id":"bcyvymhyc","run_id":"0mwylxyxd-57a2403d","tool_use_id":"toolu_01J7oi1RVgyfg9PQ4pYFbPqJ","description":"Run the 25-second sleep command in foreground","is_backgrounded":false,"task_type":"local_bash","uuid":"ad3fa47d-27ad-4c0b-8f68-30ce49e39155","session_id":"07e1e377-d805-4047-9050-614c7f4d12a7"}

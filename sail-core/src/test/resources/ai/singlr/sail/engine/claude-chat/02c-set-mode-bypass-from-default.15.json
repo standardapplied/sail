@@ -1,0 +1,1 @@
+{"type":"control_response","response":{"subtype":"error","request_id":"mode-bypass","error":"Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions","error_code":"bypass_not_launched"}}
