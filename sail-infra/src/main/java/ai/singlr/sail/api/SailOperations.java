@@ -140,12 +140,10 @@ public final class SailOperations implements HostOperations {
     this.chats =
         new ChatHost(
             new ChatStore(db),
-            new FdeStore(db),
-            pty,
-            ProjectReader.ofCatalog(projectStore),
-            shell,
-            chatProcesses,
-            ChatHost.Timing.real());
+            new ChatLaunch(
+                pty, new FdeStore(db), ProjectReader.ofCatalog(projectStore), chatProcesses),
+            new ChatAttachments(shell),
+            ChatTiming.real());
     projectSkills = new ProjectSkills(this::projectFiles);
     dispatchOps.useProjectSkills(projectSkills);
     return this;

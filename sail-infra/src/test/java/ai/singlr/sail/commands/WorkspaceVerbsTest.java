@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
@@ -104,11 +105,15 @@ class WorkspaceVerbsTest {
    */
   @Test
   void aDeletedWorkspaceOrDestroyedProjectTakesItsChatsFromTheBox() {
+    var run = Ids.newId().toString();
+    var dock = "dock-" + run.substring(0, 8);
+    var quay = "quay-" + run.substring(0, 8);
+    var places = List.of(dock + "/try", dock + "/pier", quay + "/try");
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
       new SchemaManager(db).migrate();
-      var sam = Acting.system(() -> new FdeStore(db).add("sam-chats", "Sam", null, "member")).id();
+      var sam = Acting.system(() -> new FdeStore(db).add("sam-" + run, "Sam", null, "member")).id();
       var chats = new ChatStore(db);
-      for (var place : List.of("dock/try", "dock/pier", "quay/try")) {
+      for (var place : places) {
         var parts = place.split("/");
         chats.open(
             new ChatStore.Chat(
@@ -126,17 +131,14 @@ class WorkspaceVerbsTest {
                 null));
       }
 
-      WorkspaceVerbs.forgetChats("dock", "try");
-      var afterDelete =
-          List.of("dock/try", "dock/pier", "quay/try").stream()
-              .map(id -> chats.find(id).isPresent())
-              .toList();
-      WorkspaceVerbs.forgetProjectChats("dock");
+      WorkspaceVerbs.forgetChats(dock, "try");
+      var afterDelete = places.stream().map(id -> chats.find(id).isPresent()).toList();
+      WorkspaceVerbs.forgetProjectChats(dock);
 
       assertEquals(List.of(false, true, true), afterDelete);
       assertEquals(
           List.of(false, true),
-          List.of("dock/pier", "quay/try").stream().map(id -> chats.find(id).isPresent()).toList());
+          places.subList(1, 3).stream().map(id -> chats.find(id).isPresent()).toList());
     }
   }
 

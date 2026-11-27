@@ -22,6 +22,9 @@ import ai.singlr.sail.engine.SessionLogin;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -108,7 +111,7 @@ class ChatHostTest {
           assertThrows(
               Remedied.Io.class,
               () -> {
-                var person = ChatBench.personOf(who);
+                var person = new PtyIdentity.Person(new Actor(who, Role.MEMBER, Actor.Lane.API));
                 bench.door.admitWorkspace(project, workspace, person);
                 bench.door.admitAgent(
                     project,
@@ -271,7 +274,7 @@ class ChatHostTest {
     bench.readsWait();
 
     var read = CompletableFuture.supplyAsync(() -> bench.read(session, 1));
-    assertTrue(bench.held.await(30, TimeUnit.SECONDS), "the read never waited");
+    assertTrue(bench.held.tryAcquire(30, TimeUnit.SECONDS), "the read never waited");
     bench.says(INIT);
 
     assertEquals(List.of(2L), seqs(read.get(30, TimeUnit.SECONDS)));
@@ -393,7 +396,7 @@ class ChatHostTest {
 
     var closed = bench.items(session).get(3);
     assertEquals(
-        Map.of("type", "tool_done", "id", CALL, "output", ChatProcess.UNREAD, "failed", false),
+        Map.of("type", "tool_done", "id", CALL, "output", ChatLog.UNREAD, "failed", false),
         Map.of(
             "type", closed.get("type"),
             "id", closed.get("id"),
@@ -529,8 +532,7 @@ class ChatHostTest {
     var items = bench.items(session);
     assertEquals(ChatHost.RESTARTED, items.get(4).get("words"));
     assertEquals(
-        List.of(CALL, ChatProcess.UNREAD),
-        List.of(items.get(5).get("id"), items.get(5).get("output")));
+        List.of(CALL, ChatLog.UNREAD), List.of(items.get(5).get("id"), items.get(5).get("output")));
     assertEquals(REQUEST, items.get(6).get("id"));
     assertEquals(
         Harnesses.of("claude-code")

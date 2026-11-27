@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.BoxInstances;
@@ -17,10 +16,10 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
-import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.ChatStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
@@ -28,8 +27,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Semaphore;
 import java.util.function.Supplier;
 
 /**
@@ -60,19 +58,15 @@ final class ChatBench implements AutoCloseable {
   final ManualClock clock = new ManualClock(START, Duration.ofDays(40));
   final ChatHost host;
   final String samId;
-  final CountDownLatch held = new CountDownLatch(1);
 
-  /** How the text window is waited: never, so the next line closes it, unless a test says. */
-  volatile RoomWakeReactor.Delay delay =
-      window -> {
-        throw new InterruptedException("the window is the next line's to close");
-      };
+  /** A permit each time a read first waits for an item, once {@link #readsWait} says reads wait. */
+  final Semaphore held = new Semaphore(0);
 
-  /** How long each step of an end waits, for a host made from now on. */
-  volatile ProcessEnd.Grace grace = new ProcessEnd.Grace(GRACE, GRACE, GRACE, GRACE);
+  /** The text windows a test lets close, once {@link #windowsWait} says windows wait. */
+  final Semaphore windows = new Semaphore(0);
 
-  /** How a read waits for an item: its bound passes at once, unless a test says. */
-  volatile ChatHost.Patience patience = (arrivals, within) -> clock.advance(within);
+  private volatile boolean readsWait;
+  private volatile boolean windowsWait;
 
   /** Workspace {@code name} of acme, running, labelled for {@code owner} by {@code id}. */
   static String workspace(String name, String owner, String id) {
@@ -97,6 +91,16 @@ final class ChatBench implements AutoCloseable {
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     HeldProjects.hold(db, "beta");
+    Acting.system(
+        () -> {
+          new ProjectStore(db)
+              .upsert(
+                  TestDefinitions.yaml(
+                      "name: acme\nagent:\n  type: claude-code\n  install: [claude-code]\n"));
+          new ProjectStore(db)
+              .upsert(
+                  TestDefinitions.yaml("name: beta\nagent:\n  type: codex\n  install: [codex]\n"));
+        });
     fdes = new FdeStore(db);
     store = new ChatStore(db);
     samId = Acting.system(() -> fdes.add("sam", "Sam", null, "member")).id();
@@ -120,7 +124,7 @@ final class ChatBench implements AutoCloseable {
             null,
             new BoxInstances(incus),
             TestWorkspaces.over(incus),
-            ChatBench::definition,
+            ProjectReader.ofCatalog(new ProjectStore(db)),
             handle -> WorkspaceOwner.onThisBox(fdes, handle, "ada"),
             incus);
     processes.onStart(fake -> fake.onClose(fake::exitsIfRunning));
@@ -129,32 +133,34 @@ final class ChatBench implements AutoCloseable {
 
   /** A host over this box's chats, as sail starts one: what a restart leaves. */
   ChatHost restarted() {
+    return restarted(new ProcessEnd.Grace(GRACE, GRACE, GRACE, GRACE));
+  }
+
+  /** A host over this box's chats whose ends wait {@code grace} each step. */
+  ChatHost restarted(ProcessEnd.Grace grace) {
     return new ChatHost(
         store,
-        fdes,
-        door,
-        ChatBench::definition,
-        incus,
-        processes,
-        new ChatHost.Timing(
+        new ChatLaunch(door, fdes, ProjectReader.ofCatalog(new ProjectStore(db)), processes),
+        new ChatAttachments(incus),
+        new ChatTiming(
             clock::instant,
-            window -> delay.pause(window),
-            (arrivals, within) -> patience.await(arrivals, within),
+            window -> {
+              if (!windowsWait) {
+                throw new InterruptedException("the window is the next line's to close");
+              }
+              windows.acquire();
+            },
+            (arrivals, within) -> {
+              if (readsWait) {
+                held.release();
+                arrivals.wait();
+              } else {
+                clock.advance(within);
+              }
+            },
             Duration.ofSeconds(25),
             Duration.ofMinutes(5),
             grace));
-  }
-
-  /** Acme installs Claude Code, beta only Codex. */
-  static Optional<ProjectDefinition> definition(String project) {
-    return Optional.of(
-        TestDefinitions.yaml(
-            "name: "
-                + project
-                + (project.equals("acme")
-                    ? "\nagent:\n  type: claude-code\n  install: [claude-code]"
-                    : "\nagent:\n  type: codex\n  install: [codex]")
-                + "\n"));
   }
 
   /** How many chats this box holds. */
@@ -162,26 +168,27 @@ final class ChatBench implements AutoCloseable {
     return db.queryOne("SELECT COUNT(*) FROM chat_sessions", row -> row.integer(0)).orElseThrow();
   }
 
-  /** Reads from now on wait for an item to be logged, and say when they first wait. */
+  /**
+   * Reads from now on wait for an item to be logged, and say when they wait ({@link #held}); else a
+   * read's bound passes at once.
+   */
   void readsWait() {
-    patience =
-        (arrivals, within) -> {
-          held.countDown();
-          arrivals.wait();
-        };
+    readsWait = true;
   }
 
-  static PtyIdentity.Person personOf(String handle) {
-    return new PtyIdentity.Person(person(handle));
-  }
-
-  static Actor person(String handle) {
-    return new Actor(handle, handle.equals("ada") ? Role.ADMIN : Role.MEMBER, Actor.Lane.API);
+  /**
+   * Text windows from now on close only as a test lets them ({@link #windows}); else the next line
+   * closes one.
+   */
+  void windowsWait() {
+    windowsWait = true;
   }
 
   /** {@code work} as {@code handle}'s, through the API's lane. */
   static <T> T as(String handle, Supplier<T> work) {
-    return Actor.call(person(handle), work::get);
+    return Actor.call(
+        new Actor(handle, handle.equals("ada") ? Role.ADMIN : Role.MEMBER, Actor.Lane.API),
+        work::get);
   }
 
   /** Sam's chat with Claude Code in his workspace, asking first. */

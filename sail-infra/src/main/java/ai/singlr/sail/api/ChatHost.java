@@ -5,43 +5,17 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
-import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.Guardrails;
-import ai.singlr.sail.config.Lane;
-import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentProcess;
-import ai.singlr.sail.engine.ChatWire;
-import ai.singlr.sail.engine.ContainerExec;
-import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.LiveStream;
-import ai.singlr.sail.engine.SessionLogin;
-import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.harness.Harness;
-import ai.singlr.sail.harness.HarnessChat;
-import ai.singlr.sail.harness.Harnesses;
-import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.pty.FileScripts;
-import ai.singlr.sail.pty.PtyAdmission;
-import ai.singlr.sail.pty.PtyIdentity;
-import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.ChatStore;
-import ai.singlr.sail.store.FdeStore;
-import java.io.IOException;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeoutException;
-import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 /**
  * The chats this box holds: a person talks to an agent in their own workspace, the agent run as one
@@ -52,7 +26,7 @@ import java.util.stream.Stream;
  * holds a chat's conversation, and only a message starts one: it ends after the project's {@code
  * max_idle} with no turn open, and the next message resumes the conversation by id, in the mode in
  * force. A request the agent makes is logged and held; nothing here answers one, so after {@link
- * Timing#requestBound} the process is ended and the request withdrawn, said in plain words.
+ * ChatTiming#requestBound} the process is ended and the request withdrawn, said in plain words.
  */
 public final class ChatHost implements AutoCloseable {
 
@@ -61,12 +35,6 @@ public final class ChatHost implements AutoCloseable {
 
   /** The most items one read answers. */
   static final int PAGE = 500;
-
-  /** The most files a message attaches. */
-  static final int ATTACHMENTS = 8;
-
-  /** The largest image a message attaches: what Claude takes, 5 MiB once in base64. */
-  static final long IMAGE_BYTES = 3_932_160;
 
   /** How long a chat's log is kept once it ended. */
   static final Duration RETENTION = Duration.ofDays(30);
@@ -78,58 +46,6 @@ public final class ChatHost implements AutoCloseable {
   /** What a turn that a restart of sail cut says. */
   static final String RESTARTED =
       "Sail restarted while this turn was open, so it was cut; your next message starts it again.";
-
-  /** Where a chat's process runs, and the only folder its attachments are read from. */
-  static final String WORKSPACE = ContainerExec.DEV_WORKSPACE;
-
-  private static final String CHATS = ContainerExec.DEV_HOME + "/.sail/chats/";
-  private static final Duration READ_IMAGE = Duration.ofSeconds(30);
-
-  /** What reads an attachment: within the workspace, at most {@link #IMAGE_BYTES}. */
-  private static final List<String> IMAGE_READ =
-      Stream.concat(
-              FileScripts.IMAGE_COMMAND.stream(), Stream.of(WORKSPACE, Long.toString(IMAGE_BYTES)))
-          .toList();
-
-  private static final Map<String, String> IMAGE_TYPES =
-      Map.of(
-          "png", "image/png",
-          "jpg", "image/jpeg",
-          "jpeg", "image/jpeg",
-          "gif", "image/gif",
-          "webp", "image/webp");
-
-  /**
-   * Time as the host reads it, injectable so tests never sleep: the clock, how a pause is waited
-   * (the text window), how a read waits for an item ({@code patience}) and the most it waits
-   * ({@code poll}), how long a request is held unanswered, and the ending grace.
-   */
-  record Timing(
-      Supplier<Instant> clock,
-      RoomWakeReactor.Delay delay,
-      Patience patience,
-      Duration poll,
-      Duration requestBound,
-      ProcessEnd.Grace grace) {
-
-    static Timing real() {
-      return new Timing(
-          DateTimeUtils::now,
-          Thread::sleep,
-          (arrivals, within) -> arrivals.wait(Math.max(1, within.toMillis())),
-          Duration.ofSeconds(25),
-          Duration.ofMinutes(5),
-          ProcessEnd.Grace.DEFAULT);
-    }
-  }
-
-  /**
-   * How a read waits, holding {@code arrivals}, for an item to be logged, at most {@code within}.
-   */
-  @FunctionalInterface
-  interface Patience {
-    void await(Object arrivals, Duration within) throws InterruptedException;
-  }
 
   /** A chat opened: its session id. */
   record Opened(String session) implements Mappable {
@@ -162,31 +78,22 @@ public final class ChatHost implements AutoCloseable {
   }
 
   private final ChatStore store;
-  private final FdeStore fdes;
-  private final HostPty doors;
-  private final ProjectReader definitions;
-  private final ShellExec shell;
-  private final AgentProcess processes;
-  private final Timing timing;
+  private final ChatLaunch launch;
+  private final ChatAttachments attachments;
+  private final ChatTiming timing;
   private final Map<String, ChatProcess> live = new ConcurrentHashMap<>();
   private final Map<String, Object> locks = new ConcurrentHashMap<>();
   private final Object arrivals = new Object();
   private final PeriodicPass sweepPass = new PeriodicPass("chats", this::sweep);
 
-  ChatHost(
-      ChatStore store,
-      FdeStore fdes,
-      HostPty doors,
-      ProjectReader definitions,
-      ShellExec shell,
-      AgentProcess processes,
-      Timing timing) {
+  /**
+   * The chats {@code store} holds, admitted and started through {@code launch}, their images read
+   * through {@code attachments}, on {@code timing}.
+   */
+  ChatHost(ChatStore store, ChatLaunch launch, ChatAttachments attachments, ChatTiming timing) {
     this.store = Objects.requireNonNull(store, "store");
-    this.fdes = Objects.requireNonNull(fdes, "fdes");
-    this.doors = Objects.requireNonNull(doors, "doors");
-    this.definitions = Objects.requireNonNull(definitions, "definitions");
-    this.shell = Objects.requireNonNull(shell, "shell");
-    this.processes = Objects.requireNonNull(processes, "processes");
+    this.launch = Objects.requireNonNull(launch, "launch");
+    this.attachments = Objects.requireNonNull(attachments, "attachments");
     this.timing = Objects.requireNonNull(timing, "timing");
   }
 
@@ -198,16 +105,12 @@ public final class ChatHost implements AutoCloseable {
    */
   public Opened open(
       String project, String workspace, String harness, String mode, boolean inside) {
-    var agent = Harnesses.of(Strings.requireNonBlank(harness, "harness"));
-    Harness.Mode.named(form(agent).modes(), mode, agent.displayName());
-    var person = person();
-    admit(() -> doors.admitWorkspace(project, workspace, person));
-    door(() -> doors.admitAgent(project, workspace, agent(harness, mode, inside), person));
+    var opener = launch.admit(project, workspace, harness, mode, inside);
     var session = Ids.newId().toString();
     store.open(
         new ChatStore.Chat(
             session,
-            openerId(),
+            opener,
             project,
             workspace,
             harness,
@@ -223,7 +126,7 @@ public final class ChatHost implements AutoCloseable {
 
   /**
    * The items of the caller's chat {@code session} after {@code after}: at once when there are any,
-   * else once one is logged or {@link Timing#poll} passes, whichever is first. Never starts a
+   * else once one is logged or {@link ChatTiming#poll} passes, whichever is first. Never starts a
    * process.
    */
   public Read read(String session, long after) {
@@ -238,7 +141,7 @@ public final class ChatHost implements AutoCloseable {
         var ended = store.find(session).map(ChatStore.Chat::ended).orElse(true);
         var now = timing.clock().get();
         if (!items.isEmpty() || ended || !now.isBefore(deadline)) {
-          return new Read(items.stream().map(ChatHost::wire).toList(), ended);
+          return new Read(items.stream().map(ChatLog::wire).toList(), ended);
         }
         try {
           timing.patience().await(arrivals, Duration.between(now, deadline));
@@ -251,22 +154,20 @@ public final class ChatHost implements AutoCloseable {
   }
 
   /**
-   * Sends {@code text}, with the workspace images {@code attachments} names, to the caller's chat
-   * {@code session}: logged, then handed to the process that holds its conversation, started when
-   * none does; held, and said to be, while a turn is open.
+   * Sends {@code text}, with the workspace images {@code paths} names, to the caller's chat {@code
+   * session}: logged, then handed to the process that holds its conversation, started when none
+   * does; held, and said to be, while a turn is open.
    */
-  public Sent send(String session, String text, List<String> attachments) {
+  public Sent send(String session, String text, List<String> paths) {
     Strings.requireNonBlank(text, "text");
-    if (attachments.size() > ATTACHMENTS) {
-      throw new IllegalArgumentException("A message attaches at most " + ATTACHMENTS + " files.");
-    }
+    ChatAttachments.requireFew(paths);
     var chat = yours(session);
     synchronized (lock(session)) {
       chat = store.find(session).orElseThrow(() -> unknown(session));
       if (chat.ended()) {
         throw ended(chat);
       }
-      var images = images(chat, attachments);
+      var images = attachments.images(chat, paths);
       var process = live.get(session);
       if (process == null || process.over()) {
         process = start(chat);
@@ -278,7 +179,7 @@ public final class ChatHost implements AutoCloseable {
             .start(() -> ended.end(timing.grace().afterInt(), null));
         throw ended(chat);
       }
-      return process.send(text, List.copyOf(attachments), images);
+      return process.send(text, List.copyOf(paths), images);
     }
   }
 
@@ -310,8 +211,7 @@ public final class ChatHost implements AutoCloseable {
    */
   public int reclaim() {
     var cut = store.openTurns();
-    cut.forEach(
-        session -> ChatProcess.cut(store, session, RESTARTED, timing.clock().get(), this::arrived));
+    cut.forEach(session -> new ChatLog(store, session, timing, this::arrived).cut(RESTARTED));
     return cut.size();
   }
 
@@ -332,7 +232,7 @@ public final class ChatHost implements AutoCloseable {
 
   /**
    * One pass: ends each process idle past its project's {@code max_idle}, and each that held a
-   * request unanswered past {@link Timing#requestBound}, saying so; erases the chats that ended
+   * request unanswered past {@link ChatTiming#requestBound}, saying so; erases the chats that ended
    * more than {@link #RETENTION} ago.
    */
   void sweep() {
@@ -364,142 +264,33 @@ public final class ChatHost implements AutoCloseable {
     }
   }
 
-  /**
-   * Starts the process for {@code chat}, as its opener: admitted and signed in as a pty agent start
-   * is, its workspace entered (started when stopped), its login handed over as a file its launch
-   * reads and removes, resuming the conversation the harness last named, in the mode it last said.
-   */
+  /** Starts the process that holds {@code chat}'s conversation, and reads it. */
   private ChatProcess start(ChatStore.Chat chat) {
-    var harness = Harnesses.of(chat.harness());
-    var form = form(harness);
-    var person = person();
-    var project = chat.project();
-    var workspace = chat.workspace();
-    var login =
-        door(
-            () ->
-                doors.admitAgent(
-                    project, workspace, agent(chat.harness(), chat.mode(), chat.inside()), person));
-    admit(() -> doors.enterWorkspace(project, workspace, person));
-    var launch = Ids.newId().toString();
-    var file = SessionLogin.file(launch);
-    var instance = project + "-" + workspace;
-    admit(
-        () ->
-            doors.handOver(
-                project, workspace, file, login.map(LaunchEnv::loginLines).orElse(""), person));
-    AgentProcess.Handle handle;
-    try {
-      handle =
-          processes.start(
-              instance,
-              WORKSPACE,
-              Map.of(),
-              form.argv(new HarnessChat.Launch(chat.mode(), null, chat.conversation())),
-              CHATS + launch + "/agent.pid",
-              CHATS + launch + "/agent.log",
-              file);
-    } catch (IOException | RuntimeException failed) {
-      doors.withdraw(instance, file);
-      throw new ApiException(
-          ErrorCode.AGENT_LAUNCH_FAILED,
-          harness.displayName() + " did not start in workspace " + workspace + ".",
-          "Check that the workspace is running and answers, then send the message again.",
-          failed);
-    }
+    var started = launch.start(chat);
     var process =
         new ChatProcess(
             chat.id(),
-            harness.displayName(),
-            store,
-            form,
-            handle,
+            started.agent(),
+            new ChatLog(store, chat.id(), timing, this::arrived),
+            started.form(),
+            started.handle(),
             timing,
-            maxIdle(project),
+            started.maxIdle(),
             new ChatProcess.Host() {
               @Override
-              public void arrived() {
-                ChatHost.this.arrived();
-              }
-
-              @Override
-              public List<LiveStream.Image> images(List<String> attachments) {
-                return ChatHost.this.images(chat, attachments);
+              public List<LiveStream.Image> images(List<String> paths) {
+                return attachments.images(chat, paths);
               }
 
               @Override
               public void gone(ChatProcess ended) {
                 live.remove(ended.session(), ended);
-                Thread.ofVirtual()
-                    .name("sail-chat-withdraw")
-                    .start(() -> doors.withdraw(instance, file));
+                Thread.ofVirtual().name("sail-chat-withdraw").start(started.withdraw());
               }
             });
     live.put(chat.id(), process);
     process.read();
     return process;
-  }
-
-  /** The project's {@code max_idle}, which a chat's process ends after with no turn open. */
-  private Duration maxIdle(String project) {
-    var idle = definitions.require(project).guardrailsFor(Lane.ROOM).maxIdle();
-    return Objects.requireNonNullElse(
-        Guardrails.parseDuration(idle), Guardrails.parseDuration(Guardrails.defaults().maxIdle()));
-  }
-
-  /**
-   * The images {@code attachments} names in {@code chat}'s workspace, each read through the files
-   * door's rules: a file within the workspace, a link's target included, of a type the model reads
-   * and at most {@link #IMAGE_BYTES}. The path reaches the workspace on the read's input, never a
-   * command line.
-   */
-  List<LiveStream.Image> images(ChatStore.Chat chat, List<String> attachments) {
-    var instance = chat.project() + "-" + chat.workspace();
-    return attachments.stream().map(path -> image(instance, chat.workspace(), path)).toList();
-  }
-
-  private LiveStream.Image image(String instance, String workspace, String path) {
-    if (Strings.isBlank(path) || path.indexOf('\0') >= 0 || path.length() > 4096) {
-      throw new IllegalArgumentException("An attachment is a path in the workspace.");
-    }
-    var extension = path.substring(path.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
-    var type = IMAGE_TYPES.get(extension);
-    if (type == null) {
-      throw new IllegalArgumentException(
-          "Attachment " + path + " is not an image: a chat attaches png, jpeg, gif or webp.");
-    }
-    ShellExec.Result read;
-    try {
-      read =
-          shell.execWithInput(
-              ContainerExec.asDevUser(instance, WORKSPACE, Map.of(), IMAGE_READ),
-              path + "\0",
-              READ_IMAGE);
-    } catch (IOException | TimeoutException | InterruptedException failed) {
-      if (failed instanceof InterruptedException) {
-        Thread.currentThread().interrupt();
-      }
-      throw new ApiException(
-          ErrorCode.CONTAINER_ERROR,
-          "Attachment " + path + " could not be read in workspace " + workspace + ".",
-          failed);
-    }
-    if (!read.ok()) {
-      throw new ApiException(
-          ErrorCode.INVALID_REQUEST, unreadable(path, workspace, read.exitCode()));
-    }
-    return new LiveStream.Image(type, read.stdout().strip());
-  }
-
-  private static String unreadable(String path, String workspace, int exit) {
-    return switch (exit) {
-      case FileScripts.OUTSIDE_HOME ->
-          "Attachment " + path + " is outside workspace " + workspace + ".";
-      case FileScripts.TOO_LARGE ->
-          "Attachment " + path + " is larger than " + IMAGE_BYTES / 1024 + " KiB.";
-      default ->
-          "Attachment " + path + " is not a file Sail may read in workspace " + workspace + ".";
-    };
   }
 
   /**
@@ -514,43 +305,11 @@ public final class ChatHost implements AutoCloseable {
       throw new IllegalArgumentException(
           "'" + session + "' is not a chat's id: use the session its open answered.", malformed);
     }
-    var opener = fdes.byHandle(Actor.current().handle()).map(FdeStore.Fde::id).orElse(null);
-    var chat =
-        store
-            .find(session)
-            .filter(found -> found.opener().equals(opener))
-            .orElseThrow(() -> unknown(session));
-    admit(() -> doors.admitWorkspace(chat.project(), chat.workspace(), person()));
-    return chat;
+    return store.find(session).filter(launch::opens).orElseThrow(() -> unknown(session));
   }
 
   private static ApiException unknown(String session) {
     return new ApiException(ErrorCode.NOT_FOUND, "There is no chat " + session + " of yours here.");
-  }
-
-  /**
-   * The FDE id of the caller, whose chat it opens: on the roster, as the person an agent start
-   * admitted in their own workspace is.
-   */
-  private String openerId() {
-    return fdes.byHandle(Actor.current().handle()).map(FdeStore.Fde::id).orElseThrow();
-  }
-
-  private static HarnessChat form(Harness harness) {
-    return harness
-        .chat()
-        .orElseThrow(
-            () ->
-                new IllegalArgumentException(
-                    harness.displayName() + " has no chat form; start it in a terminal."));
-  }
-
-  private static PtyMessage.Agent agent(String harness, String mode, boolean inside) {
-    return new PtyMessage.Agent(harness, mode, inside);
-  }
-
-  private static PtyIdentity.Person person() {
-    return new PtyIdentity.Person(Actor.current());
   }
 
   private Object lock(String session) {
@@ -561,53 +320,5 @@ public final class ChatHost implements AutoCloseable {
     synchronized (arrivals) {
       arrivals.notifyAll();
     }
-  }
-
-  private static Map<String, Object> wire(ChatStore.Item item) {
-    var wire = new LinkedHashMap<String, Object>();
-    wire.put("seq", item.seq());
-    wire.put("at", DateTimeUtils.format(item.at()));
-    wire.put(ChatWire.TYPE, item.kind());
-    wire.putAll(YamlUtil.parseJsonLine(item.payload(), LiveStream.MAX_LINE_CHARS));
-    return wire;
-  }
-
-  /** A door of the pty host's, asked as a route asks: what it refuses, refused in its words. */
-  @FunctionalInterface
-  private interface Door<T> {
-    T ask() throws IOException;
-  }
-
-  @FunctionalInterface
-  private interface Act {
-    void run() throws IOException;
-  }
-
-  private static <T> T door(Door<T> door) {
-    try {
-      return door.ask();
-    } catch (IOException refused) {
-      throw refusal(refused);
-    }
-  }
-
-  private static void admit(Act act) {
-    door(
-        () -> {
-          act.run();
-          return null;
-        });
-  }
-
-  /** {@code refused} as the API says it: its own code when it names one, its words as they are. */
-  private static ApiException refusal(IOException refused) {
-    return switch (refused) {
-      case PtyAdmission.Absent absent -> ApiException.of(ErrorCode.NOT_FOUND, absent);
-      case PtyAdmission.Unavailable unavailable ->
-          ApiException.of(ErrorCode.CONTAINER_ERROR, unavailable);
-      case Remedied remedied when Strings.isNotBlank(remedied.code()) ->
-          ApiException.of(ErrorCode.valueOf(remedied.code().toUpperCase(Locale.ROOT)), refused);
-      default -> ApiException.of(ErrorCode.FORBIDDEN, refused);
-    };
   }
 }

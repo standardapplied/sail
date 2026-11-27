@@ -20,7 +20,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -91,15 +90,14 @@ class ChatEdgesTest {
 
   @Test
   void textWhoseWindowClosesWithNoLineAfterItIsLoggedOnItsOwn() throws Exception {
-    var windows = new Semaphore(0);
-    bench.delay = window -> windows.acquire();
+    bench.windowsWait();
     var session = bench.samsChat();
     bench.send(session, "hi");
     bench.says(line("01-baseline-live-flags", 20), line("01-baseline-live-flags", 21));
     bench.readsWait();
 
     var read = CompletableFuture.supplyAsync(() -> bench.read(session, 1));
-    windows.release();
+    bench.windows.release();
 
     assertEquals("done", read.get(30, TimeUnit.SECONDS).items().getFirst().get("text"));
   }
@@ -134,8 +132,7 @@ class ChatEdgesTest {
   @Test
   void anEndInterruptedWhileItWaitsSignalsAtOnce() throws Exception {
     var patient = Duration.ofMinutes(5);
-    bench.grace = new ProcessEnd.Grace(patient, patient, patient, patient);
-    var host = bench.restarted();
+    var host = bench.restarted(new ProcessEnd.Grace(patient, patient, patient, patient));
     var session = bench.samsChat();
     as("sam", () -> host.send(session, "hi", List.of()));
     var fake = bench.says(INIT, ENDS);
@@ -158,10 +155,8 @@ class ChatEdgesTest {
   @Test
   void aReadInterruptedWhileItWaitsAnswersNothing() {
     var session = bench.samsChat();
-    bench.patience =
-        (arrivals, within) -> {
-          throw new InterruptedException("stopping");
-        };
+    bench.readsWait();
+    Thread.currentThread().interrupt();
 
     var read = bench.read(session, 0);
 
@@ -217,7 +212,7 @@ class ChatEdgesTest {
 
   @Test
   void theRealTimingWaitsOnTheArrivalsItIsGivenForItsBound() throws Exception {
-    var timing = ChatHost.Timing.real();
+    var timing = ChatTiming.real();
     var arrivals = new Object();
 
     synchronized (arrivals) {
