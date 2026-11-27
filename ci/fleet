@@ -931,7 +931,8 @@ chat_walks() {
 # turn to stop, Never asks is refused, and Ask first, then Edits freely, are set between turns, each
 # said back by Claude Code. The command allowed always is a touch, as recorded (S1's probe 01): a
 # command that writes through a redirect is asked again by Claude Code 2.1.332 even with its own
-# exact rule kept, so it cannot show a rule taking effect. A wait that runs out prints what the
+# exact rule kept (probe 6), so its card must offer no always, which the first command's card
+# shows on the harness a workspace installs now. A wait that runs out prints what the
 # chat said since its step. The chat is ended, the login removed, the key file and both tokens gone,
 # whatever failed.
 readonly CHAT_ANSWERS='set -u
@@ -1024,6 +1025,7 @@ say "printf fleet-%s 7341 > asked.txt"
 await asked 7341
 read -r denied call_id offer <<< "$found"
 [ "$denied" != "-" ] || fail "no permission item for the command holding 7341 arrived"
+[ "$offer" = once ] || fail "the card offered always for a command that writes through a redirect, which Claude Code asked for again with its rule kept (probe 6)"
 status=$(answer "$denied" "{\"decision\":\"deny\",\"message\":\"DENIED-tamarind-4417\"}")
 [ "$status" = 200 ] || fail "the denial was refused: HTTP $status"
 await done "$call_id"
@@ -2664,7 +2666,7 @@ storage() {
     chat_walks "$run" main eng acme eng-own client
   check "$run" "main holds the fleet's Claude Code key where only root reads it, for eng's answers" \
     place_secret "$run" main fleet-anthropic-key anthropic
-  check "$run" "eng answers what Claude Code asks in a chat in eng-own: a command denied with a token comes back as the call's result exactly and never ran, asked again and allowed it ran, allowed always its suggested rule is kept, the chat is in Edits freely, and it then asks nothing; a second answer, an invented id and client are refused, an idle chat has nothing to stop, Never asks is refused, and Ask first then Edits freely set between turns are each said back; the key, the login and the tokens removed after" \
+  check "$run" "eng answers what Claude Code asks in a chat in eng-own: a command writing through a redirect is offered no always, and denied with a token comes back as the call's result exactly and never ran, asked again and allowed it ran, allowed always its suggested rule is kept, the chat is in Edits freely, and it then asks nothing; a second answer, an invented id and client are refused, an idle chat has nothing to stop, Never asks is refused, and Ask first then Edits freely set between turns are each said back; the key, the login and the tokens removed after" \
     chat_answers "$run" main eng acme eng-own client
   check "$run" "eng's workspace commits as eng" commits_as "$run" main acme-eng-own eng@fleet.example
   check "$run" "eng's workspace holds none of main's person's forge token" holds_no_forge_token "$run" main acme-eng-own
