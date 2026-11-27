@@ -1824,11 +1824,11 @@ class ClientGoldensTest {
      * Records every answer, stop and change of mode a chat's person makes, and each refusal, as the
      * app meets them: dana opens a chat in berth and sets its mode before any process holds it; its
      * turn asks to run a command, which she denies with her words, then to run another always, to
-     * run one it offers no always for, a question she answers with two choices and her own words,
-     * and a plan she approves; a request she stops; and a mode set between turns. A second answer,
-     * one to a request withdrawn or never asked, a reply a request does not take, a change of mode
-     * mid-turn or to one no chat takes, another person at each route, and an answer to a chat ended
-     * are refused.
+     * run one it offers no always for, and one that writes through a redirect, a question she
+     * answers with two choices and her own words, and a plan she approves; a request she stops; and
+     * a mode set between turns. A second answer, one to a request withdrawn or never asked, a reply
+     * a request does not take, a change of mode mid-turn or to one no chat takes, another person at
+     * each route, and an answer to a chat ended are refused.
      */
     void recordChatAnswers(Map<String, String> goldens, String ana, String dana) throws Exception {
       Acting.system(
@@ -1917,6 +1917,16 @@ class ClientGoldensTest {
           dana,
           Map.of("decision", "allow_always"));
       record(goldens, "chat-request-allowed", "POST", requests + unsaid, dana, allow());
+      said(Recorded.line("02b-relay-stdio", 16));
+      var redirects = requests + "a871f652-0656-42bf-8cc8-860ad0a34b79";
+      record(
+          goldens,
+          "refusal-chat-always-not-offered-redirect",
+          "POST",
+          redirects,
+          dana,
+          Map.of("decision", "allow_always"));
+      send("POST", redirects, dana, allow());
       said(Recorded.line("02-question-multi-select-and-own-words", 32));
       var question = requests + "82da6f15-368c-4201-9a85-f925427a7c03";
       record(

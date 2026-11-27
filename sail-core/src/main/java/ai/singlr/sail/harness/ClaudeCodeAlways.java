@@ -78,6 +78,15 @@ final class ClaudeCodeAlways {
   private static final List<String> COMPOUND = List.of("&", ";", "|", "$(");
 
   /**
+   * What makes a rule's command redirect, {@code >} (and so {@code >>}, {@code 2>}) or {@code <}
+   * (and so a here-document), read as written, inside quotes too: Claude Code 2.1.332 asked again
+   * for an exact rule's command that writes through {@code >}, with the rule kept, in its own
+   * process and in one that read it at start (probe 6), so a kept one may never match again; what
+   * one of the other shapes covers was never recorded.
+   */
+  private static final List<String> REDIRECTS = List.of(">", "<");
+
+  /**
    * A rule that runs {@code xargs} anywhere a word of it starts, after a wrapper ({@code timeout 5
    * xargs}, {@code nice xargs}, {@code env xargs}) or by its path ({@code /usr/bin/xargs}): what a
    * kept one covers, with whatever {@code xargs} is fed, was never recorded.
@@ -149,9 +158,10 @@ final class ClaudeCodeAlways {
    * recorded it covering: one with no {@code *} allows that exact command; one whose only {@code *}
    * ends it (written {@code " *"}, {@code ":*"} or {@code "*"}) allows every command that starts
    * with what comes before. A compound command is not said: Claude Code matches each of its
-   * commands alone, so it may never match again. Nor is a rule {@code xargs} starts, which Claude
-   * Code suggests for a pipeline into it (01:108, 01:260): what such a kept rule covers, with
-   * whatever it is fed, was never recorded.
+   * commands alone, so it may never match again; nor is one that redirects, which Claude Code asked
+   * for again with it kept (probe 6). Nor is a rule {@code xargs} starts, which Claude Code
+   * suggests for a pipeline into it (01:108, 01:260): what such a kept rule covers, with whatever
+   * it is fed, was never recorded.
    */
   private static Optional<String> command(Object rule) {
     var said = rule instanceof Map<?, ?> map ? map : Map.of();
@@ -159,6 +169,7 @@ final class ClaudeCodeAlways {
         || !"Bash".equals(said.get("toolName"))
         || !(said.get("ruleContent") instanceof String content)
         || COMPOUND.stream().anyMatch(content::contains)
+        || REDIRECTS.stream().anyMatch(content::contains)
         || XARGS.matcher(content).find()) {
       return Optional.empty();
     }

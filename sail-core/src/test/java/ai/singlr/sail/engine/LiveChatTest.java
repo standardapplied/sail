@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.LoginOutcome;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -199,9 +200,7 @@ class LiveChatTest {
                 "Write current date into stamp.txt",
                 null,
                 new Detail.Command("date > stamp.txt", false, false),
-                List.of(
-                    new ChatItem.Always(
-                        List.of("Allow this exact command: `date > stamp.txt`" + EXACT, FOLDER))),
+                List.of(),
                 false)),
         shown("02b-relay-stdio", 16));
     assertEquals(
@@ -247,8 +246,10 @@ class LiveChatTest {
    * rule with what probe 2 recorded it also covers (01, 01b): none for a compound command, a rule
    * Claude Code matches one command at a time, so it may never match again (03b:91's {@code &&},
    * 04d:20's {@code ;}, which is inside quotes but read as written, and 01:198); none for a rule
-   * run by xargs (01:108, 01:260), whose reach is not recorded; and none for a rule of another tool
-   * kept for the session (03a:13).
+   * run by xargs (01:108, 01:260), whose reach is not recorded; none for a rule whose command
+   * redirects (02b:16, 02d:17 and 04a:16's {@code date > …}), which Claude Code asked for again
+   * with the rule kept (probe 6); and none for a rule of another tool kept for the session
+   * (03a:13).
    */
   @Test
   void everyRecordedAlwaysIsSaidInPlainWords() {
@@ -279,15 +280,15 @@ class LiveChatTest {
 
     assertEquals(
         List.of(
-            List.of(List.of("Allow this exact command: `date > stamp.txt`" + EXACT, FOLDER)),
+            List.of(),
             List.of(List.of(EDITS_FREELY)),
             List.of(List.of("Allow any command that starts with `echo original`" + PREFIX, FOLDER)),
             List.of(
                 List.of(
                     "Allow this exact command: `touch always.txt`" + EXACT, FOLDER, EDITS_FREELY)),
-            List.of(List.of("Allow this exact command: `date > stamp4.txt`" + EXACT, FOLDER)),
             List.of(),
-            List.of(List.of("Allow this exact command: `date > c.txt`" + EXACT, FOLDER)),
+            List.of(),
+            List.of(),
             List.of(List.of(EDITS_FREELY)),
             List.of(),
             List.of(
@@ -314,6 +315,63 @@ class LiveChatTest {
                     EDITS_FREELY))),
         List.copyOf(recorded.values()),
         recorded.keySet().toString());
+  }
+
+  /**
+   * Probe 6 (Claude Code 2.1.332, the fleet's storage box): the command allowed always wrote
+   * through {@code >}, its exact rule was kept in settings.local.json, and Claude Code asked for
+   * the same command again, in that process and in a fresh one that read the rule at start. Its
+   * card said the rule and the folder below, so these were its suggestions, the rule as the file
+   * kept it. Such a rule is offered no always, inside quotes too, as a compound is not; nor is one
+   * that redirects otherwise ({@code >>}, {@code 2>}, {@code <}), whose reach no probe recorded.
+   */
+  @Test
+  void aRuleWhoseCommandRedirectsIsOfferedNoAlways() {
+    var asked = new ArrayList<List<List<String>>>();
+    for (var command :
+        List.of(
+            "printf fleet-%s 7341 > always.txt",
+            "printf fleet-%s 7341 >> always.txt",
+            "make 2> errors.txt",
+            "sort < names.txt",
+            "echo '>'")) {
+      var suggestions =
+          List.<Object>of(
+              Map.of(
+                  "type",
+                  "addRules",
+                  "rules",
+                  List.of(Map.of("toolName", "Bash", "ruleContent", command)),
+                  "behavior",
+                  "allow",
+                  "destination",
+                  "localSettings"),
+              Map.of(
+                  "type",
+                  "addDirectories",
+                  "directories",
+                  List.of("/home/dev/workspace"),
+                  "destination",
+                  "session"));
+      var shown =
+          LiveChat.items(
+              new Step.Permission(
+                  "607188f7-c248-4fd4-9873-1e3b542545d5",
+                  "toolu_018juR1jrmMSQWorGP9ZfQBU",
+                  null,
+                  "Bash",
+                  "Bash",
+                  Map.of("command", command),
+                  null,
+                  null,
+                  suggestions),
+              CLAUDE_CODE);
+      asked.add(
+          ((ChatItem.Permission) shown.getFirst())
+              .always().stream().map(ChatItem.Always::words).toList());
+    }
+
+    assertEquals(List.of(List.of(), List.of(), List.of(), List.of(), List.of()), asked);
   }
 
   private static List<List<String>> always(String recording, int line) {

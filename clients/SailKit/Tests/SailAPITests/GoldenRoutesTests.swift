@@ -607,7 +607,8 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-chat-mode-turn-open", "refusal-chat-mode-not-a-chat-mode", "refusal-chat-request-not-yours",
     "refusal-chat-interrupt-not-yours", "refusal-chat-mode-not-yours", "refusal-chat-request-not-found",
     "refusal-chat-answer-invalid", "refusal-chat-answer-not-taken", "refusal-chat-request-answered",
-    "refusal-chat-always-not-offered", "refusal-chat-answer-not-a-choice",
+    "refusal-chat-always-not-offered", "refusal-chat-always-not-offered-redirect",
+    "refusal-chat-answer-not-a-choice",
     "refusal-chat-request-withdrawn", "refusal-chat-answer-ended",
 ]
 

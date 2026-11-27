@@ -179,6 +179,25 @@ class ChatAnswersTest {
     assertEquals("allow", last(session).get("decision"));
   }
 
+  /**
+   * I7: a command that writes through a redirect ({@code date > stamp.txt}, 02b:16) is offered no
+   * always, since Claude Code asked again for one with its rule kept (probe 6): allow always is
+   * refused, and it is allowed once.
+   */
+  @Test
+  void aCommandThatRedirectsIsOfferedNoAlwaysAndIsAllowedOnce() {
+    var session = bench.samsChat();
+    var fake = asked(session, ASKS);
+
+    var refusal = invalid(() -> answer(session, REQUEST, Map.of("decision", "allow_always")));
+    answer(session, REQUEST, ALLOW);
+
+    assertEquals(List.of(), bench.items(session).get(2).get("always"));
+    assertEquals(
+        "Claude Code offered no way to allow this always; allow it once instead.", refusal);
+    assertEquals(List.of(Recorded.parsed("02b-relay-stdio", 17)), responses(fake));
+  }
+
   /** A3, I8: a denial's words reach the agent exactly, and come back as the call's result. */
   @Test
   void aDenialsWordsReachTheAgentExactly() {
