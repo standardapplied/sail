@@ -133,9 +133,9 @@ public final class WorkspacesView: NSView {
     /// How the reads of a template being built wait between them: a test's own.
     var pause: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     /// The project whose template its page reads (nil: none), whether those reads ended, and the
-    /// last reads started, cancelled before others start.
+    /// last reads started, cancelled before others start: what a test awaits.
     private var reading: (project: String?, ended: Bool) = (nil, true)
-    private var lastReads: Task<Void, Never>?
+    package private(set) var lastReads: Task<Void, Never>?
     /// The reads started: an answer to reads since replaced is dropped.
     private var reads = 0
     /// The window is off screen (closed, in the Dock, the app hidden): nothing is read, nothing ticks.

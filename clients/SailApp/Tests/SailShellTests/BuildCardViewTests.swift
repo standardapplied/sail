@@ -203,6 +203,7 @@ import Testing
         let (view, window, desk) = try await Self.section("building", "refusal-missing-bearer-token", pauses, ended: ended)
         defer { window.orderOut(nil) }
         #expect(await RunnerTabTests.until { ended.times == 1 }, "the ended session was not told: \(view.text)")
+        await view.lastReads?.value
         #expect(!view.text.lowercased().contains("bearer") && !view.text.contains("Creating lighthouse") && pauses.count == 0, "\(view.text)")
         await desk.answer(try Self.template("template-2e-building"))
         view.shown()
