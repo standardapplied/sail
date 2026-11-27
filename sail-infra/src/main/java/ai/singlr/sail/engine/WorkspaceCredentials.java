@@ -23,8 +23,7 @@ import java.util.concurrent.TimeoutException;
 final class WorkspaceCredentials {
 
   private static final String DEV = ContainerExec.DEV_HOME + "/";
-  static final String STORE = DEV + ".git-credentials";
-  private static final String NEW = ".sail-new";
+  static final String STORE = ContainerExec.DEV_GIT_CREDENTIALS;
   static final String GH_HOSTS = ContainerExec.DEV_HOME + "/.config/gh/hosts.yml";
   static final String KEYS = ContainerExec.DEV_HOME + "/.ssh/authorized_keys";
 
@@ -33,7 +32,11 @@ final class WorkspaceCredentials {
    * so the two cannot drift.
    */
   static final List<String> FILES =
-      List.of(STORE, STORE + NEW, GH_HOSTS, DEV + ForgeCliLogin.TOKEN_FILE);
+      List.of(
+          STORE,
+          ContainerExec.DEV_GIT_CREDENTIALS_NEW,
+          GH_HOSTS,
+          DEV + ContainerExec.GH_TOKEN_FILE);
 
   /**
    * Where agent sessions' logins are handed over ({@link SessionLogin#DIR}): no session lives
@@ -451,8 +454,9 @@ final class WorkspaceCredentials {
   /** The store written beside the old one and renamed over it, with git told to read it. */
   private static void writeStore(ShellExec shell, String instance, String store)
       throws IOException, InterruptedException, TimeoutException {
-    ContainerFilePush.pushAsDev(shell, instance, STORE + NEW, store, "0600");
-    asDev(shell, instance, "mv", "-f", STORE + NEW, STORE);
+    ContainerFilePush.pushAsDev(
+        shell, instance, ContainerExec.DEV_GIT_CREDENTIALS_NEW, store, "0600");
+    asDev(shell, instance, "mv", "-f", ContainerExec.DEV_GIT_CREDENTIALS_NEW, STORE);
     asDev(shell, instance, "git", "config", "--global", "credential.helper", "store");
   }
 
