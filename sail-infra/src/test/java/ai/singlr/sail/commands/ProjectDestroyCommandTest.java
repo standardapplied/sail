@@ -11,8 +11,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.ChatStore;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -137,5 +146,51 @@ class ProjectDestroyCommandTest {
             new ProjectDestroyCommand.Other("acme-fix", "workspace fix"),
             new ProjectDestroyCommand.Other("acme--tmpl", "template acme--tmpl")),
         ProjectDestroyCommand.others("acme", new BoxInstances(shell).all()));
+  }
+
+  /**
+   * I11: a project destroyed here takes its chats from the box, whether its container was still
+   * there to delete or was gone already, when destroy has nothing else to do.
+   */
+  @Test
+  void aDestroyedProjectTakesItsChatsWhetherOrNotItsContainerWasLeft() {
+    var run = Ids.newId().toString().substring(0, 8);
+    var gone = "gone-" + run;
+    var left = "left-" + run;
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list", "[{\"name\": \"" + left + "\", \"status\": \"Running\"}]");
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      new SchemaManager(db).migrate();
+      var sam = Acting.system(() -> new FdeStore(db).add("sam-" + run, "Sam", null, "member")).id();
+      var chats = new ChatStore(db);
+      for (var project : List.of(gone, left)) {
+        chats.open(
+            new ChatStore.Chat(
+                project,
+                sam,
+                project,
+                "try",
+                "claude-code",
+                "default",
+                false,
+                null,
+                false,
+                false,
+                0,
+                DateTimeUtils.now(),
+                null));
+      }
+
+      var nothingElse =
+          CommandRun.of(new ProjectDestroyCommand(dryRun -> shell, () -> true), gone, "--yes");
+      var destroyed =
+          CommandRun.of(new ProjectDestroyCommand(dryRun -> shell, () -> true), left, "--yes");
+
+      assertEquals(List.of(0, 0), List.of(nothingElse.exit(), destroyed.exit()), destroyed.err());
+      assertEquals(
+          List.of(false, false),
+          List.of(chats.find(gone).isPresent(), chats.find(left).isPresent()));
+    }
   }
 }
