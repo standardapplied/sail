@@ -4092,7 +4092,8 @@ first. An ended one is listed for `CORPSE_RETENTION` (10 min) or until the host 
 carries only live sessions), a workspace's stop included: the yield that ends it deletes its ring
 and keeps it ended, so a client back later says why it ended rather than that it is gone. An ended
 entry counts toward no cap and holds its name for no one. A listing asked while the host closes is
-refused, never a short page. Attaching to one is the ticket above.
+refused, never a short page. Attaching to one is the ticket above. The same listing names the caller's own
+chats in the workspace beside them ("A chat in its workspace's listing", below).
 
 **Whose keyboard (`PtySession#attach`, `SAILPTY7`).** An `Attach` that asks to write names its
 client, which keeps its name across its own reconnects, and says whether the person asked now
@@ -4511,6 +4512,41 @@ and a turn it begins itself after is never cut. `chat_sessions` and `chat_items`
 never synced; a chat goes with its opener (the roster's cascade), its workspace
 (`WorkspaceDoors.delete`, and the command line's) and its project (`project destroy`, whether or
 not its container was left, and `Erasure`).
+
+**A chat in its workspace's listing.** `GET /v1/projects/{p}/workspaces/{w}/sessions` answers the
+terminals as above, each `"form": "terminal"`, and the caller's own chats in that workspace
+(`ChatListing`, which reads `ChatStore` alone), each `{"name", "form": "chat", "live", "state",
+"opener", "agent", "created_at"}`: `name` is the id its chat routes take, `live` is false once it
+ended, and it has no `attached`, `writer` or `command`. The two are one list, newest `created_at`
+first, then by name (`WorkspaceSessionsResponse.NEWEST`); the terminal host is asked first, so its
+refusals refuse the whole answer, never a partial list. A chat is listed to its opener alone, an
+admin included, and to no credential that acts for no person (`Access.attendee`); open ones, and
+ended ones for 10 minutes (`ChatListing.ENDED_KEPT`, as an ended terminal), at most 200, newest
+first; an older one's log is still read by its id. `state` is read from the log alone, so no
+process is asked or started and no lock taken, and whether a process holds the chat is never a
+state (an idle end is not seen): the first that holds of `ended` (`ended_at` set), `needs_you` (a
+turn open and `ChatLog.open` holds a request), `working` (a turn open), `error` (of `failed`,
+`interrupted` and `turn_ended`, the last two are `failed` then `turn_ended`), `your_turn` (a turn
+ended otherwise, stopped or cut) and `idle` (no turn yet). A terminal row carries no `state`.
+
+**Which harness chats, and who starts in Chat.** Each offer of the agents route carries `forms`
+(`Harness.forms`, from `Harness.chat` alone: `["terminal", "chat"]` for Claude Code,
+`["terminal"]` for Codex) and, for a harness that chats, `chat` `{"modes", "mode_default",
+"inside"}`: `HarnessChat.modes` in the words a person reads, its first, and `inside`, the offer's
+`inside` and `HarnessChat.signsInInside` together, the one switch for whether a chat may use the
+sign-in a person made inside their workspace, which Sail never holds, copies or relays (true for
+Claude Code, the owner's stated default for internal staff). A chat's open reads the same seam
+(`ChatLaunch.form`): a harness with no chat form is refused, and while the switch is off an
+`inside` open is `422` "Claude Code's chat takes your stored API key here, not the sign-in made in
+the workspace."; a stored key is always offered (`kinds`). `GET /v1/me/preferences` answers
+`{"session_form"}`, `chat` for a person who never set it, and `PUT /v1/me/preferences
+{"session_form"}` sets it to `chat`, `terminal` or `both`; any other value is `422` "session_form
+is chat, terminal or both.", any other field `422` "A preference names only session_form.", and
+anything else under `/v1/me/` is answered as no route. Both decide Keep preferences on the caller's
+own (`PreferenceOperations`): every person, a viewer too, and no agent or container credential; a
+credential that acts for no person holds none (`403 forbidden`). The preference is a box-local row
+(`preferences`, `PreferenceStore`), never synced, erased with its person (the roster's cascade): a
+person using two boxes sets it on each.
 
 What a command the agent runs can read, measured with fake keys on Claude Code 2.1.327 (its Bash
 tool's `env`, against a stand-in API) and Codex 0.170: a run's key, in `ANTHROPIC_API_KEY`, or an

@@ -891,6 +891,109 @@ status=$(call "$token" POST "/v1/sessions/$session/chat/messages" "{\"text\":\"m
 [ "$status" = 409 ] || fail "an ended chat took a message: HTTP $status"
 echo "CHAT WALKED"'
 
+# A chat in its workspace's sessions listing through a real turn, on the API as the app reads it: the
+# opener stores the fleet's key (read from root's file, on the request's input, never a command line)
+# and makes it her default, opens a chat with Claude Code in her workspace and finds it listed idle;
+# one message read to its turn's end lists it your_turn; a command Claude Code asks before running,
+# read to its permission, lists it needs_you; ended, it is listed ended and not live. Another member
+# listing the workspace sees no such chat while the opener still does. Her preference reads chat, is
+# set to terminal and read back, the other member's still reads chat, and a word no preference
+# takes is refused. Claude Code offers a chat in its three chat modes, Codex only a terminal. The
+# chat is ended, the preference put back, the login removed, the key file and both tokens gone,
+# whatever failed.
+readonly CHAT_LIST='set -u
+handle=$1 project=$2 workspace=$3 other=$4
+api=http://127.0.0.1:7070
+place=/v1/projects/$project/workspaces/$workspace
+session=""
+token=$(sudo sail server token create "list-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+stranger=$(sudo sail server token create "list-$other" member --fde "$other" 2>/dev/null | sed -n 2p | tr -d " ")
+call() { curl -s -o /tmp/list.json -w "%{http_code}" -X "$2" -H "Authorization: Bearer $1" -H "Content-Type: application/json" -d "${4:-}" "$api$3"; }
+cleanup() {
+  if [ -n "$session" ]; then call "$token" POST "/v1/sessions/$session:end" > /dev/null; fi
+  call "$token" PUT /v1/me/preferences "{\"session_form\":\"chat\"}" > /dev/null
+  call "$token" DELETE /v1/logins/claude-code/fleet-list > /dev/null
+  sudo rm -f /root/.fleet/anthropic /tmp/list.json /tmp/list-items.json
+  sudo sail server token revoke "list-$handle" > /dev/null 2>&1
+  sudo sail server token revoke "list-$other" > /dev/null 2>&1
+}
+trap cleanup EXIT
+fail() { echo "FAIL: $1"; head -c 400 /tmp/list.json; echo; exit 1; }
+listed() {
+  status=$(call "$1" GET "$place/sessions")
+  [ "$status" = 200 ] || { echo "HTTP $status"; return; }
+  python3 -I -c "
+import json, sys
+rows = [r for r in json.load(open(\"/tmp/list.json\"))[\"sessions\"] if r[\"name\"] == sys.argv[1]]
+print(\" \".join([rows[0][\"form\"], rows[0][\"state\"], str(rows[0][\"live\"]).lower()]) if rows else \"none\")
+" "$session"
+}
+read_to() {
+  echo "[]" > /tmp/list-items.json
+  for attempt in $(seq 1 12); do
+    status=$(call "$token" GET "/v1/sessions/$session/chat?after=$after")
+    [ "$status" = 200 ] || fail "a read was refused: HTTP $status"
+    read -r after seen <<< "$(python3 -I -c "
+import json, sys
+items = json.load(open(\"/tmp/list.json\"))[\"items\"]
+had = json.load(open(\"/tmp/list-items.json\")) + items
+json.dump(had, open(\"/tmp/list-items.json\", \"w\"))
+types = [i[\"type\"] for i in had]
+print(items[-1][\"seq\"] if items else sys.argv[1], sys.argv[2] if sys.argv[2] in types else (\"turn_ended\" if \"turn_ended\" in types else \"no\"))
+" "$after" "$1")"
+    [ "$seen" = no ] || break
+  done
+  [ "$seen" = "$1" ] || fail "the chat read $seen, not $1, within twelve reads"
+}
+[ -n "$token" ] && [ -n "$stranger" ] || fail "no token"
+status=$(sudo python3 -I -c "import json; print(json.dumps({\"kind\": \"api-key\", \"value\": open(\"/root/.fleet/anthropic\").read().strip()}))" |
+  curl -s -o /tmp/list.json -w "%{http_code}" -X PUT -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary @- "$api/v1/logins/claude-code/fleet-list")
+[ "$status" = 200 ] || fail "the key was not stored: HTTP $status"
+status=$(call "$token" POST /v1/logins/claude-code/fleet-list:use)
+[ "$status" = 200 ] || fail "the key was not made the default: HTTP $status"
+status=$(call "$token" POST "$place/chats" "{\"harness\":\"claude-code\",\"mode\":\"default\"}")
+[ "$status" = 201 ] || fail "the chat did not open: HTTP $status"
+session=$(python3 -I -c "import json; print(json.load(open(\"/tmp/list.json\"))[\"session\"])")
+said=$(listed "$token"); echo "opened: $said"
+[ "$said" = "chat idle true" ] || fail "a chat just opened is listed as $said"
+after=0
+status=$(call "$token" POST "/v1/sessions/$session/chat/messages" "{\"text\":\"Reply with the single word pong and nothing else.\"}")
+[ "$status" = 200 ] || fail "the message was not taken: HTTP $status"
+read_to turn_ended
+said=$(listed "$token"); echo "its turn ended: $said"
+[ "$said" = "chat your_turn true" ] || fail "a chat whose turn ended is listed as $said"
+status=$(call "$token" POST "/v1/sessions/$session/chat/messages" "{\"text\":\"Run the shell command printf x > listed.txt in the workspace.\"}")
+[ "$status" = 200 ] || fail "the second message was not taken: HTTP $status"
+read_to permission
+said=$(listed "$token"); echo "it asks: $said"
+[ "$said" = "chat needs_you true" ] || fail "a chat that asks is listed as $said"
+status=$(call "$token" POST "/v1/sessions/$session:end")
+[ "$status" = 204 ] || fail "the end was refused: HTTP $status"
+said=$(listed "$token"); echo "ended: $said"
+[ "$said" = "chat ended false" ] || fail "an ended chat is listed as $said"
+said=$(listed "$stranger"); echo "$other lists: $said"
+[ "$said" = none ] || fail "$other was listed $handle chat: $said"
+status=$(call "$token" GET /v1/me/preferences)
+[ "$status" = 200 ] && grep -q "\"session_form\": \"chat\"" /tmp/list.json || fail "a preference never set does not read chat: HTTP $status"
+status=$(call "$token" PUT /v1/me/preferences "{\"session_form\":\"terminal\"}")
+[ "$status" = 200 ] && grep -q "\"session_form\": \"terminal\"" /tmp/list.json || fail "terminal was not set: HTTP $status"
+status=$(call "$token" GET /v1/me/preferences)
+[ "$status" = 200 ] && grep -q "\"session_form\": \"terminal\"" /tmp/list.json || fail "terminal does not read back: HTTP $status"
+status=$(call "$stranger" GET /v1/me/preferences)
+[ "$status" = 200 ] && grep -q "\"session_form\": \"chat\"" /tmp/list.json || fail "$other reads another preference than chat: HTTP $status"
+status=$(call "$token" PUT /v1/me/preferences "{\"session_form\":\"tab\"}")
+[ "$status" = 422 ] && grep -qF "session_form is chat, terminal or both." /tmp/list.json || fail "tab was not refused: HTTP $status"
+status=$(call "$token" GET "$place/agents")
+[ "$status" = 200 ] || fail "the agents route was refused: HTTP $status"
+python3 -I -c "
+import json, sys
+offers = {o[\"harness\"]: o for o in json.load(open(\"/tmp/list.json\"))[\"offered\"]}
+claude, codex = offers[\"claude-code\"], offers[\"codex\"]
+print(\"claude-code forms %s, %d chat modes; codex forms %s\" % (claude[\"forms\"], len(claude[\"chat\"][\"modes\"]), codex[\"forms\"]))
+sys.exit(0 if \"chat\" in claude[\"forms\"] and len(claude[\"chat\"][\"modes\"]) == 3 and codex[\"forms\"] == [\"terminal\"] and \"chat\" not in codex else 1)
+" || fail "the agents route says another form"
+echo "CHAT LISTED"'
+
 # The in-container credential asking the socket it holds for the caller's passkeys, its status line
 # after the body; the command fails unless the socket answered 200.
 readonly IN_CONTAINER_PASSKEYS='curl -s -w "\nHTTP %{http_code}\n" --unix-socket /var/lib/sail/run/api.sock -H "Authorization: Bearer $(cat /var/lib/sail/run/box.credential)" http://sail/v1/passkeys | tee /dev/stderr | grep -q "^HTTP 200$"'
@@ -921,6 +1024,13 @@ chat_walks() {
   out=$(on "$run" "$box" "cat > /tmp/sail-chat && bash /tmp/sail-chat $handle $project $workspace $other" <<< "$CHAT_WALK")
   echo "$out"
   grep -q '^CHAT WALKED$' <<< "$out"
+}
+
+chat_lists() {
+  local run=$1 box=$2 handle=$3 project=$4 workspace=$5 other=$6 out
+  out=$(on "$run" "$box" "cat > /tmp/sail-chat-list && bash /tmp/sail-chat-list $handle $project $workspace $other" <<< "$CHAT_LIST")
+  echo "$out"
+  grep -q '^CHAT LISTED$' <<< "$out"
 }
 
 modes_match_claude() {
@@ -2497,6 +2607,10 @@ storage() {
     place_secret "$run" main fleet-anthropic-key anthropic
   check "$run" "eng chats with Claude Code in eng-own on main through main's API with the fleet's key: one message, its items read to the turn's end each once, a reconnect from 0 and from the last seq losing and repeating nothing, client told there is no such chat of hers, then the chat ended and taking no message; the key, the login and the tokens removed after" \
     chat_walks "$run" main eng acme eng-own client
+  check "$run" "main holds the fleet's Claude Code key again where only root reads it, for eng's listed chat" \
+    place_secret "$run" main fleet-anthropic-key anthropic
+  check "$run" "eng's chat in eng-own is listed beside her terminals through a real turn on main's API: idle when opened, your_turn once pong's turn ended, needs_you while Claude Code asks before printf x > listed.txt, ended and not live once she ends it; client lists none of it; eng's preference reads chat, is set to terminal and read back, client's still reads chat, and tab is refused; Claude Code offers a chat in three modes and Codex only a terminal; the chat ended, the preference put back, the key, the login and the tokens removed after" \
+    chat_lists "$run" main eng acme eng-own client
   check "$run" "eng's workspace commits as eng" commits_as "$run" main acme-eng-own eng@fleet.example
   check "$run" "eng's workspace holds none of main's person's forge token" holds_no_forge_token "$run" main acme-eng-own
   check "$run" "client, a member, is refused eng's workspace on main, naming her" \
