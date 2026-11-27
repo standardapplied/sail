@@ -132,7 +132,7 @@ class LiveStreamTest {
                     "x".repeat(119) + "\uD83D\uDE00",
                     Map.of("timeout", 5, "command", command, "description", "second")),
                 new ToolCall("toolu_2", "T".repeat(64), "", Map.of("limit", 3)),
-                new ToolCall("", "", "", Map.of()))),
+                new ToolCall("toolu_3", "", "", Map.of()))),
         LiveStream.read(
             "{\"type\":\"assistant\",\"message\":{\"content\":["
                 + "{\"type\":\"text\",\"text\":\"checking\"},"
@@ -143,18 +143,28 @@ class LiveStreamTest {
                 + "{\"type\":\"tool_use\",\"id\":\"toolu_2\",\"name\":\""
                 + "T".repeat(80)
                 + "\",\"input\":{\"limit\":3}},"
-                + "{\"type\":\"tool_use\"}]}}"));
+                + "{\"type\":\"tool_use\",\"id\":\"toolu_3\"}]}}"));
+    assertEquals(
+        new Step.Other("assistant"),
+        LiveStream.read(
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\"}]}}"),
+        "a call that names no id is no call");
   }
 
   @Test
   void toolResultsNameTheCallsThatCameBack() {
     assertEquals(
         new Step.ToolResults(
-            List.of(new ToolResult("toolu_1", "ok", false), new ToolResult("", "", false))),
+            List.of(new ToolResult("toolu_1", "ok", false), new ToolResult("toolu_2", "", false))),
         LiveStream.read(
             "{\"type\":\"user\",\"message\":{\"content\":["
                 + "{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\",\"content\":\"ok\"},"
-                + "{\"type\":\"tool_result\"}]}}"));
+                + "{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_2\"}]}}"));
+    assertEquals(
+        new Step.Other("user"),
+        LiveStream.read(
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\"}]}}"),
+        "a result that names no call is no result");
   }
 
   @Test
@@ -224,7 +234,7 @@ class LiveStreamTest {
 
   private static Step.Result ended(boolean error, String reason, String text, LoginOutcome login) {
     return new Step.Result(
-        error, reason, text, false, false, login, new ChatItem.TurnEnded(0, 0, 0, 0));
+        error, reason, text, false, false, login, new ChatItem.TurnEnded(null, 0, 0, 0));
   }
 
   /**

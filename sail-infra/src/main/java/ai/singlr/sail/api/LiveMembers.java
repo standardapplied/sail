@@ -1192,9 +1192,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
             LiveStream.Step.Permission _,
             LiveStream.Step.Question _,
             LiveStream.Step.Plan _,
-            LiveStream.Step.Withdrawn _,
-            LiveStream.Step.Retry _,
-            LiveStream.Step.Compaction _,
+            LiveStream.Step.Shown _,
             LiveStream.Step.Status _,
             LiveStream.Step.Other _ -> {}
       }

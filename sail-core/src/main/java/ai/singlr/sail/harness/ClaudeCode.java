@@ -8,7 +8,6 @@ package ai.singlr.sail.harness;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BoxCredentialFile;
-import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.SailPaths;
@@ -25,6 +24,7 @@ import java.util.stream.Collectors;
 final class ClaudeCode implements Harness {
 
   private static final String BINARY = "claude";
+  private static final String RESULT = "\"type\":\"result\"";
 
   /** Where Claude Code sends its requests, which its stored key fixes to the Anthropic API. */
   private static final String BASE_URL = "ANTHROPIC_BASE_URL";
@@ -49,7 +49,7 @@ final class ClaudeCode implements Harness {
   /**
    * How sail runs Claude Code as one process it talks to: JSON lines both ways, text as written.
    */
-  private static final List<String> STREAMING =
+  static final List<String> STREAMING =
       List.of(
           BINARY,
           "--print",
@@ -59,9 +59,6 @@ final class ClaudeCode implements Harness {
           "stream-json",
           "--verbose",
           "--include-partial-messages");
-
-  /** The prefix Claude Code gives the name of every tool an MCP server serves. */
-  private static final String MCP_TOOL = "mcp__";
 
   /** Where, under the dev user's home, Claude Code keeps its own sign-in. */
   private static final String CREDENTIALS = ".claude/.credentials.json";
@@ -78,8 +75,7 @@ final class ClaudeCode implements Harness {
    * The settings file of a live member, passed via {@code --settings} to the one process sail reads
    * instead of hooking: the read-deny rules and nothing that runs a script.
    */
-  private static final String LIVE_SETTINGS_PATH =
-      ContainerExec.DEV_HOME + "/.sail/claude-live.json";
+  static final String LIVE_SETTINGS_PATH = ContainerExec.DEV_HOME + "/.sail/claude-live.json";
 
   /**
    * What makes a session read-only, as argv: ambient settings and MCP configs excluded, the tool
@@ -238,78 +234,9 @@ final class ClaudeCode implements Harness {
     return Optional.of(new LiveSettings(LIVE_SETTINGS_PATH, settings()));
   }
 
-  /**
-   * Claude Code's streaming mode with every request a person answers relayed on its stdout ({@code
-   * --permission-prompt-tool stdio}: without it nothing is asked, and each call its mode does not
-   * allow is refused), as the S0 probe recorded it asking on 2.1.332, with no {@code initialize}
-   * sent first, which it does not need. It runs under the live member's settings: the read-deny
-   * rules, and no hook to race the person's answer. Never {@code --bare}, which ignores a sign-in
-   * the workspace stored, drops {@code CLAUDE.md} and the person's skills and cuts the tools
-   * (recorded). Its process outlives a closed stdin while a background task it started runs, and
-   * begins a turn of its own when that task ends (recorded).
-   */
   @Override
-  public Optional<List<String>> chat(ChatLaunch launch) {
-    var mode = Mode.named(chatModes(), launch.mode(), displayName());
-    var command = new ArrayList<>(STREAMING);
-    command.addAll(List.of("--settings", LIVE_SETTINGS_PATH));
-    if (launch.model() != null) {
-      command.addAll(List.of("--model", launch.model()));
-    }
-    command.addAll(List.of("--permission-prompt-tool", "stdio"));
-    if (!mode.args().isBlank()) {
-      command.addAll(List.of(mode.args().strip().split(" ")));
-    }
-    launch.resume().ifPresent(id -> command.addAll(List.of("--resume", id)));
-    return Optional.of(List.copyOf(command));
-  }
-
-  /**
-   * Claude Code's own permission modes, as a person is told them in a chat: its {@code default},
-   * which a start with no mode is in (recorded), first. A workspace's settings may name another
-   * default, so the mode a chat is in is the one Claude Code says ({@code init}, {@code status}).
-   * In plan mode the recorded turns ran on a model other than the one {@code --model} named, until
-   * the plan was approved.
-   */
-  @Override
-  public List<Mode> chatModes() {
-    return List.of(
-        new Mode(
-            "default",
-            "Asks first",
-            "Asks before edits, shell commands and network actions.",
-            "",
-            false),
-        permissionMode(
-            "acceptEdits",
-            "Edits freely",
-            "Makes file edits and common filesystem commands without asking, and asks before the"
-                + " rest.",
-            false),
-        permissionMode(
-            "plan",
-            "Plans first",
-            "Researches and proposes a plan, and changes nothing until you approve it.",
-            false),
-        permissionMode(
-            "bypassPermissions",
-            "Never asks",
-            "Runs everything without asking, skipping every permission check.",
-            true));
-  }
-
-  /** What each of Claude Code's tools does, by its name; a tool an MCP server serves is MCP's. */
-  @Override
-  public ChatItem.ToolKind toolKind(String tool) {
-    return switch (tool) {
-      case "Bash" -> ChatItem.ToolKind.COMMAND;
-      case "Edit", "Write", "NotebookEdit" -> ChatItem.ToolKind.EDIT;
-      case "Read" -> ChatItem.ToolKind.READ;
-      case "Grep", "Glob" -> ChatItem.ToolKind.SEARCH;
-      case "WebFetch", "WebSearch" -> ChatItem.ToolKind.WEB;
-      case "Agent", "Task" -> ChatItem.ToolKind.AGENT;
-      default -> tool.startsWith(MCP_TOOL) ? ChatItem.ToolKind.MCP : ChatItem.ToolKind.OTHER;
-    };
+  public Optional<HarnessChat> chat() {
+    return Optional.of(new ClaudeCodeChat());
   }
 
   @Override
@@ -420,7 +347,7 @@ final class ClaudeCode implements Harness {
             true));
   }
 
-  private static Mode permissionMode(String name, String label, String about, boolean risky) {
+  static Mode permissionMode(String name, String label, String about, boolean risky) {
     return new Mode(name, label, about, " --permission-mode " + name, risky);
   }
 
@@ -446,7 +373,7 @@ final class ClaudeCode implements Harness {
 
   @Override
   public List<String> reportMarkers() {
-    return List.of(ClaudeCodeReport.RESULT);
+    return List.of(RESULT);
   }
 
   /**
@@ -459,7 +386,11 @@ final class ClaudeCode implements Harness {
    */
   @Override
   public RunUsage usage(String report) {
-    return ClaudeCodeReport.usage(report);
+    var found = RunUsage.last(report, RESULT, ClaudeCode::reports);
+    if (found.unreadable()) {
+      return null;
+    }
+    return found.line() == null ? RunUsage.NONE : usageOf(found.line());
   }
 
   /**
@@ -472,7 +403,62 @@ final class ClaudeCode implements Harness {
    */
   @Override
   public Optional<LoginOutcome> loginOutcome(String report) {
-    return ClaudeCodeReport.loginOutcome(report);
+    var result = RunUsage.last(report, RESULT, line -> "result".equals(line.get("type"))).line();
+    if (result == null || !Boolean.TRUE.equals(result.get("is_error"))) {
+      return Optional.empty();
+    }
+    return LiveStream.loginOutcome(
+        result.get("result") instanceof String text ? text : "",
+        RunUsage.count(result, "api_error_status"));
+  }
+
+  private static boolean reports(Map<String, Object> line) {
+    if (!"result".equals(line.get("type"))) {
+      return false;
+    }
+    var usage = usageOf(line);
+    return (usage.costUsd() != null && usage.costUsd() > 0)
+        || (usage.tokens() != null && usage.tokens() > 0);
+  }
+
+  private static RunUsage usageOf(Map<String, Object> result) {
+    var cost = result.get("total_cost_usd") instanceof Number usd ? usd.doubleValue() : null;
+    var models = RunUsage.map(result, "modelUsage");
+    if (models.isEmpty()) {
+      var usage = RunUsage.map(result, "usage");
+      return new RunUsage(
+          null,
+          RunUsage.count(usage, "input_tokens"),
+          RunUsage.count(usage, "output_tokens"),
+          RunUsage.count(usage, "cache_read_input_tokens"),
+          RunUsage.count(usage, "cache_creation_input_tokens"),
+          cost,
+          RunUsage.Source.RESULT);
+    }
+    String model = null;
+    var most = -1.0;
+    long in = 0;
+    long out = 0;
+    long read = 0;
+    long write = 0;
+    for (var entry : models.entrySet()) {
+      var figures = RunUsage.map(models, entry.getKey());
+      in += figure(figures, "inputTokens");
+      out += figure(figures, "outputTokens");
+      read += figure(figures, "cacheReadInputTokens");
+      write += figure(figures, "cacheCreationInputTokens");
+      var spent = figures.get("costUSD") instanceof Number usd ? usd.doubleValue() : 0;
+      if (spent > most) {
+        most = spent;
+        model = entry.getKey();
+      }
+    }
+    return new RunUsage(model, in, out, read, write, cost, RunUsage.Source.RESULT);
+  }
+
+  private static long figure(Map<String, Object> figures, String key) {
+    var count = RunUsage.count(figures, key);
+    return count == null ? 0 : count;
   }
 
   /**
@@ -588,15 +574,16 @@ final class ClaudeCode implements Harness {
    * live outside {@code ~/workspace}, are unreadable by default even without a rule. These denies
    * harden the box FDE {@code box.credential}, the box SSH identity ({@code ~/.ssh}, the Sail CLI
    * identity), the {@code ~/.git-credentials} token, the {@code gh} token under {@code
-   * ~/.config/gh} and a run's {@code launch.env}, which holds its credential and its person's login
-   * until its wrapper reads it, explicitly on top of that, so the protection does not rest solely
-   * on the cwd heuristic. Claude Code applies a {@code Read(path)} deny to a Bash command that
-   * reads that path (verified), deny outranks every allow rule, and the room invocation pins {@code
-   * --setting-sources ""} so no ambient settings file can shadow these. A full (YOLO) agent skips
-   * permission rules by design: it is the trusted member lane. Spec-CLI auth is untouched: the
-   * helper reads the credential at the OS level, not through a tool. Residual (a secret committed
-   * inside the workspace, a kernel escape, a harness-enforcement bug) is owned by the room-lane
-   * hardening follow-up, a read-only-disk sidecar, not this denylist.
+   * ~/.config/gh}, a run's {@code launch.env}, which holds its credential and its person's login
+   * until its wrapper reads it, and a session's login file under {@code ~/.sail/sessions}, which
+   * holds its person's login until its shell reads it, explicitly on top of that, so the protection
+   * does not rest solely on the cwd heuristic. Claude Code applies a {@code Read(path)} deny to a
+   * Bash command that reads that path (verified), deny outranks every allow rule, and the room
+   * invocation pins {@code --setting-sources ""} so no ambient settings file can shadow these. A
+   * full (YOLO) agent skips permission rules by design: it is the trusted member lane. Spec-CLI
+   * auth is untouched: the helper reads the credential at the OS level, not through a tool.
+   * Residual (a secret committed inside the workspace, a kernel escape, a harness-enforcement bug)
+   * is owned by the room-lane hardening follow-up, a read-only-disk sidecar, not this denylist.
    */
   private static List<String> readDenyRules() {
     return List.of(
@@ -604,11 +591,13 @@ final class ClaudeCode implements Harness {
         "Read(" + ContainerExec.DEV_HOME + "/.ssh/**)",
         "Read(" + ContainerExec.DEV_HOME + "/.git-credentials)",
         "Read(" + ContainerExec.DEV_HOME + "/.config/gh/**)",
-        "Read(" + ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env)");
+        "Read(" + ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env)",
+        "Read(~/.sail/sessions/**)");
   }
 
   private static String boxCredentialReadDeny() {
-    return "Read(/" + SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME) + ")";
+    var credential = SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME);
+    return "Read(/" + credential + ")";
   }
 
   private static String invocation(Launch launch) {

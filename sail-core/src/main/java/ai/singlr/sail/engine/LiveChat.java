@@ -8,7 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.LiveStream.Step;
-import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.HarnessChat;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,12 +26,16 @@ public final class LiveChat {
 
   private LiveChat() {}
 
-  /** What a person is shown of {@code step}, of a process of {@code harness}; none for many. */
-  public static List<ChatItem> items(Step step, Harness harness) {
-    return items(step, harness, null);
+  /**
+   * What a person is shown of {@code step}, of a process of the harness {@code chat} speaks for;
+   * none for many. The host keeps the step itself: what it answers a request with, the call's input
+   * and the harness's own suggestions, is the step's, never an item's.
+   */
+  public static List<ChatItem> items(Step step, HarnessChat chat) {
+    return items(step, chat, null);
   }
 
-  private static List<ChatItem> items(Step step, Harness harness, String under) {
+  private static List<ChatItem> items(Step step, HarnessChat chat, String under) {
     return switch (step) {
       case Step.Init init ->
           List.of(new ChatItem.Session(init.model(), init.mode(), init.commands(), init.skills()));
@@ -39,7 +43,7 @@ public final class LiveChat {
       case Step.Text text -> List.of(new ChatItem.Text(under, text.text(), false));
       case Step.Said said -> List.of(new ChatItem.Text(under, said.text(), true));
       case Step.ToolCalls called ->
-          called.calls().stream().<ChatItem>map(call -> row(call, harness, under)).toList();
+          called.calls().stream().<ChatItem>map(call -> row(call, chat, under)).toList();
       case Step.ToolResults returned ->
           returned.results().stream()
               .<ChatItem>map(
@@ -47,21 +51,13 @@ public final class LiveChat {
                       new ChatItem.ToolDone(
                           under, result.callId(), result.output(), result.error()))
               .toList();
-      case Step.Subagent subagent -> items(subagent.step(), harness, subagent.callId());
-      case Step.Permission asked -> List.of(permission(asked, harness));
+      case Step.Subagent subagent -> items(subagent.step(), chat, subagent.callId());
+      case Step.Permission asked -> List.of(permission(asked, chat));
       case Step.Question asked ->
           List.of(new ChatItem.Question(asked.requestId(), asked.callId(), asked.questions()));
       case Step.Plan asked ->
           List.of(new ChatItem.Plan(asked.requestId(), asked.callId(), asked.plan()));
-      case Step.Withdrawn withdrawn -> List.of(new ChatItem.Withdrawn(withdrawn.requestId()));
-      case Step.Retry retry ->
-          List.of(
-              new ChatItem.Retrying(
-                  retry.attempt(), retry.attempts(), retry.delayMs(), retry.error()));
-      case Step.Compaction compaction ->
-          List.of(
-              new ChatItem.Compacted(
-                  compaction.trigger(), compaction.tokensBefore(), compaction.tokensAfter()));
+      case Step.Shown shown -> List.of(shown.item());
       case Step.Status status ->
           status.mode() == null ? List.of() : List.of(new ChatItem.ModeChanged(status.mode()));
       case Step.Result result -> ended(result);
@@ -70,23 +66,24 @@ public final class LiveChat {
   }
 
   /** A call's row: in the words Claude Code gives it ({@code description}), else its summary. */
-  private static ChatItem row(LiveStream.ToolCall call, Harness harness, String under) {
+  private static ChatItem row(LiveStream.ToolCall call, HarnessChat chat, String under) {
     var words =
         call.input().get("description") instanceof String described && !described.isBlank()
             ? Strings.clip(described, LiveStream.SUMMARY_CODE_POINTS)
             : call.summary();
-    return new ChatItem.Tool(under, call.id(), harness.toolKind(call.tool()), words, call.input());
+    return new ChatItem.Tool(
+        under, call.id(), chat.kind(call.tool()), words, chat.detail(call.tool(), call.input()));
   }
 
-  private static ChatItem permission(Step.Permission asked, Harness harness) {
+  private static ChatItem permission(Step.Permission asked, HarnessChat chat) {
     return new ChatItem.Permission(
         asked.requestId(),
         asked.callId(),
-        harness.toolKind(asked.tool()),
+        chat.kind(asked.tool()),
         Strings.isNotBlank(asked.description()) ? asked.description() : asked.displayName(),
         asked.reason(),
-        asked.input(),
-        !asked.suggestions().isEmpty());
+        chat.detail(asked.tool(), asked.input()),
+        chat.always(asked.suggestions()));
   }
 
   /**
@@ -121,9 +118,10 @@ public final class LiveChat {
 
   /**
    * Allows the call and every one like it from now on: with {@code permissions}, the request's own
-   * suggestions handed back as they came. Claude Code keeps a rule it suggests for {@code
-   * localSettings} in {@code ~/workspace/.claude/settings.local.json}, a file it makes inside the
-   * workspace, and a suggested mode switches the session's mode at once (2.1.332, recorded).
+   * suggestions handed back as they came, which its item's {@code always} words said. Claude Code
+   * keeps a rule it suggests for {@code localSettings} in {@code
+   * ~/workspace/.claude/settings.local.json}, a file it makes inside the workspace, and a suggested
+   * mode switches the session's mode at once (2.1.332, recorded).
    *
    * @throws IllegalArgumentException when Claude Code suggested nothing to keep
    */
@@ -165,8 +163,9 @@ public final class LiveChat {
 
   /**
    * Stops the turn in progress. Claude Code withdraws a request it is waiting on ({@link
-   * Step.Withdrawn}), and the turn ends interrupted; the process stays, and takes the next message
-   * as a new turn (2.1.332, recorded).
+   * ChatItem.Withdrawn}), and the turn ends interrupted; the process stays, and takes the next
+   * message as a new turn (2.1.332, recorded). A process that ends instead takes every request it
+   * held with it, and a resume replays none (recorded): the host withdraws each itself.
    */
   public static String interrupt(String requestId) {
     return ask(requestId, LiveStream.ordered("subtype", "interrupt"));
@@ -174,7 +173,8 @@ public final class LiveChat {
 
   /**
    * Puts the session in {@code mode}, one of the harness's chat modes by name; Claude Code says so
-   * in a {@link Step.Status} (2.1.332, recorded).
+   * in a {@link Step.Status} (2.1.332, recorded), and a switch it refuses is a {@link
+   * ChatItem.Refused} naming {@code requestId}.
    */
   public static String setMode(String requestId, String mode) {
     return ask(
