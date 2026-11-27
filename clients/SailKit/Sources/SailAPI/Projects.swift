@@ -101,9 +101,17 @@ public struct ProjectDefinition: Codable, Equatable, Sendable {
     }
 }
 
-/// A project the caller created, by the name the server keeps it under.
-public struct ProjectCreated: Codable, Equatable, Sendable {
+/// A project's definition as the server keeps it, by the name it keeps it under, and who wrote it
+/// last: what a create answers, and what reading the definition answers.
+public struct DefinedProject: Codable, Equatable, Sendable {
     public let name: String
+    public let definition: ProjectDefinition
+    public let updatedBy: String
+
+    private enum CodingKeys: String, CodingKey {
+        case name, definition
+        case updatedBy = "updated_by"
+    }
 }
 
 /// A project's template as the server tells it: where it is, and each step of its build by name,
@@ -119,10 +127,30 @@ public struct TemplateStatus: Codable, Equatable, Sendable {
     }
 }
 
-extension Endpoint where Response == ProjectCreated {
+extension Endpoint where Response == DefinedProject {
     /// Creates the project `definition` names, whole, with no template yet.
     public static func createProject(_ definition: ProjectDefinition) throws(SailError) -> Self {
         Self(.post, Route.projects, body: try SailJSON.encode(definition))
+    }
+
+    /// Project `project`'s definition and who wrote it last.
+    public static func projectDefinition(_ project: String) -> Self {
+        Self(.get, Route.projects + [project, "definition"])
+    }
+}
+
+extension SailClient {
+    /// Creates `definition` for `handle`. A name taken by a project `handle` wrote last with this very
+    /// definition is their own create, which landed while its answer was lost: it answers as that
+    /// create did, so Create again after a time-out finds the project rather than a refusal.
+    public func create(_ definition: ProjectDefinition, by handle: String) async -> Result<DefinedProject, SailError> {
+        do throws(SailError) {
+            return .success(try await send(.createProject(definition)))
+        } catch {
+            guard NewProject.nameRefusal(error) != nil, let held = try? await send(.projectDefinition(definition.name)),
+                  held.updatedBy == handle, held.definition == definition else { return .failure(error) }
+            return .success(held)
+        }
     }
 }
 

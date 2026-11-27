@@ -343,7 +343,7 @@ import Testing
         let again = model.listAgain()
         model.listed(.failure(.unreachable("The network connection was lost.")), request: again, at: Self.at.addingTimeInterval(240))
         let page = try #require(Self.page(model))
-        #expect(page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list harbor’s workspaces", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: true))
+        #expect(page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list harbor’s workspaces", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: .list))
         #expect(page.stale && page.listedAt == Self.at && Self.table(model)?.yours.isEmpty == false, "the old list stays, dimmed")
         let recovered = model.listAgain()
         model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: recovered, at: Self.at.addingTimeInterval(300))
@@ -512,7 +512,7 @@ import Testing
         let older = model.askingProjects(), newer = model.askingProjects()
         model.projectsListed(.failure(.unreachable("lost")), request: newer)
         guard case let .shown(panel, .project(page)) = model.screen else { Issue.record("\(model.screen)"); return }
-        #expect(panel.stale && page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list your projects", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: true))
+        #expect(panel.stale && page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list your projects", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: .list))
         model.projectsListed(.success(ProjectList(projects: [], total: 0)), request: older)
         guard case .shown(_, .project) = model.screen else { Issue.record("an older answer was taken: \(model.screen)"); return }
         let again = model.askingProjects()

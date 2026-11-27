@@ -374,7 +374,8 @@ struct Step: Decodable {
     var projectSheetReturnTwice: Bool?
     /// Create Project is shown somewhere in the Workspaces section (true) or nowhere (false).
     var projectCreateOffered: Bool?
-    /// The same session shown again with its `whoami` a viewer's ("viewer") or the golden's ("admin").
+    /// The same session shown again with its `whoami` a viewer's ("viewer"), a member's who may
+    /// write ("member") or the golden's ("admin").
     var signedInAs: String?
     /// `[route, golden, from, to]`: from now on `route` is answered as `golden` was, every `from` in
     /// its answer `to`.

@@ -15,7 +15,7 @@ import SailWorkbench
 package final class ProjectView: NSView, NSTextFieldDelegate {
     enum Act: Equatable {
         case open(String), startAndOpen(String), newSession(String), startLast(String), copyName(String), stop(String), delete(String)
-        case newWorkspace, listAgain, checkAgain, typed(String), create, cancelCreate, chose(String?), show(String), createProject
+        case newWorkspace, listAgain, checkAgain, typed(String), create, cancelCreate, chose(String?), show(String), createProject, buildAgain
     }
 
     static let padding = (top: 26.0, sides: 32.0, bottom: 20.0), listGap = 18.0, footGap = 12.0, actionsColumn = 214.0
@@ -521,7 +521,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     private func banner(_ notice: WorkspacesModel.Notice) -> Banner {
-        let again = notice.tryAgain ? SailButton("Try Again", kind: .secondary, size: .small, look: look, target: self, action: #selector(askAgain(_:))) : nil
+        let again = notice.tryAgain.map { SailButton("Try Again", kind: .secondary, size: .small, look: look, target: self, action: $0 == .build ? #selector(buildAgain(_:)) : #selector(askAgain(_:))) }
         return Banner(notice.tone == .error ? .error : .warning, title: notice.title, line: notice.line.isEmpty ? nil : notice.line, action: again, look: look)
     }
 
@@ -542,6 +542,11 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// Create Project, in the empty state of a control plane with no project.
     @objc private func createProject(_: Any?) {
         on(.createProject)
+    }
+
+    /// Try Again over a project whose template's build could not be asked: asks it again.
+    @objc private func buildAgain(_: Any?) {
+        on(.buildAgain)
     }
 
     /// Words in mono 11, tertiary: the foot's.

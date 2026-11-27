@@ -63,13 +63,15 @@ extension Driver {
         return nil
     }
 
-    /// Who is signed in shown again with the same session, their `whoami` a viewer's (`read` only)
-    /// or the golden's (an admin), as a refreshed sign-in would show it.
+    /// Who is signed in shown again with the same session, their `whoami` a viewer's (`read` only),
+    /// a member's (`read` and `write`, who may create but not build), or the golden's (an admin), as a
+    /// refreshed sign-in would show it.
     private func signIn(as role: String) -> (Bool, String) {
         guard let standing = shell.flow.standing else { return (false, "no one is signed in") }
         let whoami: Whoami
-        if role == "viewer" {
-            whoami = Whoami(fde: standing.fde, name: standing.fde, role: .known(.viewer), capabilities: [.known(.read)])
+        if role == "viewer" || role == "member" {
+            let capabilities: [Capability] = role == "viewer" ? [.read] : [.read, .write]
+            whoami = Whoami(fde: standing.fde, name: standing.fde, role: .known(role == "viewer" ? .viewer : .member), capabilities: capabilities.map { .known($0) })
         } else {
             guard let golden = try? Exchange("whoami"), let decoded = try? Endpoint.whoami.decode(HTTPResponse(status: golden.status, body: golden.body)) else {
                 return (false, "the golden whoami could not be read")

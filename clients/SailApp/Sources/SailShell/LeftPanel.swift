@@ -16,7 +16,7 @@ package final class LeftPanel: NSView {
     static let remembered = "leftPanel.width"
 
     var onChoose: @MainActor (String) -> Void = { _ in }
-    /// Create Project, at the header's end beside the projects listed.
+    /// Create Project, on the control plane's head beside its count.
     var onCreate: @MainActor () -> Void = {}
     /// Try Again under the control plane's head, which could list no project.
     var onTryAgain: @MainActor () -> Void = {}
@@ -35,7 +35,8 @@ package final class LeftPanel: NSView {
     /// Under the empty line while no project could be listed and This Mac's page is shown, where
     /// no card offers its own: the projects asked again.
     package let tryAgain: SailButton
-    /// Create Project, offered to those who may write once projects are listed.
+    /// Create Project, a quiet + on the control plane's head before its count, offered to those who
+    /// may create and build a project once projects are listed.
     package let createProject: SailButton
     /// Skeleton rows, each a tile and a name, before any project is listed.
     private let skeletons: [(tile: Skeleton, name: Skeleton)]
@@ -45,6 +46,8 @@ package final class LeftPanel: NSView {
     private var headed: String?
     /// The control plane's head's count as drawn, nil before its projects are listed.
     private var counted: Int?
+    /// Create Project is on the control plane's head as drawn.
+    private var offered = false
     /// The names are drawn in the secondary ink: what is shown failed to refresh.
     private var stale = false
     /// What it last showed, drawn again in a new look.
@@ -63,8 +66,6 @@ package final class LeftPanel: NSView {
         createProject.isHidden = true
         createProject.target = self
         createProject.action = #selector(create(_:))
-        createProject.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(createProject)
         emptyLine.isHidden = true
         addSubview(emptyLine)
         tryAgain.isHidden = true
@@ -90,8 +91,6 @@ package final class LeftPanel: NSView {
         NSLayoutConstraint.activate([
             widthConstraint, heading.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             heading.centerYAnchor.constraint(equalTo: topAnchor, constant: Self.header / 2),
-            createProject.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            createProject.centerYAnchor.constraint(equalTo: heading.centerYAnchor),
         ])
         list.onChoose = { [weak self] name in if let name { self?.onChoose(name) } }
     }
@@ -145,12 +144,13 @@ package final class LeftPanel: NSView {
             .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),
         ])
         let count = panel.listed ? panel.projects.count : nil
-        if panel.projects != projects || panel.stale != stale || panel.controlPlane != headed || count != counted {
+        if panel.projects != projects || panel.stale != stale || panel.controlPlane != headed || count != counted || panel.creates != offered {
             projects = panel.projects
             stale = panel.stale
             headed = panel.controlPlane
             counted = count
-            list.entries = thisMac + [.head(panel.controlPlane, count: count, icon: .cloud)] + panel.projects.map { project in
+            offered = panel.creates
+            list.entries = thisMac + [.head(panel.controlPlane, count: count, icon: .cloud, action: panel.creates ? createProject : nil)] + panel.projects.map { project in
                 .item(row(project))
             }
         }

@@ -9,6 +9,7 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "projects": { _ = try await $0.send(.projects) },
     "projects-none": { _ = try await $0.send(.projects) },
     "project-created": { _ = try await $0.send(.createProject(marina)) },
+    "project-definition": { _ = try await $0.send(.projectDefinition("marina")) },
     "template-2f-joined": { _ = try await $0.send(.buildTemplate(project: "lighthouse")) },
     "template-2g-current": { _ = try await $0.send(.buildTemplate(project: "lighthouse")) },
     "rooms": { _ = try await $0.send(.rooms(project: "harbor")) },

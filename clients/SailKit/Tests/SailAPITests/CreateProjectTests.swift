@@ -21,12 +21,16 @@ import Testing
     }
 
     /// No project yet: the panel says so under the control plane's head, counting none, and the main
-    /// area says what a project is, offers Create Project to those whose `whoami` names `write`, and
-    /// names the host and who may; others are told to ask an admin, with no action.
+    /// area says what a project is, offers Create Project to those whose `whoami` names `write` and
+    /// `admin` (who may also build its template), and names the host and who may; others are told to
+    /// ask an admin, with no action, whatever their role is called; one whose `whoami` has not come
+    /// is told only that.
     @Test func whoIsOfferedCreateProject() throws {
         for (role, capabilities, line, action) in [
             (Role.admin, [Capability.read, .write, .admin], "sail.example.com · you can create projects as an admin", WorkspacesModel.EmptyAction.createProject),
-            (.member, [.read, .write], "sail.example.com · you can create projects as a member", .createProject),
+            (.member, [.read, .write, .admin], "sail.example.com · you can create projects as an admin", .createProject),
+            (.admin, [.read, .write], "sail.example.com · Ask an admin to create one.", nil),
+            (.member, [.read, .write], "sail.example.com · Ask an admin to create one.", nil),
             (.viewer, [.read], "sail.example.com · Ask an admin to create one.", nil),
         ] as [(Role, [Capability], String, WorkspacesModel.EmptyAction?)] {
             let model = Self.none(try Self.person(role, capabilities))
@@ -34,16 +38,22 @@ import Testing
             #expect(panel.listed && panel.projects.isEmpty && panel.emptyLine == "No projects yet." && !panel.creates)
             #expect(empty.title == "Create your first project")
             #expect(empty.body == "A project holds the repositories, agents and size that every workspace starts from. Create one, and Sail builds its template on the runner.")
-            #expect(empty.line == line && empty.action == action, "\(role)")
+            #expect(empty.line == line && empty.action == action, "\(role) \(capabilities)")
         }
+        let plane = try ControlPlane(address: "https://sail.example.com")
+        let unconfirmed = WorkspacesModel.Person(SignedIn(controlPlane: plane, fde: "mara", until: .distantFuture, whoami: .failure(AccountRefusal(.unreachable, at: plane))))
+        guard case let .shown(_, .noProjects(empty)) = Self.none(unconfirmed).screen else { Issue.record("no empty state"); return }
+        #expect(empty.line == "sail.example.com · your role is not yet confirmed" && empty.action == nil)
     }
 
     /// With projects listed, Create Project is offered from the panel by the same rule; with none,
     /// only while This Mac stands where the main area would offer it.
     @Test func thePanelOffersCreateProjectByTheSameRule() throws {
-        for (capabilities, offered) in [([Capability.read, .write], true), ([.read], false)] {
+        for (capabilities, offered) in [([Capability.read, .write, .admin], true), ([.read, .write], false), ([.read], false)] {
             var model = WorkspacesModel(person: try Self.person(.member, capabilities))
             #expect(!model.panel.creates, "offered before any project was listed")
+            model.chooseThisMac()
+            #expect(!model.panel.creates, "offered on This Mac before any project was listed")
             model.projectsListed(WorkspacesModelTests.answer(.projects, "projects"))
             #expect(model.panel.creates == offered)
             var none = Self.none(try Self.person(.member, capabilities))
@@ -53,7 +63,7 @@ import Testing
     }
 
     /// The sizes are the app's words for `resources`, Medium chosen at first; SIZE's help names the
-    /// choice; Custom starts at Medium's and sends what is typed, its digits alone.
+    /// choice; Custom starts at the size chosen before and sends what is typed, its digits alone.
     @Test func theSizePresets() {
         var sheet = NewProject(agents: Self.harnesses)
         #expect(sheet.size == .medium && sheet.sizeHelp == "4 cores · 8 GB memory · 50 GB disk for each workspace.")
@@ -63,7 +73,7 @@ import Testing
         }
         #expect(sent == [
             ProjectDefinition.Resources(cpu: 2, memory: "4GB", disk: "30GB"), ProjectDefinition.Resources(cpu: 4, memory: "8GB", disk: "50GB"),
-            ProjectDefinition.Resources(cpu: 8, memory: "16GB", disk: "100GB"), ProjectDefinition.Resources(cpu: 4, memory: "8GB", disk: "50GB"),
+            ProjectDefinition.Resources(cpu: 8, memory: "16GB", disk: "100GB"), ProjectDefinition.Resources(cpu: 8, memory: "16GB", disk: "100GB"),
         ])
         #expect(sheet.typeCustom(.cores, "1 core") == "1")
         sheet.typeCustom(.memory, "12")
@@ -72,6 +82,9 @@ import Testing
         #expect(sheet.sizeHelp == "1 core · 12 GB memory · 0 GB disk for each workspace.")
         sheet.choose(.small)
         #expect(sheet.sizeHelp == "2 cores · 4 GB memory · 30 GB disk for each workspace.")
+        sheet.choose(.large)
+        sheet.choose(.custom)
+        #expect(sheet.custom == [.cores: "8", .memory: "16", .disk: "100"], "Custom did not start from the size chosen before")
     }
 
     /// A repository's path fills from its URL's last part, less `.git`, until the person edits it;
@@ -90,6 +103,18 @@ import Testing
         #expect(sheet.repos.map(\.path) == ["web", "docs"])
         sheet.removeRepo(0)
         #expect(sheet.repos.map(\.url) == ["github.com/acme/docs/"])
+        for (url, path) in [
+            ("github.com/acme/app?ref=main", "app"), ("github.com/acme/app.git#readme", "app"), ("git@github.com:acme/app.git", "app"), ("git@host:app.git", "app"),
+            ("git@host:app", "app"),
+        ] {
+            sheet.typeURL(url, row: 0)
+            #expect(sheet.repos[0].path == path, "\(url) filled \(sheet.repos[0].path)")
+        }
+        sheet.addRepo()
+        sheet.typeURL("github.com/other/app", row: 1)
+        sheet.addRepo()
+        sheet.typeURL("github.com/third/app.git", row: 2)
+        #expect(sheet.repos.map(\.path) == ["app", "app-2", "app-3"])
     }
 
     /// Create sends one definition, whole, as the server's golden create took it: the name, each
@@ -98,7 +123,11 @@ import Testing
     @Test func createSendsTheWholeDefinitionOnce() throws {
         var sheet = NewProject(agents: Self.harnesses + [NewProject.Agent(name: "pi", display: "Pi")])
         #expect(!sheet.creates && sheet.send() == nil, "Create offered with no name")
+        sheet.named("   ")
+        #expect(!sheet.creates, "Create offered for a name of spaces")
+        sheet.typePath("app", row: 0)
         sheet.named("marina")
+        #expect(!sheet.creates, "Create offered with a path and no URL to clone into it")
         sheet.typeURL("https://github.com/harbor/app.git", row: 0)
         sheet.addRepo()
         sheet.typeURL("github.com/harbor/docs.git", row: 1)
@@ -109,6 +138,22 @@ import Testing
         let golden = try #require(try Exchange("project-created").requestBody)
         #expect(try json(SailJSON.encode(sent)) == json(golden))
         #expect(sheet.send() == nil && !sheet.creates)
+        var ssh = NewProject(agents: Self.harnesses)
+        ssh.named("app")
+        ssh.typeURL("git@github.com:acme/app.git", row: 0)
+        #expect(ssh.send()?.repos == [ProjectDefinition.Repo(url: "git@github.com:acme/app.git", path: "app")], "an ssh address not sent as typed")
+    }
+
+    /// While the server's harnesses could not be listed, Create is off and AGENTS says why; listed
+    /// again, each is shown checked and Create is on: no project is created with agents the person
+    /// did not see.
+    @Test func noCreateWhileTheAgentsAreNotListed() throws {
+        var sheet = NewProject(agents: [])
+        sheet.agentsListed(.failure(.unreachable("lost")), at: "sail.example.com")
+        sheet.named("harbor")
+        #expect(sheet.agentsUnlisted == "Sail could not list the agents: Sail cannot reach the control plane at sail.example.com." && !sheet.creates && sheet.send() == nil)
+        sheet.agentsListed(WorkspacesModelTests.answer(.knownAgents, "agents"), at: "sail.example.com")
+        #expect(sheet.agentsUnlisted == nil && sheet.agents.map(\.name) == ["claude-code", "codex"] && sheet.agents.allSatisfy(\.checked) && sheet.creates)
     }
 
     /// A taken name: the server's sentence under NAME with its remedy in words, nothing over the
@@ -124,6 +169,9 @@ import Testing
         #expect(sheet.refused.isEmpty && !sheet.underWay && sheet.name == "harbor" && sheet.repos[0].url == "github.com/acme/harbor-api" && sheet.creates)
         sheet.choose(.large)
         #expect(sheet.nameRefused != nil)
+        _ = sheet.send()
+        #expect(sheet.nameRefused == nil, "a refusal stood under a name sent again")
+        sheet.refuse(try Self.taken(), at: "sail.example.com")
         sheet.named("harbour")
         #expect(sheet.nameRefused == nil)
     }
@@ -141,27 +189,65 @@ import Testing
         #expect(sheet.refused.isEmpty)
         _ = sheet.send()
         sheet.refuse(.unreachable("The network connection was lost."), at: "sail.example.com")
+        sheet.typeURL("github.com/acme/app", row: 0)
+        #expect(sheet.refused.isEmpty, "the refusal over the foot stayed after the URL was edited")
+        _ = sheet.send()
+        sheet.refuse(.unreachable("The network connection was lost."), at: "sail.example.com")
         #expect(sheet.refused == ["Sail cannot reach the control plane at sail.example.com."])
     }
 
     /// The created project is chosen once the projects listed show it, in This Mac's place too, and
-    /// a build refused is said over its page in words, never a command.
+    /// stays chosen once the person chooses another; a build refused is said over its page in words,
+    /// never a command; a build that got no answer is said with Try Again, which asks it again,
+    /// until the build is asked.
     @Test func theCreatedProjectIsChosenOnceListed() throws {
         var model = Self.none(try Self.person(.admin, [.read, .write, .admin]))
         model.chooseThisMac()
         model.projectCreated("lighthouse")
-        model.buildRefused("lighthouse", try #require(WorkspacesModelTests.answer(.buildTemplate(project: "lighthouse"), "refusal-template-2d-login-not-stored").failure))
         let listed = ProjectList(projects: ["harbor", "lighthouse"].map { ProjectSummary(name: $0, containerStatus: .known(.notCreated), template: .known(.missing)) }, total: 2)
         let request = model.projectsListed(.success(listed))
         #expect(model.chosen == "lighthouse" && !model.thisMacChosen && request != nil)
         model.listed(WorkspacesModelTests.answer(.workspaces(project: "lighthouse"), "workspaces-none"), request: try #require(request), at: WorkspacesModelTests.at)
-        let page = try #require(WorkspacesModelTests.page(model))
-        #expect(page.banner == WorkspacesModel.Notice(
-            tone: .error, title: "github.com asks for credentials to fetch lighthouse's repo lamp, and dana keeps no token for it.", line: "An admin stores it on the runner for now.",
-            tryAgain: false
+        model.built("lighthouse", .failure(.unreachable("The request timed out.")))
+        #expect(WorkspacesModelTests.page(model)?.banner == WorkspacesModel.Notice(
+            tone: .error, title: "Couldn’t start building lighthouse’s template", line: "Sail cannot reach the control plane at https://sail.example.com.", tryAgain: .build
         ))
+        model.listed(WorkspacesModelTests.answer(.workspaces(project: "lighthouse"), "workspaces-none"), request: model.listAgain(), at: WorkspacesModelTests.at)
+        #expect(WorkspacesModelTests.page(model)?.banner?.tryAgain == .build, "a later list took away the build still owed")
+        model.built("lighthouse", WorkspacesModelTests.answer(.buildTemplate(project: "lighthouse"), "refusal-template-2d-login-not-stored"))
+        #expect(WorkspacesModelTests.page(model)?.banner == WorkspacesModel.Notice(
+            tone: .error, title: "github.com asks for credentials to fetch lighthouse's repo lamp, and dana keeps no token for it.", line: "An admin stores it on the runner for now.",
+            tryAgain: nil
+        ))
+        model.built("lighthouse", WorkspacesModelTests.answer(.buildTemplate(project: "lighthouse"), "template-2f-joined"))
+        #expect(WorkspacesModelTests.page(model)?.banner == nil, "a build asked left the refusal standing")
+        model.built("lighthouse", .failure(.unexpected(route: "POST /v1/projects/lighthouse/template:build", status: 502)))
+        let building = ProjectList(projects: [ProjectSummary(name: "lighthouse", containerStatus: .known(.notCreated), template: .known(.building))], total: 1)
+        model.projectsListed(.success(building))
+        #expect(WorkspacesModelTests.page(model)?.banner == nil, "the build owed stayed once the list showed it building")
         model.projectsListed(.success(listed))
         #expect(model.chosen == "lighthouse", "a later list chose again")
+        _ = model.choose("harbor")
+        model.projectsListed(.success(listed))
+        #expect(model.chosen == "harbor", "a later list chose the created project over the person's choice")
+    }
+
+    /// Create's answer from the server; a name taken by a project the person wrote last with this very
+    /// definition (their create that landed while its answer was lost) answers as that create did;
+    /// one written by another, or to another definition, stays the refusal.
+    @Test func aCreateThatLandedUnansweredIsTheirs() async throws {
+        let created = await SailClient(transport: RecordedServer([try Exchange("project-created")]), token: "tok").create(marina, by: "dana")
+        #expect(try created.get().name == "marina")
+        let taken = try Exchange("refusal-project-name-taken")
+        let landed = RecordedServer([Exchange(method: "POST", path: "/v1/projects", status: taken.status, body: taken.body), try Exchange("project-definition")])
+        let theirs = await SailClient(transport: landed, token: "tok").create(marina, by: "dana")
+        #expect(try theirs.get().name == "marina" && (try theirs.get().updatedBy) == "dana")
+        #expect(await landed.requests.map(\.route) == ["POST /v1/projects", "GET /v1/projects/marina/definition"])
+        let another = await SailClient(transport: landed, token: "tok").create(marina, by: "uday")
+        #expect(another.failure.flatMap(NewProject.nameRefusal) != nil, "another's project taken as the person's own")
+        let changed = ProjectDefinition(name: "marina", repos: marina.repos, agent: ProjectDefinition.Agent(install: ["codex"]), resources: marina.resources)
+        let other = await SailClient(transport: landed, token: "tok").create(changed, by: "dana")
+        #expect(other.failure.flatMap(NewProject.nameRefusal) != nil, "a project of another definition taken as this create")
     }
 
     /// The template's build answers with its state and each step by name, in the build's order.

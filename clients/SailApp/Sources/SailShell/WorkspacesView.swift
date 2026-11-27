@@ -278,8 +278,20 @@ public final class WorkspacesView: NSView {
     func shown() {
         guard client != nil else { return }
         door = .signedIn
+        let owed = owedBuild.flatMap { $0.by.handle == person.handle && $0.by.controlPlane == person.controlPlane ? $0.project : nil }
+        if let owed {
+            owedBuild = nil
+            model.projectCreated(owed)
+        }
         askProjects()
+        guard let owed else { return }
+        let era = self.era
+        byAPerson { [weak self] in await self?.build(owed, era: era) }
     }
+
+    /// A project's build a sign-out cut off after its create: asked, and the project chosen, once
+    /// the person who created it is signed in to that control plane again.
+    private var owedBuild: (by: WorkspacesModel.Person, project: String)?
 
     func refresh() async {
         await askProjects().value
@@ -438,6 +450,9 @@ public final class WorkspacesView: NSView {
             render()
         case .listAgain, .checkAgain:
             askProjects()
+        case .buildAgain:
+            let era = self.era
+            byAPerson { [weak self] in await self?.build(projectName, era: era) }
         case .createProject: break
         }
     }
@@ -446,24 +461,25 @@ public final class WorkspacesView: NSView {
     package private(set) var projectSheet: CreateProjectSheet?
 
     /// Create Project: the server's harnesses asked, then the sheet on the window with each one
-    /// checked; harnesses that could not be listed leave AGENTS saying why, the rest of the sheet
-    /// working. Its Create sends the definition once, and a project created has its template built.
+    /// checked; harnesses that could not be listed leave AGENTS saying why with Try Again, and
+    /// Create off. Its Create sends the definition once, and a project created is listed and chosen,
+    /// then has its template built.
     private func createProject() {
         guard let client, projectSheet == nil, model.person.creates else { return }
-        let era = self.era
+        let era = self.era, asker = model.person
         byAPerson { [weak self] in
             guard let self else { return }
-            let agents = await Self.result { () async throws(SailError) in try await client.send(.knownAgents) }
+            let ask: @MainActor () async -> Result<KnownAgents, SailError> = { await Self.result { () async throws(SailError) in try await client.send(.knownAgents) } }
+            let agents = await ask()
             guard era == self.era, projectSheet == nil, let window, !isHiddenOrHasHiddenAncestor else { return }
             let address = model.person.controlPlane
-            let asked: NewProject = switch agents {
-            case let .success(known): NewProject(agents: known.agents.map { NewProject.Agent(name: $0.name, display: $0.displayName) })
-            case let .failure(error): NewProject(agents: [], unlisted: "Sail could not list the agents: \(error.said(at: address))")
-            }
+            var asked = NewProject(agents: [])
+            asked.agentsListed(agents, at: address)
             let (width, room) = Self.sheetRoom(window)
             let sheet = CreateProjectSheet(asked, width: width, room: room, direction: userInterfaceLayoutDirection, address: address, look: look, titleFont: titleFont, mono: mono)
-            sheet.send = { definition in await Self.result { () async throws(SailError) in try await client.send(.createProject(definition)) } }
-            sheet.onCreated = { [weak self] name in self?.created(name, era: era) }
+            sheet.send = { definition in await client.create(definition, by: asker.handle) }
+            sheet.askAgents = ask
+            sheet.onCreated = { [weak self] name in self?.created(name, era: era, by: asker) }
             sheet.onEnd = { [weak self] in self?.projectSheet = nil }
             projectSheet = sheet
             window.beginSheet(sheet) { _ in }
@@ -477,19 +493,36 @@ public final class WorkspacesView: NSView {
         return (min(CreateProjectSheet.width, Double(content.width) - 2 * CreateProjectSheet.inset), Double(content.height) - CreateProjectSheet.inset)
     }
 
-    /// Project `name` created: its template's build asked at once, then the projects listed and it
-    /// chosen; a build refused is said over its page.
-    private func created(_ name: String, era: Int) {
-        guard let client, era == self.era else { return }
+    /// Project `name` created by `asker`: the projects listed and it chosen, so it shows at once,
+    /// then its template's build asked; a sign-out before the build leaves it owed to them.
+    private func created(_ name: String, era: Int, by asker: WorkspacesModel.Person) {
+        guard era == self.era else {
+            owedBuild = (asker, name)
+            return
+        }
+        model.projectCreated(name)
         byAPerson { [weak self] in
             guard let self else { return }
-            let built = await Self.result { () async throws(SailError) in try await client.send(.buildTemplate(project: name)) }
-            guard era == self.era else { return }
-            if case let .failure(error) = built { model.buildRefused(name, error) }
-            model.projectCreated(name)
             await askProjects().value
+            guard era == self.era else {
+                owedBuild = (asker, name)
+                return
+            }
             if model.chosen == name, !model.thisMacChosen { keepChosen(name, person) }
+            await build(name, era: era)
         }
+    }
+
+    /// Project `name`'s template's build asked, which the server joins when one is under way; once
+    /// asked, the projects listed again to show it building. A refusal, or no answer with Try
+    /// Again, is said over its page.
+    private func build(_ name: String, era: Int) async {
+        guard let client else { return }
+        let built = await Self.result { () async throws(SailError) in try await client.send(.buildTemplate(project: name)) }
+        guard era == self.era else { return }
+        model.built(name, built)
+        render()
+        if case .success = built { await askProjects().value }
     }
 
     // MARK: New Session

@@ -543,7 +543,7 @@ extension Driver {
         if let wanted = step.panelHeads {
             let heads = {
                 pane.panel.list.entries.compactMap { entry -> String? in
-                    guard case let .head(title, count, _) = entry else { return nil }
+                    guard case let .head(title, count, _, _) = entry else { return nil }
                     return count.map { "\(title) \($0)" } ?? title
                 }
             }

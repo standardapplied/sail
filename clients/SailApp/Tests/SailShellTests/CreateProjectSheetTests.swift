@@ -9,8 +9,10 @@ import Testing
 /// The New project sheet (`createSheet` of the first-impressions page, section 6): what a person
 /// types reaches the model and the paths fill from the URLs, Create sends once, the server's
 /// refusal stands under the field it names or over the foot, and the sheet is laid out whole, in
-/// its window, at 600 pt and at the least window, left to right and right to left; and the
-/// Workspaces section offers Create Project only to those who may write.
+/// its window, at 600 pt and at the least window, left to right and right to left; nothing in it
+/// acts while the create is under way, and none is sent while the agents are not listed; the
+/// Workspaces section offers Create Project only to those who may create and build a project, and
+/// a project created is listed and chosen, then built.
 @MainActor @Suite(.serialized, .timeLimit(.minutes(1))) struct CreateProjectSheetTests {
     init() {
         ExitWatch.install()
@@ -24,9 +26,11 @@ import Testing
     /// The least window's sheet: its 480 pt less 12 pt each side.
     static let least = 480.0 - 2 * CreateProjectSheet.inset
 
-    static func sheet(width: Double = CreateProjectSheet.width, room: Double = 720, direction: NSUserInterfaceLayoutDirection = .leftToRight) throws -> CreateProjectSheet {
+    static func sheet(
+        _ model: NewProject = NewProject(agents: Self.harnesses), width: Double = CreateProjectSheet.width, room: Double = 720, direction: NSUserInterfaceLayoutDirection = .leftToRight
+    ) throws -> CreateProjectSheet {
         let sheet = CreateProjectSheet(
-            NewProject(agents: Self.harnesses), width: width, room: room, direction: direction, address: "sail.example.com", look: .light,
+            model, width: width, room: room, direction: direction, address: "sail.example.com", look: .light,
             titleFont: try TitleFont(directory: LookTests.fonts), mono: try LabelFont(directory: LookTests.fonts)
         )
         sheet.orderFront(nil)
@@ -42,6 +46,16 @@ import Testing
     static func type(_ text: String, into field: SailTextField, of sheet: CreateProjectSheet) {
         field.field.stringValue = text
         sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field.field))
+    }
+
+    /// `view` clicked at its middle as a mouse-up there tells it, with none of AppKit's own tracking.
+    static func click(_ view: NSView) throws {
+        let window = try #require(view.window)
+        let at = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+        let up = try #require(NSEvent.mouseEvent(
+            with: .leftMouseUp, location: at, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0
+        ))
+        view.mouseUp(with: up)
     }
 
     static func answer<Response>(_ endpoint: Endpoint<Response>, _ golden: String) throws -> Result<Response, SailError> {
@@ -110,6 +124,70 @@ import Testing
         #expect(WorkspacesReachTests.outOfReach(in: try #require(sheet.contentView)) == [])
     }
 
+    /// An agent's check clicked off: the create sends the agents still checked.
+    @Test func anAgentClickedOffIsNotInstalled() async throws {
+        let sheet = try Self.sheet()
+        defer { sheet.orderOut(nil) }
+        var sent: [ProjectDefinition] = []
+        sheet.send = { definition in
+            sent.append(definition)
+            return .failure(.unreachable("lost"))
+        }
+        Self.type("harbor", into: sheet.name, of: sheet)
+        try Self.click(sheet.checks[1])
+        #expect(!sheet.checks[1].checked && sheet.checks[0].checked)
+        Self.press(sheet.create)
+        await sheet.sending?.value
+        #expect(sent.map(\.agent.install) == [["claude-code"]])
+    }
+
+    /// While the create is under way nothing in the sheet acts: Escape and Cancel do not end it, and
+    /// the fields, ×, Add Repository, the sizes and the checks are off; its answer then ends it.
+    @Test func nothingActsWhileTheCreateIsUnderWay() async throws {
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 760), styleMask: [.titled], backing: .buffered, defer: false)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        let sheet = try Self.sheet()
+        let created = try Self.answer(.createProject(Self.harbor), "project-created"), answer = Gate()
+        var ended = false
+        sheet.send = { _ in
+            await answer.wait()
+            return created
+        }
+        sheet.onEnd = { ended = true }
+        window.beginSheet(sheet) { _ in }
+        Self.type("marina", into: sheet.name, of: sheet)
+        Self.press(sheet.create)
+        _ = sheet.control(sheet.name.field, textView: NSTextView(), doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+        sheet.cancelOperation(nil)
+        Self.press(sheet.cancel)
+        #expect(!ended && window.attachedSheet === sheet, "the sheet ended while its create was under way")
+        let controls: [NSControl] = [sheet.name.field, sheet.urls[0].field, sheet.paths[0].field, sheet.removes[0], sheet.addRepo, sheet.cancel]
+        #expect(controls.allSatisfy { !$0.isEnabled } && !sheet.sizes.isEnabled && sheet.checks.allSatisfy { !$0.isEnabled })
+        try Self.click(sheet.checks[0])
+        #expect(sheet.checks[0].checked && sheet.model.agents[0].checked, "a check turned while the create was under way")
+        answer.open()
+        await sheet.sending?.value
+        #expect(ended && window.attachedSheet == nil)
+    }
+
+    /// The agents not listed: AGENTS says why with Try Again and Create is off; Try Again lists them,
+    /// each checked, and Create is on.
+    @Test func noCreateUntilTheAgentsAreListed() async throws {
+        var unlisted = NewProject(agents: [])
+        unlisted.agentsListed(.failure(.unreachable("lost")), at: "sail.example.com")
+        let sheet = try Self.sheet(unlisted)
+        defer { sheet.orderOut(nil) }
+        let known = try Self.answer(.knownAgents, "agents")
+        sheet.askAgents = { known }
+        Self.type("harbor", into: sheet.name, of: sheet)
+        #expect(!sheet.create.isEnabled && sheet.checks.isEmpty && sheet.agentsAgain.superview != nil)
+        #expect(Driverless.words(sheet.contentView).contains("Sail could not list the agents: Sail cannot reach the control plane at sail.example.com."))
+        Self.press(sheet.agentsAgain)
+        #expect(await RunnerTabTests.until { sheet.checks.count == 2 }, "Try Again listed no agents")
+        #expect(sheet.checks.allSatisfy(\.checked) && sheet.create.isEnabled && sheet.agentsAgain.superview == nil)
+    }
+
     /// Created: the sheet ends on its window and names the project the server created.
     @Test func aCreatedProjectEndsTheSheet() async throws {
         let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 760), styleMask: [.titled], backing: .buffered, defer: false)
@@ -158,7 +236,8 @@ import Testing
         }
     }
 
-    /// SIZE says what each choice gives, and Custom shows its three fields only while chosen.
+    /// SIZE says what each choice gives, and Custom shows its three fields only while chosen,
+    /// starting at the size chosen before.
     @Test func eachSizeSaysWhatItGives() throws {
         let sheet = try Self.sheet()
         defer { sheet.orderOut(nil) }
@@ -167,14 +246,14 @@ import Testing
         sheet.sizes.onChoose(.large)
         #expect(Driverless.words(sheet.contentView).contains("8 cores · 16 GB memory · 100 GB disk for each workspace.") && sheet.sizes.chosen == .large)
         sheet.sizes.onChoose(.custom)
-        #expect(sheet.custom.allSatisfy { !$0.field.isHidden })
+        #expect(sheet.custom.allSatisfy { !$0.field.isHidden } && sheet.custom.map(\.field.field.stringValue) == ["8", "16", "100"])
         Self.type("6 cores", into: sheet.custom[0].field, of: sheet)
-        #expect(sheet.custom[0].field.field.stringValue == "6" && Driverless.words(sheet.contentView).contains("6 cores · 8 GB memory · 50 GB disk for each workspace."))
+        #expect(sheet.custom[0].field.field.stringValue == "6" && Driverless.words(sheet.contentView).contains("6 cores · 16 GB memory · 100 GB disk for each workspace."))
     }
 
-    /// No project yet: Create Project is offered to a person whose `whoami` names `write`, and opens
-    /// the sheet with the server's harnesses, each checked; a viewer is told to ask an admin, with no
-    /// button.
+    /// No project yet: Create Project is offered to a person who may create and build a project, and
+    /// opens the sheet with the server's harnesses, each checked; others are told to ask an admin,
+    /// with no button.
     @Test func createProjectIsOfferedToThoseWhoMayWrite() async throws {
         let server = RecordedServer([try Exchange("projects-none"), try Exchange("agents")])
         let (view, window) = try WorkspacesViewTests.view(server)
@@ -211,7 +290,102 @@ import Testing
         #expect(view.panel.createProject.isHidden, "offered to one who may not write")
         view.person = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "127.0.0.1", creates: true)
         #expect(!view.panel.createProject.isHidden && Driverless.button("Create Project", in: view.project) == nil)
+        window.displayIfNeeded()
+        let button = view.panel.createProject, cell = try #require(button.superview as? HeadCell)
+        let head = view.panel.list.rect(ofRow: 2), plus = cell.convert(button.alignmentRect(forFrame: button.frame), to: view.panel.list)
+        #expect(head.contains(plus), "the + at \(plus), the control plane's head at \(head)")
         Self.press(view.panel.createProject)
         #expect(await RunnerTabTests.until { window.attachedSheet is CreateProjectSheet }, "the panel's + opened no sheet")
+    }
+
+    /// A head's action stands before its count, and right to left mirrors it.
+    @Test func aHeadsActionStandsBeforeItsCount() throws {
+        var frames: [NSRect] = []
+        for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
+            let plus = SailButton(icon: .plus, label: "Create Project", kind: .quiet, size: .small, look: .light, target: nil, action: nil)
+            let cell = HeadCell("127.0.0.1:7979", count: 1, icon: .cloud, at: (14, 18), look: .light, mono: try LabelFont(directory: LookTests.fonts), hairline: false, action: plus)
+            cell.userInterfaceLayoutDirection = direction
+            cell.frame = NSRect(x: 0, y: 0, width: 235, height: 30)
+            frames.append(plus.alignmentRect(forFrame: plus.frame))
+        }
+        let ltr = frames[0], rtl = frames[1]
+        #expect(ltr.maxX < 235 - 18 - 8 && ltr.minX > 235 / 2 && abs(ltr.midY - 15) < 1, "\(ltr)")
+        #expect(abs(rtl.minX - (235 - ltr.maxX)) < 0.5 && abs(rtl.minY - ltr.minY) < 0.5, "right to left at \(rtl), left to right at \(ltr)")
+    }
+
+    /// A project created is listed and chosen before its build is asked, once; a build that got no
+    /// answer leaves Try Again over its page, which asks it again, and then the page says it builds.
+    @Test func aCreatedProjectIsChosenThenBuilt() async throws {
+        let build = "POST /v1/projects/lighthouse/template%3Abuild"
+        let desk = try Desk(["projects-none", "agents"])
+        let (view, window) = try WorkspacesViewTests.view(desk)
+        defer {
+            window.attachedSheet.map { window.endSheet($0) }
+            window.orderOut(nil)
+        }
+        view.person = WorkspacesModel.Person(handle: "dana", admin: true, confirmed: true, controlPlane: "127.0.0.1", creates: true)
+        view.shown()
+        #expect(await RunnerTabTests.until { Driverless.button("Create Project", in: view.project) != nil }, "\(view.text)")
+        await desk.answer(try Exchange("project-created").altered(at: ["name"], to: "lighthouse"))
+        await desk.answer(try Exchange("projects").altered(at: ["projects"], to: [["name": "lighthouse", "container_status": "not_created", "template": "missing"]]))
+        let none = try Exchange("workspaces-none")
+        await desk.answer(Exchange(method: "GET", path: "/v1/projects/lighthouse/workspaces", status: none.status, body: none.body))
+        await desk.hold(build)
+        Self.press(try #require(Driverless.button("Create Project", in: view.project)))
+        #expect(await RunnerTabTests.until { window.attachedSheet is CreateProjectSheet }, "Create Project opened no sheet")
+        let sheet = try #require(window.attachedSheet as? CreateProjectSheet)
+        Self.type("lighthouse", into: sheet.name, of: sheet)
+        Self.press(sheet.create)
+        await desk.arrived(during: Task { _ = await RunnerTabTests.until { false } })
+        let asked = await desk.asked
+        #expect(asked.filter { $0 == build }.count == 1 && asked.last == build, "\(asked)")
+        #expect(asked.firstIndex(of: "POST /v1/projects").map { asked[$0...].contains("GET /v1/projects") } == true, "not listed before the build: \(asked)")
+        #expect(view.panel.list.chosen == "lighthouse" && view.text.hasPrefix("Workspaces\nlighthouse\n"), "not chosen before the build: \(view.text)")
+        await desk.release()
+        #expect(await RunnerTabTests.until { view.text.contains("Couldn’t start building lighthouse’s template") }, "\(view.text)")
+        await desk.answer(try Exchange("template-2f-joined"))
+        await desk.answer(try Exchange("projects").altered(at: ["projects"], to: [["name": "lighthouse", "container_status": "not_created", "template": "building"]]))
+        Self.press(try #require(Driverless.button("Try Again", in: view.project)))
+        #expect(await RunnerTabTests.until { view.text.contains("lighthouse’s template is being built") && !view.text.contains("Couldn’t start") }, "\(view.text)")
+        #expect(await desk.asked.filter { $0 == build }.count == 2)
+    }
+
+    /// A sign-out between a project's create and its build leaves the build owed to the one who
+    /// created it: asked, and the project chosen, once they are signed in again; never for another.
+    @Test func aBuildCutOffBySignOutIsAskedAtTheNextSignIn() async throws {
+        let build = "POST /v1/projects/lighthouse/template%3Abuild"
+        let desk = try Desk(["projects-none", "agents"])
+        let (view, window) = try WorkspacesViewTests.view(desk)
+        defer {
+            window.attachedSheet.map { window.endSheet($0) }
+            window.orderOut(nil)
+        }
+        let dana = WorkspacesModel.Person(handle: "dana", admin: true, confirmed: true, controlPlane: "127.0.0.1", creates: true)
+        view.person = dana
+        view.shown()
+        #expect(await RunnerTabTests.until { Driverless.button("Create Project", in: view.project) != nil }, "\(view.text)")
+        await desk.answer(try Exchange("project-created").altered(at: ["name"], to: "lighthouse"))
+        await desk.answer(try Exchange("projects").altered(at: ["projects"], to: [["name": "lighthouse", "container_status": "not_created", "template": "missing"]]))
+        await desk.hold("GET /v1/projects")
+        Self.press(try #require(Driverless.button("Create Project", in: view.project)))
+        #expect(await RunnerTabTests.until { window.attachedSheet is CreateProjectSheet }, "Create Project opened no sheet")
+        let sheet = try #require(window.attachedSheet as? CreateProjectSheet)
+        Self.type("lighthouse", into: sheet.name, of: sheet)
+        Self.press(sheet.create)
+        await desk.arrived(during: Task { _ = await RunnerTabTests.until { false } })
+        view.person = WorkspacesViewTests.ana
+        await desk.release()
+        #expect(await RunnerTabTests.until { !view.busy }, "the create's list never ended")
+        view.shown()
+        #expect(await RunnerTabTests.until { !view.busy }, "another's sign-in never ended its work")
+        #expect(await desk.asked.contains(build) == false, "a build asked once its creator signed out, or for another")
+        await desk.hold(build)
+        view.person = dana
+        view.shown()
+        await desk.arrived(during: Task { _ = await RunnerTabTests.until { false } })
+        let asked = await desk.asked
+        #expect(asked.filter { $0 == build }.count == 1, "\(asked)")
+        await desk.release()
+        #expect(await RunnerTabTests.until { view.panel.list.chosen == "lighthouse" }, "\(view.text)")
     }
 }

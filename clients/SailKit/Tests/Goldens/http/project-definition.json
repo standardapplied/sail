@@ -1,0 +1,53 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/marina/definition"
+  },
+  "response": {
+    "body": {
+      "definition": {
+        "agent": {
+          "auto_branch": true,
+          "branch_prefix": "agent/",
+          "install": [
+            "claude-code",
+            "codex"
+          ]
+        },
+        "name": "marina",
+        "repos": [
+          {
+            "path": "app",
+            "url": "https://github.com/harbor/app.git"
+          },
+          {
+            "path": "docs",
+            "url": "https://github.com/harbor/docs.git"
+          }
+        ],
+        "resources": {
+          "cpu": 4,
+          "disk": "50GB",
+          "memory": "8GB"
+        }
+      },
+      "name": "marina",
+      "schema_version": 1,
+      "tags": {
+        "agent": "a1e778bd6aa8",
+        "description": "74234e98afe7",
+        "image": "74234e98afe7",
+        "packages": "74234e98afe7",
+        "pipeline": "74234e98afe7",
+        "processes": "74234e98afe7",
+        "repos": "d6709b162059",
+        "resources": "11fe2d018f0e",
+        "runtimes": "74234e98afe7",
+        "services": "74234e98afe7"
+      },
+      "updated_at": "2026-11-11T09:00:00.656Z",
+      "updated_by": "dana"
+    },
+    "status": 200
+  }
+}

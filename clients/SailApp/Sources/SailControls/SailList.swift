@@ -109,8 +109,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     public enum Entry {
         /// A group head with its count; with none, its title alone (a list still loading); its icon
-        /// before its words when it has one.
-        case head(String, count: Int?, icon: LineIcon? = nil)
+        /// before its words when it has one; its action, a quiet button, before its count.
+        case head(String, count: Int?, icon: LineIcon? = nil, action: NSView? = nil)
         case item(Item)
     }
 
@@ -359,7 +359,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     private static func id(_ entry: Entry) -> String? {
         switch entry {
         case let .item(item): item.id
-        case let .head(title, _, _): "\u{0}head\u{0}" + title
+        case let .head(title, _, _, _): "\u{0}head\u{0}" + title
         }
     }
 
@@ -573,11 +573,11 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     private func cell(for row: Int) -> NSView? {
         guard entries.indices.contains(row) else { return nil }
         switch entries[row] {
-        case let .head(title, count, icon):
+        case let .head(title, count, icon, action):
             let sidebar = rowStyle == .sidebar
             let leading = sidebar ? HeadCell.sidebarLeading : RowStyle.list.leading
             let trailing = sidebar ? rowStyle.margin + rowStyle.trailing + (actionsColumn ?? 0) : nil
-            return HeadCell(title, count: count, icon: icon, at: (leading, trailing), look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
+            return HeadCell(title, count: count, icon: icon, at: (leading, trailing), look: look, mono: mono, hairline: rowStyle.hairline && row > 0, action: action)
         case let .item(item):
             rowsMade += 1
             if let cell = makeView(withIdentifier: Self.cellID, owner: nil) as? RowCell {
@@ -858,7 +858,8 @@ final class SailRowView: NSTableRowView {
 
 /// A group head's words: mono capitals 20 pt in (14 pt in a sidebar, as the design's panel draws
 /// its heads), after its icon when it has one, the count 8 pt after them (in a sidebar, at its rows'
-/// trailing end), on the line the browser puts a 10 pt line in the row's middle.
+/// trailing end), on the line the browser puts a 10 pt line in the row's middle; its action, the
+/// one subview it may hold, 8 pt before the count.
 @MainActor
 package final class HeadCell: NSView {
     static let countGap = 8.0, iconSide = 12.0, iconGap = 6.0, sidebarLeading = 14.0
@@ -873,7 +874,7 @@ package final class HeadCell: NSView {
     /// How far before its trailing edge the count ends, nil for the count after the words.
     private let trailing: Double?
 
-    init(_ title: String, count: Int?, icon: LineIcon?, at inset: (leading: Double, trailing: Double?), look: Look, mono: LabelFont, hairline: Bool) {
+    package init(_ title: String, count: Int?, icon: LineIcon?, at inset: (leading: Double, trailing: Double?), look: Look, mono: LabelFont, hairline: Bool, action: NSView? = nil) {
         leading = inset.leading
         trailing = inset.trailing
         self.icon = icon
@@ -886,6 +887,7 @@ package final class HeadCell: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         setAccessibilityLabel(count.map { "\(title), \($0)" } ?? title)
+        if let action { addSubview(action) }
     }
 
     @available(*, unavailable)
@@ -897,20 +899,36 @@ package final class HeadCell: NSView {
         true
     }
 
+    private var words: Double {
+        leading + (icon == nil ? 0 : Self.iconSide + Self.iconGap)
+    }
+
+    /// Where its count starts.
+    private var countX: Double {
+        let titleWidth = Double(title.size().width), countWidth = Double(count.size().width), width = Double(bounds.width)
+        if userInterfaceLayoutDirection == .rightToLeft { return trailing ?? width - words - titleWidth - Self.countGap - countWidth }
+        return trailing.map { width - $0 - countWidth } ?? words + titleWidth + Self.countGap
+    }
+
+    /// Its action placed 8 pt before the count, at the width it is given.
+    override package func resizeSubviews(withOldSize _: NSSize) {
+        guard let action = subviews.first else { return }
+        let size = action.intrinsicContentSize, top = hairline ? 1.0 : 0, rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+        let x = rightToLeft ? countX + Double(count.size().width) + Self.countGap : countX - Self.countGap - Double(size.width)
+        action.frame = action.frame(forAlignmentRect: NSRect(x: x, y: top + (Double(bounds.height) - top - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height)))
+    }
+
     override package func draw(_: NSRect) {
         let points = Look.Step.caption.points, top = hairline ? 1.0 : 0
         let baseline = TextLine.baseline(top: top + (Double(bounds.height) - top - points) / 2, points: points, lineHeight: points)
-        let titleWidth = Double(title.size().width), countWidth = Double(count.size().width), width = Double(bounds.width)
-        let words = leading + (icon == nil ? 0 : Self.iconSide + Self.iconGap)
+        let titleWidth = Double(title.size().width), width = Double(bounds.width)
         let iconTop = top + (Double(bounds.height) - top - Self.iconSide) / 2
+        Draw.line(count, x: countX, baseline: baseline)
         if userInterfaceLayoutDirection == .rightToLeft {
-            let x = width - words - titleWidth
-            Draw.line(title, x: x, baseline: baseline)
-            Draw.line(count, x: trailing ?? x - Self.countGap - countWidth, baseline: baseline)
+            Draw.line(title, x: width - words - titleWidth, baseline: baseline)
             if let icon { Draw.icon(icon, in: NSRect(x: width - leading - Self.iconSide, y: iconTop, width: Self.iconSide, height: Self.iconSide), ink: ink) }
         } else {
             Draw.line(title, x: words, baseline: baseline)
-            Draw.line(count, x: trailing.map { width - $0 - countWidth } ?? words + titleWidth + Self.countGap, baseline: baseline)
             if let icon { Draw.icon(icon, in: NSRect(x: leading, y: iconTop, width: Self.iconSide, height: Self.iconSide), ink: ink) }
         }
     }

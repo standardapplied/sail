@@ -74,9 +74,9 @@ public struct NewProject: Equatable, Sendable {
     public private(set) var repos = [Repo()]
     public private(set) var agents: [Agent]
     /// Why the server's harnesses could not be listed, said under AGENTS; nil when they were.
-    public let agentsUnlisted: String?
+    public private(set) var agentsUnlisted: String?
     public private(set) var size = Size.medium
-    /// Custom's fields as typed, digits only, starting at Medium's.
+    /// Custom's fields as typed, digits only, starting at the size chosen before.
     public private(set) var custom: [Part: String] = [.cores: "4", .memory: "8", .disk: "50"]
     /// Create was pressed and the server has not answered.
     public private(set) var underWay = false
@@ -90,9 +90,23 @@ public struct NewProject: Equatable, Sendable {
         agentsUnlisted = unlisted
     }
 
-    /// Create is offered: a name is typed and nothing is under way.
+    /// Create is offered: a name is typed, the agents were listed, every path typed has a URL to
+    /// clone into it, and nothing is under way.
     public var creates: Bool {
-        !underWay && !name.trimmingCharacters(in: .whitespaces).isEmpty
+        !underWay && agentsUnlisted == nil && !name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !repos.contains { $0.url.trimmingCharacters(in: .whitespaces).isEmpty && !$0.path.isEmpty }
+    }
+
+    /// The server's harnesses as `GET /v1/agents` answered, each checked; or why they could not be
+    /// listed, failing to reach the server said at `address`.
+    public mutating func agentsListed(_ listed: Result<KnownAgents, SailError>, at address: String) {
+        switch listed {
+        case let .success(known):
+            agents = known.agents.map { Agent(name: $0.name, display: $0.displayName) }
+            agentsUnlisted = nil
+        case let .failure(error):
+            agentsUnlisted = "Sail could not list the agents: \(error.said(at: address))"
+        }
     }
 
     public mutating func named(_ typed: String) {
@@ -102,12 +116,20 @@ public struct NewProject: Equatable, Sendable {
     }
 
     /// Repository `row`'s URL typed: its path follows the URL's last part, less `.git`, until the
-    /// person types the path.
+    /// person types the path; a path another row holds gets the first free `-2`, `-3`.
     public mutating func typeURL(_ url: String, row: Int) {
         guard repos.indices.contains(row) else { return }
         repos[row].url = url
-        if !repos[row].pathTyped { repos[row].path = Self.path(of: url) }
+        if !repos[row].pathTyped { repos[row].path = free(Self.path(of: url), row: row) }
         refused = []
+    }
+
+    private func free(_ path: String, row: Int) -> String {
+        let held = Set(repos.indices.filter { $0 != row }.map { repos[$0].path })
+        guard !path.isEmpty, held.contains(path) else { return path }
+        var suffix = 2
+        while held.contains("\(path)-\(suffix)") { suffix += 1 }
+        return "\(path)-\(suffix)"
     }
 
     public mutating func typePath(_ path: String, row: Int) {
@@ -134,6 +156,7 @@ public struct NewProject: Equatable, Sendable {
     }
 
     public mutating func choose(_ size: Size) {
+        if size == .custom, let before = self.size.preset { custom = [.cores: "\(before.cores)", .memory: "\(before.memory)", .disk: "\(before.disk)"] }
         self.size = size
         refused = []
     }
@@ -187,16 +210,24 @@ public struct NewProject: Equatable, Sendable {
             refused = [error.said(at: address)]
             return
         }
-        if let field = refusal.fieldErrors.first(where: { $0.field == "name" }) {
-            nameRefused = Refused(said: field.message, remedy: Said.fix(refusal.remedy, otherwise: refusal.action))
+        if let name = Self.nameRefusal(error) {
+            nameRefused = name
         } else {
             refused = refusal.lines
         }
     }
 
-    /// The folder a repository is cloned to by default: its URL's last part, less `.git`.
+    /// The server's refusal of the name, where `error` is one: its sentence and what to do.
+    public static func nameRefusal(_ error: SailError) -> Refused? {
+        guard case let .refused(refusal) = error, let field = refusal.fieldErrors.first(where: { $0.field == "name" }) else { return nil }
+        return Refused(said: field.message, remedy: Said.fix(refusal.remedy, otherwise: refusal.action))
+    }
+
+    /// The folder a repository is cloned to by default: its URL's last part, less `.git`, its query
+    /// and its fragment; an ssh address with no folder (`git@host:app`) its part after the colon.
     static func path(of url: String) -> String {
-        let last = url.trimmingCharacters(in: .whitespaces).split(separator: "/").last.map(String.init) ?? ""
+        let address = url.trimmingCharacters(in: .whitespaces).prefix { $0 != "?" && $0 != "#" }
+        let last = address.split(separator: "/").last.map { $0.split(separator: ":").last ?? $0 }.map(String.init) ?? ""
         return last.hasSuffix(".git") ? String(last.dropLast(4)) : last
     }
 

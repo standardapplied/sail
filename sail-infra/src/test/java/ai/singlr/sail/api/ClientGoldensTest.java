@@ -439,6 +439,7 @@ class ClientGoldensTest {
       box.recordTemplates(
           http, dana, box.session("ike", "Ike", "ike@example.com", Role.ADMIN), ana, vik);
       box.record(http, "project-created", "POST", "/v1/projects", dana, marina());
+      box.record(http, "project-definition", "GET", "/v1/projects/marina/definition", dana, null);
       box.record(
           http,
           "refusal-project-name-taken",
