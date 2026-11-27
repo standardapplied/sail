@@ -4426,20 +4426,23 @@ member left from before a restart is halted by too: signalled, and gone only on 
 answer) and nothing starts until it is proved gone (`409 agent_already_running` meanwhile). A pid
 is signalled only while it names the process the wrapper started: the wrapper records the
 process's start (`/proc/<pid>/stat`) beside its pid (`AgentUnit.startPath`) before it writes the
-pid, and the halt compares it with the process now at that pid before any signal
-(`AgentSession.killStarted`, by `AgentSession.startedAt`, the rule a run's stop uses too); a pid
-the box has since given another process, after a restart of the box or the workspace, or whose
-start cannot be read on either side, is never signalled, and the process the file was written for
-is gone (its pid file cleaned). However a process's reading stops, an end of output or a failure,
+pid, and starts nothing when it cannot (its steps are chained with `&&`); the halt is one script
+in the container (`AgentSession.killStarted`) that compares that start with the process at the
+pid before TERM and again before KILL, and whose printed word alone is believed. A pid the box has
+since given another process, after a restart of the box or the workspace, or a live pid with no
+record, is never signalled, and the process the file was written for is gone (its pid file
+cleaned); a run of the script that failed or said nothing proves nothing, so nothing is removed
+and the chat stays `launched`. However a process's reading stops, an end of output or a failure,
 it takes no message from then on (one sent waits for the next process) and is ended (stdin
 closed, INT, TERM) unless its exit is known. An end marks its chat ended under the chat's lock, so
 a process starting for it is found and ended; it waits for that end outside the lock. At sail's
 start, before the API serves anything, `ChatHost.start` halts every process left over and cuts
 the turn each held (`told` why, rows closed as unread, every request `withdrawn`, `interrupted`);
-once it serves, `ChatHost.deliverWaiting` delivers each chat's waiting messages with a process
-started as its opener, each chat on a thread of its own (admitted as any start; a refusal is said
-in its words and the messages keep waiting). Both are safe at any time, since a chat's process is
-looked for and started under its lock. A process left over that its workspace does not answer for is asked
+once it serves, `ChatHost.deliverWaiting` delivers, on a thread of its own, each chat's waiting
+messages with a process started as its opener (admitted as any start; a refusal is said in its
+words and the messages keep waiting), leaving alone a chat a process of this sail already holds,
+which hands them as each turn ends. Both take up `ChatHost.AT_ONCE` (8) chats at a time, and both
+are safe at any time, since a chat's process is looked for and started under its lock. A process left over that its workspace does not answer for is asked
 again each sweep and before the chat's next start. When a process ends and messages wait, the next
 is started for them if the ended one took any; one that took none says so. A turn's end and a cut
 are each one write with the turn closed, so a crash never logs either twice; a turn's end closes
