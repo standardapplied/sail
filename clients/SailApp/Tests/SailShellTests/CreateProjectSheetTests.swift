@@ -361,9 +361,32 @@ import Testing
         #expect(cell.hitTest(cell.convert(middle, to: cell.superview)) === plus, "a click on the + lands on \(String(describing: cell.hitTest(cell.convert(middle, to: cell.superview))))")
     }
 
+    /// The empty state's Create Project is mirrored right to left: its plus stands before its words in
+    /// reading order, at their right, and at their left left to right. A test of the layout with every
+    /// view laid out right to left, as on a right-to-left Mac, in place of the drive's run-time flip,
+    /// which reaches only the views made before it.
+    @Test(arguments: [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
+    func theEmptyStatesCreateProjectIsMirrored(_ direction: NSUserInterfaceLayoutDirection) throws {
+        let (project, window) = try WorkspacesViewTests.project(width: 800)
+        defer { window.orderOut(nil) }
+        var model = WorkspacesModel(person: BuildCardViewTests.dana)
+        model.projectsListed(.success(ProjectList(projects: [], total: 0)))
+        guard case let .shown(_, .noProjects(empty)) = model.screen else { Issue.record("\(model.screen)"); return }
+        project.renderEmpty(empty)
+        if direction == .rightToLeft { AccountPaneTests.direct(project) }
+        project.layoutSubtreeIfNeeded()
+        let button = try #require(Driverless.button("Create Project", in: project) as? SailButton)
+        let (mark, label, _) = button.arrangement()
+        let plus = try #require(mark)
+        #expect(direction == .rightToLeft ? plus.minX >= label.maxX : plus.maxX <= label.minX, "the plus at \(plus), the words at \(label)")
+    }
+
     /// A project created is listed and chosen before its build is asked, once; a build that got no
-    /// answer leaves Try Again over its page, which asks it again, and then the page says it builds.
-    @Test func aCreatedProjectIsChosenThenBuilt() async throws {
+    /// answer reads the template, and as none started says so on its card with Build Again, which
+    /// asks it again, and then the card shows it building. A build that finds the session ended says
+    /// nothing and hands it to the check.
+    @Test(arguments: [false, true])
+    func aCreatedProjectIsChosenThenBuilt(_ ended: Bool) async throws {
         let build = "POST /v1/projects/lighthouse/template%3Abuild"
         let desk = try Desk(["projects-none", "agents"])
         let (view, window) = try WorkspacesViewTests.view(desk)
@@ -371,7 +394,11 @@ import Testing
             window.attachedSheet.map { window.endSheet($0) }
             window.orderOut(nil)
         }
-        view.person = WorkspacesModel.Person(handle: "dana", admin: true, confirmed: true, controlPlane: "127.0.0.1", creates: true)
+        let pauses = Pauses()
+        view.pause = { try await pauses.pause($0) }
+        view.person = BuildCardViewTests.dana
+        var handed = 0
+        view.onSessionEnded = { handed += 1 }
         view.shown()
         #expect(await RunnerTabTests.until { Driverless.button("Create Project", in: view.project) != nil }, "\(view.text)")
         await desk.answer(try Exchange("project-created").altered(at: ["name"], to: "lighthouse"))
@@ -389,12 +416,23 @@ import Testing
         #expect(asked.filter { $0 == build }.count == 1 && asked.last == build, "\(asked)")
         #expect(asked.firstIndex(of: "POST /v1/projects").map { asked[$0...].contains("GET /v1/projects") } == true, "not listed before the build: \(asked)")
         #expect(view.panel.list.chosen == "lighthouse" && view.text.hasPrefix("Workspaces\nlighthouse\n"), "not chosen before the build: \(view.text)")
+        if ended {
+            let joined = try Exchange("template-2f-joined"), refusal = try Exchange("refusal-missing-bearer-token")
+            await desk.answer(Exchange(method: joined.method, path: joined.path, status: refusal.status, body: refusal.body))
+            await desk.release()
+            #expect(await RunnerTabTests.until { handed == 1 }, "the ended session was not handed over: \(view.text)")
+            let reads = await BuildCardViewTests.reads(desk)
+            #expect(!view.text.lowercased().contains("bearer") && !view.text.contains("did not start") && reads == 0, "\(view.text)")
+            return
+        }
+        await desk.answer(try BuildCardViewTests.template("template-2c-missing"))
         await desk.release()
-        #expect(await RunnerTabTests.until { view.text.contains("Couldn’t start building lighthouse’s template") }, "\(view.text)")
+        #expect(await RunnerTabTests.until { view.text.contains("lighthouse’s template did not start\nSail cannot reach the control plane at 127.0.0.1.") }, "\(view.text)")
+        #expect(await desk.asked.filter { $0 == BuildCardViewTests.read }.count == 1 && pauses.count == 0, "the template not read once after the build got no answer")
         await desk.answer(try Exchange("template-2f-joined"))
-        await desk.answer(try Exchange("projects").altered(at: ["projects"], to: [["name": "lighthouse", "container_status": "not_created", "template": "building"]]))
-        Self.press(try #require(Driverless.button("Try Again", in: view.project)))
-        #expect(await RunnerTabTests.until { view.text.contains("lighthouse’s template is being built") && !view.text.contains("Couldn’t start") }, "\(view.text)")
+        await desk.answer(try BuildCardViewTests.template("template-2e-building"))
+        Self.press(try #require(Driverless.button("Build Again", in: view.project)))
+        #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && !view.text.contains("did not start") && pauses.count == 1 }, "\(view.text)")
         #expect(await desk.asked.filter { $0 == build }.count == 2)
     }
 

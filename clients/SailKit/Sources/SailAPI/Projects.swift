@@ -1,3 +1,5 @@
+import Foundation
+
 /// The projects the caller may see.
 public struct ProjectList: Codable, Equatable, Sendable {
     public let projects: [ProjectSummary]
@@ -114,15 +116,34 @@ public struct DefinedProject: Codable, Equatable, Sendable {
     }
 }
 
-/// A project's template as the server tells it: where it is, and each step of its build by name,
-/// in the order the build takes them.
+/// A project's template as the server tells it: where it is, how many steps a build takes and each
+/// by name, in the order the build takes them, and its build under way or last ended.
 public struct TemplateStatus: Codable, Equatable, Sendable {
+    /// A build: who started it and when, the step it is on (from 1; 0 before the first), and, once it
+    /// ended, when, and why it failed with what to do.
+    public struct Build: Codable, Equatable, Sendable {
+        public let by: String
+        public let startedAt: Date
+        public let endedAt: Date?
+        public let step: Int
+        public let reason: String?
+        public let remedy: [RemedyPart]?
+
+        private enum CodingKeys: String, CodingKey {
+            case by, step, reason, remedy
+            case startedAt = "started_at"
+            case endedAt = "ended_at"
+        }
+    }
+
     public let project: String
     public let state: Open<TemplateState>
+    public let steps: Int
     public let stepNames: [String]
+    public let build: Build?
 
     private enum CodingKeys: String, CodingKey {
-        case project, state
+        case project, state, steps, build
         case stepNames = "step_names"
     }
 }
@@ -158,5 +179,37 @@ extension Endpoint where Response == TemplateStatus {
     /// Builds `project`'s template on the runner, or joins the build under way.
     public static func buildTemplate(project: String) -> Self {
         Self(.post, Route.projects + [project, "template:build"])
+    }
+
+    /// `project`'s template and its build.
+    public static func template(project: String) -> Self {
+        Self(.get, Route.projects + [project, "template"])
+    }
+}
+
+extension SailClient {
+    /// How long after an answer a template being built is read again.
+    public static let templateReadsEvery = Duration.seconds(2)
+
+    /// Reads `project`'s template and hands each answer to `answered`, then, while `answered` says
+    /// so, reads it again ``templateReadsEvery`` after that answer, by `sleep`: one read at a time,
+    /// never two at once; once the task is cancelled, nothing more is read or handed on.
+    public func readTemplate(
+        _ project: String, sleep: @Sendable (Duration) async throws -> Void, answered: @MainActor (Result<TemplateStatus, SailError>) -> Bool
+    ) async {
+        while !Task.isCancelled {
+            let answer: Result<TemplateStatus, SailError>
+            do throws(SailError) {
+                answer = .success(try await send(.template(project: project)))
+            } catch {
+                answer = .failure(error)
+            }
+            guard !Task.isCancelled, await answered(answer) else { return }
+            do {
+                try await sleep(Self.templateReadsEvery)
+            } catch {
+                return
+            }
+        }
     }
 }

@@ -273,7 +273,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// check is asked at once, in a task of its own that neither a hide nor a new load stops, and
     /// says so where every check does.
     private func ends(_ error: SailError) -> Bool {
-        guard let plane = flow.standing?.controlPlane, AccountRefusal(error, at: plane, step: .asking).reason == .ended else { return false }
+        guard flow.standing != nil, AccountRefusal.ends(error) else { return false }
         acting = Task { [flow] in await flow.refresh() }
         return true
     }
