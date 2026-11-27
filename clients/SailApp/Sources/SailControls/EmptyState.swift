@@ -38,7 +38,7 @@ public final class EmptyState: NSView {
         self.mono = mono
         self.title = NSTextField(wrappingLabelWithString: title)
         self.body = NSTextField(wrappingLabelWithString: body)
-        self.line = line.map { NSTextField(labelWithString: $0) }
+        self.line = line.map { NSTextField(wrappingLabelWithString: Self.breakingAtDots($0)) }
         super.init(frame: .zero)
         clipsToBounds = false
         for label in [self.title, self.body] + [self.line].compactMap({ $0 }) {
@@ -66,6 +66,11 @@ public final class EmptyState: NSView {
         line?.attributedStringValue = Self.centred(line?.stringValue ?? "", mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, lineHeight: 1.4)
         actions.forEach { $0.look = look }
         needsDisplay = true
+    }
+
+    /// `line` with its parts kept whole: too long for one line, it wraps only at a " · ".
+    private static func breakingAtDots(_ line: String) -> String {
+        line.components(separatedBy: " · ").map { $0.replacingOccurrences(of: " ", with: "\u{00A0}") }.joined(separator: " · ")
     }
 
     static func centred(_ text: String, _ font: NSFont, _ ink: Tint, lineHeight: Double, tracking: Double = 0) -> NSAttributedString {

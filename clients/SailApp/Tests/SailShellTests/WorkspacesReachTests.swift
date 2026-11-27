@@ -152,11 +152,17 @@ import Testing
                 let none = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [], "total": 0, "schema_version": 1}"#.utf8))
                 let (view, window) = try await WorkspacesReachTests.shown(RecordedServer([none]), width: width, panel: panel, saying: "No project is open")
                 defer { window.orderOut(nil) }
-                let faults = WorkspacesReachTests.outOfReach(in: view)
-                view.person = WorkspacesModel.Person(handle: "ana", admin: true, confirmed: true, controlPlane: "127.0.0.1", creates: true)
-                let offered = await RunnerTabTests.until { view.text.contains("Create your first project") }
-                guard offered else { return faults + ["never offered Create Project: \(view.text)"] }
-                return faults + WorkspacesReachTests.outOfReach(in: view)
+                var faults = WorkspacesReachTests.outOfReach(in: view)
+                let host = WorkspacesScrollTests.longHost
+                for creates in [false, true] {
+                    view.person = WorkspacesModel.Person(handle: "ana", admin: creates, confirmed: true, controlPlane: "https://\(host)", creates: creates)
+                    view.shown()
+                    let words = creates ? "Create your first project" : "No project is open"
+                    let said = await RunnerTabTests.until { !view.busy && view.text.contains(words) && view.text.contains(host) }
+                    guard said else { return faults + ["never said \(words) at \(host): \(view.text)"] }
+                    faults += WorkspacesReachTests.outOfReach(in: view) + WorkspacesReachTests.cut(naming: host, in: view)
+                }
+                return faults
             case .unreachable:
                 let (view, window) = try await WorkspacesReachTests.shown(RecordedServer([]), width: width, panel: panel, saying: "did not answer")
                 defer { window.orderOut(nil) }
@@ -264,6 +270,19 @@ import Testing
             guard case let .item(item) = entry else { return nil }
             return item.id
         }
+    }
+
+    /// The line in `root` naming `host`, where it does not show whole: a part between its " · "
+    /// wider than the line, or the line shorter than its words at its width.
+    static func cut(naming host: String, in root: NSView) -> [String] {
+        guard let line = LookSwitchTests.views(under: root).compactMap({ $0 as? NSTextField }).first(where: { $0.stringValue.contains(host) && $0.stringValue.contains(" · ") && !$0.isHiddenOrHasHiddenAncestor }),
+              let cell = line.cell
+        else { return ["no line names \(host)"] }
+        let width = Double(line.bounds.width), text = line.attributedStringValue, ink = text.attributes(at: 0, effectiveRange: nil)
+        let widest = line.stringValue.components(separatedBy: " · ").map { Double(NSAttributedString(string: $0, attributes: ink).size().width) }.max() ?? 0
+        let tall = Double(cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 10000)).height)
+        let whole = widest <= width && tall <= Double(line.bounds.height) + 0.5 && (Double(text.size().width) <= width || cell.wraps)
+        return whole ? [] : ["'\(line.stringValue)' (\(text.size().width) pt, its widest part \(widest) pt) is cut in \(line.frame)"]
     }
 
     /// What in `root` a person could see but not reach. A text field's own insides (the field

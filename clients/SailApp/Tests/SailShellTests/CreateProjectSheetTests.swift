@@ -298,19 +298,45 @@ import Testing
         #expect(await RunnerTabTests.until { window.attachedSheet is CreateProjectSheet }, "the panel's + opened no sheet")
     }
 
-    /// A head's action stands before its count, and right to left mirrors it.
+    /// A head's action stands before its count, and right to left mirrors it; a long host yields to
+    /// it, cut to end 8 pt before it, as it yields to the count.
     @Test func aHeadsActionStandsBeforeItsCount() throws {
         var frames: [NSRect] = []
         for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
             let plus = SailButton(icon: .plus, label: "Create Project", kind: .quiet, size: .small, look: .light, target: nil, action: nil)
-            let cell = HeadCell("127.0.0.1:7979", count: 1, icon: .cloud, at: (14, 18), look: .light, mono: try LabelFont(directory: LookTests.fonts), hairline: false, action: plus)
+            let host = WorkspacesScrollTests.longHost
+            let cell = HeadCell(host, count: 1, icon: .cloud, at: (14, 18), look: .light, mono: try LabelFont(directory: LookTests.fonts), hairline: false, action: plus)
             cell.userInterfaceLayoutDirection = direction
             cell.frame = NSRect(x: 0, y: 0, width: 235, height: 30)
             frames.append(plus.alignmentRect(forFrame: plus.frame))
+            let title = cell.titleFrame, room = direction == .rightToLeft ? Double(title.minX) - Double(plus.frame.maxX) : Double(plus.frame.minX) - Double(title.maxX)
+            #expect(room > HeadCell.countGap - 0.5 && cell.fitted.string != host.uppercased(), "\(direction): \(cell.fitted.string) at \(title), the + at \(plus.frame)")
         }
         let ltr = frames[0], rtl = frames[1]
         #expect(ltr.maxX < 235 - 18 - 8 && ltr.minX > 235 / 2 && abs(ltr.midY - 15) < 1, "\(ltr)")
         #expect(abs(rtl.minX - (235 - ltr.maxX)) < 0.5 && abs(rtl.minY - ltr.minY) < 0.5, "right to left at \(rtl), left to right at \(ltr)")
+    }
+
+    /// The head's tooltip and its +'s never show together, and the + takes a click over a cut host.
+    @Test func aHeadsTooltipGivesWayToItsAction() throws {
+        let plus = SailButton(icon: .plus, label: "Create Project", kind: .quiet, size: .small, look: .light, target: nil, action: nil)
+        let cell = HeadCell(WorkspacesScrollTests.longHost, count: 1, icon: .cloud, at: (14, 18), look: .light, mono: try LabelFont(directory: LookTests.fonts), hairline: false, action: plus)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 235, height: 30), styleMask: [.titled], backing: .buffered, defer: false)
+        defer {
+            Tooltip.putAway()
+            window.orderOut(nil)
+        }
+        window.contentView = cell
+        window.orderFront(nil)
+        let own = try #require(plus.tooltip)
+        try #require(cell.tooltip.shows, "the cut host has no tooltip")
+        cell.tooltip.show()
+        own.show()
+        #expect(own.isShown && !cell.tooltip.isShown, "the + said \(own.isShown), the head \(cell.tooltip.isShown)")
+        cell.tooltip.show()
+        #expect(cell.tooltip.isShown && !own.isShown, "the head said \(cell.tooltip.isShown), the + \(own.isShown)")
+        let middle = NSPoint(x: plus.frame.midX, y: plus.frame.midY)
+        #expect(cell.hitTest(cell.convert(middle, to: cell.superview)) === plus, "a click on the + lands on \(String(describing: cell.hitTest(cell.convert(middle, to: cell.superview))))")
     }
 
     /// A project created is listed and chosen before its build is asked, once; a build that got no
