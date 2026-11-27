@@ -958,7 +958,10 @@ class ClientGoldensTest {
 
     private final ManualClock streamClock;
     private final SessionAwareAuth auth;
+
+    /** The same box with nothing more configured: no relying party, and no terminal door. */
     private final HttpServer unconfigured;
+
     private final Map<String, String> pinned = new LinkedHashMap<>();
     private final List<OpenStream> streams = new ArrayList<>();
     private final Map<String, String> ids = new LinkedHashMap<>();
@@ -1111,6 +1114,11 @@ class ClientGoldensTest {
       this.unconfigured = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
       PrivateAttributes.context(
           unconfigured, PASSKEYS, new WebauthnAuthHandler(null, null, auth, null));
+      PrivateAttributes.context(
+          unconfigured,
+          "/",
+          new ApiRouter(
+              operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), Optional.empty()));
       unconfigured.start();
     }
 
@@ -1504,7 +1512,8 @@ class ClientGoldensTest {
         String token,
         Map<String, Object> body)
         throws Exception {
-      var parsed = golden(goldens, name, method, path, body, exchange(method, path, token, body));
+      var parsed =
+          golden(goldens, name, method, path, body, exchange(base(), method, path, token, body));
       assertEquals(code, ((Map<?, ?>) parsed.get("error")).get("code"), name);
     }
 
@@ -1824,7 +1833,8 @@ class ClientGoldensTest {
     /**
      * Records uday's sessions in dock as the listing says them: his terminals, and a chat of his in
      * each state, the newest first: one ended; one whose turn failed (the key refused); one whose
-     * turn ended; one that asks him; one working; one he has said nothing in.
+     * turn ended; one that asks him; one working; one he has said nothing in. Then the same on a
+     * box with no terminal door: his chats alone.
      */
     void recordChatList(Map<String, String> goldens) throws Exception {
       var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
@@ -1845,13 +1855,20 @@ class ClientGoldensTest {
       sentIn(uday, chatIn(uday, 5));
       said(init, Recorded.line("06a-invalid-key", 5), Recorded.line("06a-invalid-key", 6));
       seed("POST", "/v1/sessions/" + chatIn(uday, 6) + ":end", uday, null);
-      record(
+      var listing = "/v1/projects/" + PROJECT + "/workspaces/dock/sessions";
+      record(goldens, "workspace-sessions-chats", "GET", listing, uday, null);
+      golden(
           goldens,
-          "workspace-sessions-chats",
+          "workspace-sessions-no-terminal-door",
           "GET",
-          "/v1/projects/" + PROJECT + "/workspaces/dock/sessions",
-          uday,
-          null);
+          listing,
+          null,
+          exchange(
+              "http://127.0.0.1:" + unconfigured.getAddress().getPort(),
+              "GET",
+              listing,
+              uday,
+              null));
       DateTimeUtils.clock = Clock.fixed(AT, ZoneOffset.UTC);
       logins.remove(idOf("uday"), claude, "work");
       Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
@@ -2084,17 +2101,18 @@ class ClientGoldensTest {
 
     HttpResponse<String> send(String method, String path, String token, Map<String, Object> body)
         throws Exception {
-      var response = exchange(method, path, token, body);
+      var response = exchange(base(), method, path, token, body);
       if (response.statusCode() >= 500) {
         fail(method + " " + path + " answered " + response.body());
       }
       return response;
     }
 
-    private HttpResponse<String> exchange(
-        String method, String path, String token, Map<String, Object> body) throws Exception {
+    private static HttpResponse<String> exchange(
+        String base, String method, String path, String token, Map<String, Object> body)
+        throws Exception {
       var builder =
-          HttpRequest.newBuilder(URI.create(base() + path))
+          HttpRequest.newBuilder(URI.create(base + path))
               .method(
                   method,
                   body == null

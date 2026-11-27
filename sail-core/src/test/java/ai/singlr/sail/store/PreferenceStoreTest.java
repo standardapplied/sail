@@ -8,10 +8,10 @@ package ai.singlr.sail.store;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.sail.harness.SessionForm;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.PreferenceStore.StartsIn;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -53,12 +53,12 @@ class PreferenceStoreTest {
   void aPreferenceIsNoneUntilSetAndTheNextReplacesIt() {
     assertEquals(Optional.empty(), preferences.sessionForm(maya));
 
-    preferences.sessionForm(maya, SessionForm.TERMINAL);
-    preferences.sessionForm(ana, SessionForm.BOTH);
-    preferences.sessionForm(maya, SessionForm.CHAT);
+    preferences.sessionForm(maya, StartsIn.TERMINAL);
+    preferences.sessionForm(ana, StartsIn.BOTH);
+    preferences.sessionForm(maya, StartsIn.CHAT);
 
     assertEquals(
-        List.of(Optional.of(SessionForm.CHAT), Optional.of(SessionForm.BOTH)),
+        List.of(Optional.of(StartsIn.CHAT), Optional.of(StartsIn.BOTH)),
         List.of(preferences.sessionForm(maya), preferences.sessionForm(ana)));
   }
 
@@ -69,7 +69,7 @@ class PreferenceStoreTest {
         () -> db.execute("INSERT INTO preferences (person, session_form) VALUES (?, 'tab')", maya));
     assertThrows(
         RuntimeException.class,
-        () -> preferences.sessionForm("fde_nobody", SessionForm.CHAT),
+        () -> preferences.sessionForm("fde_nobody", StartsIn.CHAT),
         "only a person the roster holds");
     assertEquals(Optional.empty(), preferences.sessionForm(maya));
   }
@@ -77,13 +77,13 @@ class PreferenceStoreTest {
   /** I8: a person's preferences go with them, and no one else's. */
   @Test
   void removingAPersonErasesTheirPreferences() {
-    preferences.sessionForm(maya, SessionForm.TERMINAL);
-    preferences.sessionForm(ana, SessionForm.BOTH);
+    preferences.sessionForm(maya, StartsIn.TERMINAL);
+    preferences.sessionForm(ana, StartsIn.BOTH);
 
     Acting.system(() -> new FdeStore(db).remove(maya));
 
     assertEquals(
-        List.of(0L, Optional.of(SessionForm.BOTH)),
+        List.of(0L, Optional.of(StartsIn.BOTH)),
         List.of(
             db.queryOne(
                     "SELECT COUNT(*) FROM preferences WHERE person = ?",

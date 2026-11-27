@@ -9,10 +9,10 @@ import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resources;
-import ai.singlr.sail.harness.SessionForm;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.PreferenceStore;
+import ai.singlr.sail.store.PreferenceStore.StartsIn;
 import ai.singlr.sail.store.Sqlite;
 import java.util.Map;
 import java.util.Objects;
@@ -29,10 +29,10 @@ public final class PreferenceOperations {
   static final String SESSION_FORM = "session_form";
 
   /** What a person starts a session in until they say otherwise: new people start in a chat. */
-  static final SessionForm STARTS_IN = SessionForm.CHAT;
+  static final StartsIn STARTS_IN = StartsIn.CHAT;
 
   /** A person's preferences, as the API says them. */
-  record Preferences(SessionForm sessionForm) implements Mappable {
+  record Preferences(StartsIn sessionForm) implements Mappable {
     @Override
     public Map<String, Object> toMap() {
       return Map.of(SESSION_FORM, sessionForm.wire());
@@ -66,8 +66,8 @@ public final class PreferenceOperations {
     }
     var said =
         body.get(SESSION_FORM) instanceof String word
-            ? SessionForm.of(word)
-            : Optional.<SessionForm>empty();
+            ? StartsIn.of(word)
+            : Optional.<StartsIn>empty();
     var form =
         said.orElseThrow(
             () -> new IllegalArgumentException("session_form is chat, terminal or both."));

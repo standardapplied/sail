@@ -158,7 +158,10 @@ class ChatListingTest {
     assertFalse(bench.read(session, 0).items().isEmpty(), "its log is still read by its id");
   }
 
-  /** L7, I2: only the caller's own chats, never another person's, an admin's view included. */
+  /**
+   * L7, I2: only the caller's own chats in that workspace of that project, never another person's,
+   * an admin's view included.
+   */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aChatIsListedToItsOpenerAloneInItsOwnWorkspace() {
@@ -166,15 +169,20 @@ class ChatListingTest {
     var toms =
         as("tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true)).session();
     var tomId = bench.fdes.byHandle("tom").orElseThrow().id();
-    bench.store.open(chat("toms-in-try", tomId, "try", Instant.parse("2026-11-27T09:00:00Z")));
-    bench.store.open(
-        chat("sams-elsewhere", bench.samId, "pier", Instant.parse("2026-11-27T09:00:00Z")));
+    var at = Instant.parse("2026-11-27T09:00:00Z");
+    bench.store.open(chat("toms-in-try", "acme", tomId, "try", at));
+    bench.store.open(chat("sams-elsewhere", "acme", bench.samId, "pier", at));
+    bench.store.open(chat("sams-in-beta", "beta", bench.samId, "try", at));
 
     assertEquals(List.of(sams), names(listed("sam", "try")));
     assertEquals(List.of(toms), names(listed("tom", "tom")));
     assertEquals(List.of("toms-in-try"), names(listed("tom", "try")));
     assertEquals(List.of(), listed("ada", "try"), "an admin lists none of another's chats");
     assertEquals(List.of(), listed("sam", "tom"));
+    assertEquals(
+        List.of("sams-in-beta"),
+        as("sam", () -> listing.of("beta", "try")).stream().map(ChatListing.Row::name).toList(),
+        "a workspace of the same name in another project lists its own chats alone");
     for (var lane : List.of(Actor.Lane.AGENT, Actor.Lane.CONTAINER)) {
       assertEquals(
           List.of(),
@@ -194,10 +202,11 @@ class ChatListingTest {
     var opened = new ArrayList<String>();
     for (var i = 0; i < ChatListing.MOST + 1; i++) {
       var id = "chat-%03d".formatted(i);
-      bench.store.open(chat(id, bench.samId, "try", at.plusSeconds(i)));
+      bench.store.open(chat(id, "acme", bench.samId, "try", at.plusSeconds(i)));
       opened.add(id);
     }
-    bench.store.open(chat("chat-tie", bench.samId, "try", at.plusSeconds(ChatListing.MOST)));
+    bench.store.open(
+        chat("chat-tie", "acme", bench.samId, "try", at.plusSeconds(ChatListing.MOST)));
 
     var names = names(listed("sam", "try"));
 
@@ -299,11 +308,12 @@ class ChatListingTest {
         name, true, 0, "", "sam", List.of(), PtyMessage.Agent.NONE, at, null);
   }
 
-  private static ChatStore.Chat chat(String id, String opener, String workspace, Instant at) {
+  private static ChatStore.Chat chat(
+      String id, String project, String opener, String workspace, Instant at) {
     return new ChatStore.Chat(
         id,
         opener,
-        "acme",
+        project,
         workspace,
         "claude-code",
         "default",

@@ -13,19 +13,24 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.store.ProjectStore;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * What the agents route says of each harness's forms and chat, read from {@link Harness#chat}, the
  * seam a chat's open reads too; and the one sign-in switch, {@link HarnessChat#signsInInside},
- * turned off through a stand-in of Claude Code's chat.
+ * turned off through a stand-in of Claude Code's chat, at an open and at each start of a chat's
+ * process.
  */
 @Timeout(value = 60, unit = TimeUnit.SECONDS)
 class ChatFormsTest {
@@ -96,6 +101,42 @@ class ChatFormsTest {
         CLAUDE.chat().orElseThrow().modes(),
         ChatLaunch.form(CLAUDE, true).modes(),
         "Claude Code's own chat signs in inside");
+  }
+
+  /**
+   * The switch holds at each start of a chat's process, not at its open alone: a chat opened signed
+   * in inside is not started on that sign-in once the switch is off, refused in the open's words,
+   * and nothing starts.
+   */
+  @Test
+  void aChatOpenedInsideIsNotStartedInsideOnceTheSwitchIsOff(@TempDir Path dir) {
+    try (var bench = new ChatBench(dir)) {
+      var session =
+          ChatBench.as("tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true))
+              .session();
+      var chat = bench.store.find(session).orElseThrow();
+      var switchedOff =
+          new ChatLaunch(
+              bench.door,
+              bench.fdes,
+              ProjectReader.ofCatalog(new ProjectStore(bench.db)),
+              bench.processes,
+              bench.processes.container(),
+              TestAuth.roles(bench.db),
+              name -> signingInOutside());
+      var launched = new ArrayList<Boolean>();
+
+      var refused =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> ChatBench.as("tom", () -> switchedOff.start(chat, launched::add)));
+
+      assertEquals(
+          "Claude Code's chat takes your stored API key here, not the sign-in made in the workspace.",
+          refused.getMessage());
+      assertEquals(List.of(), launched, "no process was about to start");
+      assertEquals(0, bench.processes.starts.size());
+    }
   }
 
   private static List<Object> modeLabels(Map<String, Object> offer) {

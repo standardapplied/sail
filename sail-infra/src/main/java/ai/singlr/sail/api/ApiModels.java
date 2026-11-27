@@ -87,6 +87,9 @@ record WorkspaceSessionsResponse(List<Session> sessions, List<ChatListing.Row> c
     Instant createdAt();
   }
 
+  /** No session listed. */
+  static final WorkspaceSessionsResponse NONE = new WorkspaceSessionsResponse(List.of(), List.of());
+
   /** The listing's order: newest first, then by name. */
   static final Comparator<Listed> NEWEST =
       Comparator.comparing(Listed::createdAt).reversed().thenComparing(Listed::name);

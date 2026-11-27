@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -67,11 +68,13 @@ final class ChatLaunch {
   private final AgentProcess processes;
   private final ShellExec shell;
   private final RoleRule roles;
+  private final Function<String, Harness> harnesses;
 
   /**
    * Admits through {@code doors}, as the FDEs {@code fdes} holds, chats of the projects {@code
-   * definitions} reads, started as {@code processes}; a process left over is asked after through
-   * {@code shell}, and an opener acted as whom {@code roles} says they are.
+   * definitions} reads, with the harness {@code harnesses} names ({@link Harnesses#of}), started as
+   * {@code processes}; a process left over is asked after through {@code shell}, and an opener
+   * acted as whom {@code roles} says they are.
    */
   ChatLaunch(
       HostPty doors,
@@ -79,13 +82,15 @@ final class ChatLaunch {
       ProjectReader definitions,
       AgentProcess processes,
       ShellExec shell,
-      RoleRule roles) {
+      RoleRule roles,
+      Function<String, Harness> harnesses) {
     this.doors = Objects.requireNonNull(doors, "doors");
     this.fdes = Objects.requireNonNull(fdes, "fdes");
     this.definitions = Objects.requireNonNull(definitions, "definitions");
     this.processes = Objects.requireNonNull(processes, "processes");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.roles = Objects.requireNonNull(roles, "roles");
+    this.harnesses = Objects.requireNonNull(harnesses, "harnesses");
   }
 
   /**
@@ -96,7 +101,7 @@ final class ChatLaunch {
    * caller's FDE id, the chat's opener.
    */
   String admit(String project, String workspace, String harness, String mode, boolean inside) {
-    var agent = Harnesses.of(Strings.requireNonBlank(harness, "harness"));
+    var agent = harnesses.apply(Strings.requireNonBlank(harness, "harness"));
     Harness.Mode.named(form(agent, inside).modes(), mode, agent.displayName());
     var person = person();
     act(() -> doors.admitWorkspace(project, workspace, person));
@@ -141,15 +146,16 @@ final class ChatLaunch {
   /**
    * Starts the process for {@code chat}, as its opener: admitted and signed in as a pty agent start
    * is, its workspace entered (started when stopped), resuming the conversation the harness last
-   * named, in the mode it last said. Whatever process its pid file names is halted first ({@link
-   * #halted}), however the last one's client ended, and the start refused while it is not proved
-   * gone: one conversation, one process. {@code launched} is told {@code true} as the process is
-   * about to start, and {@code false} when it then did not, or that {@code true} failed; nothing
-   * after the start can fail it, so a process that started is always held.
+   * named, in the mode it last said, and signed in inside only while its chat form still signs in
+   * inside, as at its open. Whatever process its pid file names is halted first ({@link #halted}),
+   * however the last one's client ended, and the start refused while it is not proved gone: one
+   * conversation, one process. {@code launched} is told {@code true} as the process is about to
+   * start, and {@code false} when it then did not, or that {@code true} failed; nothing after the
+   * start can fail it, so a process that started is always held.
    */
   Started start(ChatStore.Chat chat, Consumer<Boolean> launched) {
-    var harness = Harnesses.of(chat.harness());
-    var form = form(harness);
+    var harness = harnesses.apply(chat.harness());
+    var form = form(harness, chat.inside());
     var person = person();
     var project = chat.project();
     var workspace = chat.workspace();

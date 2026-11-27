@@ -788,12 +788,13 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * host would let the caller's own credential attach to, so a member lists nothing of another
    * person's, and the caller's own chats, an admin's too, in one list. The workspace is looked up
    * first as its list reads it, so a project the caller may not read, or a workspace this runner
-   * does not hold, is not found; and a session made before the workspace's own instance was, in an
-   * earlier one of its name, is not listed. Refused as the ticket route is on a box that offers no
-   * terminal over the network.
+   * does not hold, is not found; and a terminal made before the workspace's own instance was, in an
+   * earlier one of its name, is not listed. On a box that offers no terminal over the network the
+   * listing is the caller's chats alone; with a terminal door, its host's refusal, an unreachable
+   * host's too, refuses the whole answer, since a list without its live terminals would say they
+   * are gone.
    */
   private ApiResponse sessions(Call call) {
-    var tickets = offered();
     var project = call.project();
     var name = call.param("workspace");
     var listed = operations.workspaces(project);
@@ -807,10 +808,14 @@ public final class ApiRouter implements HttpHandler, RouteTable {
                 .findFirst()
                 .orElseThrow(
                     () -> ApiException.of(ErrorCode.NOT_FOUND, Workspaces.absent(project, name)));
-    return ApiResponse.ok(
-        tickets
-            .sessions(ApiAuth.credentialOf(call.exchange()), project, name, row.started())
-            .with(operations.chatListing().of(project, name)));
+    var terminals =
+        terminal
+            .map(
+                door ->
+                    door.sessions(
+                        ApiAuth.credentialOf(call.exchange()), project, name, row.started()))
+            .orElse(WorkspaceSessionsResponse.NONE);
+    return ApiResponse.ok(terminals.with(operations.chatListing().of(project, name)));
   }
 
   /**

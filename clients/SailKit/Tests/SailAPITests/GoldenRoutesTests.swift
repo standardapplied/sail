@@ -208,7 +208,9 @@ func answer<Response>(
 
     /// A workspace's terminal sessions as the runner's host lists them for the caller, newest first:
     /// one live with its keyboard held, one its workspace's stop ended, in the stop's words; another
-    /// person lists nothing of the owner's.
+    /// person lists nothing of the owner's. A chat row is no terminal, so a listing with chats, or
+    /// with chats alone on a box with no terminal door, reads its terminals; a row with no form, as
+    /// an older server lists it, is a terminal.
     @Test func aWorkspacesSessionsAreReadAsListed() throws {
         let sessions = Endpoint.sessions(workspace: "dock", project: "harbor")
         let listed = try sessions.decode(response(try Exchange("workspace-sessions")))
@@ -225,6 +227,10 @@ func answer<Response>(
             ),
         ]))
         #expect(try sessions.decode(response(try Exchange("workspace-sessions-not-theirs"))) == RunnerSessions(sessions: []))
+        let withChats = try sessions.decode(response(try Exchange("workspace-sessions-chats")))
+        #expect(withChats.sessions.map(\.name) == ["app-1f2e3d4c", "app-5a6b7c8d"])
+        #expect(try sessions.decode(response(try Exchange("workspace-sessions-no-terminal-door"))) == RunnerSessions(sessions: []))
+        #expect(try SailJSON.decode(RunnerSessions.self, from: SailJSON.encode(listed), route: "sessions") == listed)
     }
 
     /// What can start in a workspace, each case as the server answers it: its owner signed in, with
@@ -612,7 +618,7 @@ let answersOfRoutesNotYetCalled: Set<String> = [
     "spec-measures", "specs-measures",
     "chat-opened", "chat-message-sent", "chat-items", "chat-message-again", "chat-message-queued",
     "chat-items-after", "chat-ended", "chat-items-ended",
-    "workspace-sessions-chats", "preferences", "preferences-set",
+    "workspace-sessions-chats", "workspace-sessions-no-terminal-door", "preferences", "preferences-set",
 ]
 
 /// The member the golden writer seats in the room.

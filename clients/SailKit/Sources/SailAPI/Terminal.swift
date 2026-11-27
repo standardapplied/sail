@@ -54,6 +54,23 @@ public struct RunnerSessions: Codable, Equatable, Sendable {
         self.sessions = sessions
     }
 
+    /// The listing's terminal rows: a chat row (`form: "chat"`) is not a terminal, so it is left out.
+    public init(from decoder: Decoder) throws {
+        sessions = try decoder.container(keyedBy: CodingKeys.self).decode([Listed].self, forKey: .sessions).compactMap(\.terminal)
+    }
+
+    private enum CodingKeys: String, CodingKey { case sessions }
+
+    private struct Listed: Decodable {
+        let terminal: RunnerSession?
+        private enum Key: String, CodingKey { case form }
+
+        init(from decoder: Decoder) throws {
+            let form = try decoder.container(keyedBy: Key.self).decodeIfPresent(String.self, forKey: .form) ?? "terminal"
+            terminal = form == "terminal" ? try RunnerSession(from: decoder) : nil
+        }
+    }
+
     /// The live sessions `handle` opened, in the listing's order (newest first): what a person's
     /// terminals in a workspace are, for its count, its Stop and Delete questions and its Open.
     public func live(for handle: String) -> [RunnerSession] {

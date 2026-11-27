@@ -8,11 +8,11 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.sail.harness.SessionForm;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.PreferenceStore.StartsIn;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.util.HashMap;
@@ -70,13 +70,13 @@ class PreferenceOperationsTest {
 
     assertEquals(Map.of("session_form", "terminal"), set.toMap());
     assertEquals(
-        List.of(SessionForm.TERMINAL, SessionForm.BOTH, SessionForm.CHAT),
+        List.of(StartsIn.TERMINAL, StartsIn.BOTH, StartsIn.CHAT),
         List.of(
             as("vik", Role.VIEWER, () -> preferences.read()).sessionForm(),
             as("ana", Role.ADMIN, () -> preferences.read()).sessionForm(),
             as("maya", Role.MEMBER, () -> preferences.read()).sessionForm()));
     as("vik", Role.VIEWER, () -> preferences.keep(Map.of("session_form", "chat")));
-    assertEquals(SessionForm.CHAT, as("vik", Role.VIEWER, () -> preferences.read()).sessionForm());
+    assertEquals(StartsIn.CHAT, as("vik", Role.VIEWER, () -> preferences.read()).sessionForm());
   }
 
   /** I5, I9: three fixed words and one field; anything else is refused and nothing kept. */
@@ -107,7 +107,7 @@ class PreferenceOperationsTest {
     assertEquals(
         List.of(value, value, value, value, value, value, "A preference names only session_form."),
         refusals);
-    assertEquals(SessionForm.CHAT, as("maya", Role.MEMBER, () -> preferences.read()).sessionForm());
+    assertEquals(StartsIn.CHAT, as("maya", Role.MEMBER, () -> preferences.read()).sessionForm());
   }
 
   /** I5: no agent and no credential in a container keeps one, in the access table's words. */
@@ -132,7 +132,7 @@ class PreferenceOperationsTest {
             lane.toString());
       }
     }
-    assertEquals(SessionForm.CHAT, as("maya", Role.MEMBER, () -> preferences.read()).sessionForm());
+    assertEquals(StartsIn.CHAT, as("maya", Role.MEMBER, () -> preferences.read()).sessionForm());
   }
 
   /** I9: a credential that acts for no person holds no preference to read or set. */

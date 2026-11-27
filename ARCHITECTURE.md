@@ -4518,8 +4518,11 @@ terminals as above, each `"form": "terminal"`, and the caller's own chats in tha
 (`ChatListing`, which reads `ChatStore` alone), each `{"name", "form": "chat", "live", "state",
 "opener", "agent", "created_at"}`: `name` is the id its chat routes take, `live` is false once it
 ended, and it has no `attached`, `writer` or `command`. The two are one list, newest `created_at`
-first, then by name (`WorkspaceSessionsResponse.NEWEST`); the terminal host is asked first, so its
-refusals refuse the whole answer, never a partial list. A chat is listed to its opener alone, an
+first, then by name (`WorkspaceSessionsResponse.NEWEST`). On a box with no terminal door (no
+`terminal-listen`) the listing is the caller's chats alone, since a chat needs no terminal door;
+with one, its host is asked first, and its refusals, an unreachable host's too, refuse the whole
+answer, never a partial list, because a list that silently left out live terminals would say they
+are gone. A chat is listed to its opener alone, an
 admin included, and to no credential that acts for no person (`Access.attendee`); open ones, and
 ended ones for 10 minutes (`ChatListing.ENDED_KEPT`, as an ended terminal), at most 200, newest
 first; an older one's log is still read by its id. `state` is read from the log alone, so no

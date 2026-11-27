@@ -52,6 +52,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AttentionStore;
@@ -148,7 +149,8 @@ public final class SailOperations implements HostOperations {
                 ProjectReader.ofCatalog(projectStore),
                 chatProcesses,
                 shell,
-                roles()),
+                roles(),
+                Harnesses::of),
             chatTiming);
     this.chatListing = new ChatListing(new ChatStore(db), new FdeStore(db), chatTiming);
     projectSkills = new ProjectSkills(this::projectFiles);
