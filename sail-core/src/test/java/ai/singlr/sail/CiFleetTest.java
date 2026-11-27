@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Child;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -32,7 +33,9 @@ import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * {@code ci/fleet} against stand-ins for its cloud: {@code gcloud} answers only the dry run that
@@ -47,6 +50,7 @@ class CiFleetTest {
   private static final Path SCRIPT = Path.of("..", "ci", "fleet").toAbsolutePath();
   private static final String READS_ITS_INPUT = "cat > \"$3.in\"\n";
   private static final String TIMERS = "apt-daily.timer apt-daily-upgrade.timer";
+  private static final String PROBE_CONTENT = "5f2b0c9e41d7a3b86e0f1c2d3a4b5c6d";
 
   /**
    * A check limit whose timer, the stand-in {@code sleep}, runs out only once the check's remote
@@ -179,6 +183,82 @@ class CiFleetTest {
   void aSpecStoredCutShortFailsTheRowThatWroteIt() throws Exception {
     assertTheRowFails(
         "head -c 20", " <<< \"$LOOP_BODY\"", "loop-1 holds a body of 20 characters, of the ");
+  }
+
+  /**
+   * The read-deny row's verdict on what its spec's run wrote, in the shapes probe 3 recorded on
+   * Claude Code 2.1.332: a Read refused by a rule, a {@code cat} of the probe refused by it, the
+   * file read, a prompt nobody could answer, and a model that never tried. Only a rule's refusal,
+   * with the file's content nowhere, passes.
+   */
+  @ParameterizedTest
+  @MethodSource("runLogs")
+  void theReadDenyRowPassesOnlyOnARulesRefusalWithTheContentNowhere(
+      List<String> lines, int exit, String says) throws Exception {
+    Files.writeString(
+        dir.resolve("log.json"), YamlUtil.dumpJson(Map.of("name", "acme", "lines", lines)));
+    remote(
+        READS_ITS_INPUT
+            + """
+            case $2 in
+              *"agent sessions acme --json"*) echo '{"runs": [{"id": "run-1", "spec_id": "readdeny-1"}]}' ;;
+              *"agent logs acme --run run-1 --tail 100000 --json"*) cat "$FLEET_TEST/log.json" ;;
+            esac
+            """);
+
+    var ended =
+        Child.run(
+            shell(
+                "source <(sed '/^case ${1:-} in$/,$d' \"$0\") && read_refused_by_its_rule sourced eng"
+                    + " readdeny-1 "
+                    + PROBE_CONTENT,
+                SCRIPT.toString()));
+
+    assertEquals(exit, ended.exit(), ended.stdout() + ended.stderr());
+    assertEquals(says, ended.stdout().strip());
+  }
+
+  static Stream<Arguments> runLogs() {
+    var asked =
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Which?\"}]}}";
+    var byRule =
+        "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\","
+            + "\"content\":\"<tool_use_error>File is in a directory that is denied by your permission"
+            + " settings.</tool_use_error>\",\"is_error\":true,\"tool_use_id\":\"toolu_1\"}]}}";
+    var catByRule =
+        "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\","
+            + "\"content\":\"Permission to use Bash with command cat /home/dev/.ssh/fleet-read-deny-probe"
+            + " has been denied.\",\"is_error\":true,\"tool_use_id\":\"toolu_2\"}]}}";
+    var read =
+        "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_3\","
+            + "\"type\":\"tool_result\",\"content\":\"1\\t"
+            + PROBE_CONTENT
+            + "\\n2\\t\"}]}}";
+    var unanswerable =
+        "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\","
+            + "\"content\":\"Permission for this tool use was denied. It requires approval, and this"
+            + " session has no approval surface\",\"is_error\":true,\"tool_use_id\":\"toolu_4\"}]}}";
+    return Stream.of(
+        Arguments.of(
+            List.of(asked, byRule),
+            0,
+            "2 log lines; 0 hold the probe file's content; 1 are a permission rule's refusal"),
+        Arguments.of(
+            List.of(asked, catByRule),
+            0,
+            "2 log lines; 0 hold the probe file's content; 1 are a permission rule's refusal"),
+        Arguments.of(
+            List.of(asked, byRule, read),
+            1,
+            "3 log lines; 1 hold the probe file's content; 1 are a permission rule's refusal"),
+        Arguments.of(
+            List.of(asked, unanswerable),
+            1,
+            "2 log lines; 0 hold the probe file's content; 0 are a permission rule's refusal"),
+        Arguments.of(
+            List.of(asked),
+            1,
+            "1 log lines; 0 hold the probe file's content; 0 are a permission rule's refusal"));
   }
 
   /**

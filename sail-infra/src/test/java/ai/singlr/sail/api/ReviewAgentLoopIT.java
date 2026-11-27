@@ -434,7 +434,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     assertTrue(
         exec(workspaceOf(CONTAINER, "auth"), List.of("cat", "/home/dev/.sail/claude-settings.json"))
             .stdout()
-            .contains("Read(/home/dev/.config/gh/**)"),
+            .contains("Read(//home/dev/.config/gh/**)"),
         "the room lane's deny rules name the gh token");
     projectSkillsAreInstalledForBothHarnesses();
     assertTrue(

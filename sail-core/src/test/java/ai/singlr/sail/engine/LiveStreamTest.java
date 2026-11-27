@@ -7,11 +7,13 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.engine.LiveStream.ToolCall;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -199,12 +201,7 @@ class LiveStreamTest {
    */
   @Test
   void followUpsWrittenMidTurnAreAnsweredInOneLaterTurn() throws IOException {
-    String recorded;
-    try (var in =
-        LiveStreamTest.class.getResourceAsStream("claude-code-live-follow-ups-queued.jsonl")) {
-      recorded = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-    }
-    var steps = recorded.lines().map(LiveStream::read).toList();
+    var steps = recorded("claude-code-live-follow-ups-queued.jsonl").map(LiveStream::read).toList();
 
     var turns = steps.stream().filter(step -> step instanceof Step.Init).count();
     var results =
@@ -214,5 +211,65 @@ class LiveStreamTest {
     assertEquals(
         true, results.getFirst().text().endsWith("ALPHA-DONE"), "the first is answered whole");
     assertEquals("BRAVO", results.getLast().text());
+  }
+
+  /**
+   * Cut from probe 3's recordings on Claude Code 2.1.332, three one-turn sessions in the live
+   * member's streaming mode, each asked to read {@code ~/.ssh/probe-secret.txt} once: with Sail's
+   * {@code //} deny rules in the full lane ({@code --dangerously-skip-permissions}), a Read refused
+   * by the rule ({@code 03b-full-dbl-ssh-Read}), which writes no {@code system/permission_denied}
+   * line, only an {@code is_error} tool result, and a {@code cat} refused by the same rule ({@code
+   * 03b-full-dbl-ssh-cat}), which writes one first; and in the read-only lane with the single-slash
+   * rules a release before wrote, a Read refused only because nobody can answer a prompt ({@code
+   * 03c-ro-single-ssh-Read}), which writes one too. Each refusal reads as the call coming back and
+   * its turn ends in the agent's own words, not in error.
+   */
+  @Test
+  void eachRecordedRefusalOfARuleOrAPromptReadsAsItsCallComingBack() throws IOException {
+    var lines = recorded("claude-code-live-refusals.jsonl").toList();
+    var steps =
+        lines.stream()
+            .map(LiveStream::read)
+            .filter(
+                step ->
+                    step instanceof Step.Init
+                        || step instanceof Step.ToolCalls
+                        || step instanceof Step.ToolResults
+                        || step instanceof Step.Result)
+            .toList();
+    var probe = "/home/dev/.ssh/probe-secret.txt";
+
+    assertEquals(
+        List.of(
+            new Step.Init("49ff6e2d-1095-47c5-a9b1-beb62ec250d3"),
+            new Step.ToolCalls(
+                List.of(new ToolCall("toolu_01ABBt4q2CayEtxGGs4w2ejN", "Read", probe))),
+            new Step.ToolResults(List.of("toolu_01ABBt4q2CayEtxGGs4w2ejN")),
+            new Step.Result(false, null, "refused"),
+            new Step.Init("f3eff3e4-0054-424b-b01c-86b2bfef0077"),
+            new Step.ToolCalls(
+                List.of(new ToolCall("toolu_01G3SHnTanJtnPd7Xmf1MZQP", "Bash", "cat " + probe))),
+            new Step.ToolResults(List.of("toolu_01G3SHnTanJtnPd7Xmf1MZQP")),
+            new Step.Result(false, null, "done"),
+            new Step.Init("aea4d9dd-afe0-4685-8f23-23642aa14a9a"),
+            new Step.ToolCalls(
+                List.of(new ToolCall("toolu_01RRsFyFXe9qk2tuwBpNKyfX", "Read", probe))),
+            new Step.ToolResults(List.of("toolu_01RRsFyFXe9qk2tuwBpNKyfX")),
+            new Step.Result(false, null, "refused")),
+        steps);
+    var denied =
+        lines.stream().filter(line -> line.contains("\"subtype\":\"permission_denied\"")).toList();
+    assertEquals(
+        List.of("toolu_01G3SHnTanJtnPd7Xmf1MZQP", "toolu_01RRsFyFXe9qk2tuwBpNKyfX"),
+        denied.stream().map(line -> YamlUtil.parseMap(line).get("tool_use_id")).toList(),
+        "the cat and the unanswerable prompt say permission_denied; the Read the rule refused does"
+            + " not");
+    denied.forEach(line -> assertEquals(new Step.Other(), LiveStream.read(line)));
+  }
+
+  private static Stream<String> recorded(String name) throws IOException {
+    try (var in = LiveStreamTest.class.getResourceAsStream(name)) {
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8).lines();
+    }
   }
 }

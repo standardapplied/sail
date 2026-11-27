@@ -147,26 +147,29 @@ class HarnessHooksTest {
 
   @Test
   @SuppressWarnings("unchecked")
-  void claudeCodeDeniesReadsOfTheContainerCredentialsAndKeys() {
-    var permissions =
-        (Map<String, Object>)
-            YamlUtil.parseMap(HarnessHooks.render(CLAUDE_CODE)).get("permissions");
-    var deny = (List<String>) permissions.get("deny");
-    assertEquals(
-        List.of(
-            "Read(//var/lib/sail/run/box.credential)",
-            "Read(/home/dev/.ssh/**)",
-            "Read(/home/dev/.git-credentials)",
-            "Read(/home/dev/.config/gh/**)",
-            "Read(/home/dev/.sail/runs/**/launch.env)"),
-        deny,
-        "the room lane's reads are cwd-scoped (Claude auto-approves cat/head/tail/grep only inside"
-            + " the workspace, refusing out-of-tree paths), so the container's secrets are unreadable"
-            + " by default; these Read-denies belt-and-suspenders the top credentials — the box FDE"
-            + " credential, the box SSH identity, the git credential — explicitly on top. Deny"
-            + " outranks allow and --setting-sources is pinned, so no ambient file can out-vote"
-            + " these; a full (YOLO) agent skips them by design. Hermetic isolation stays with the"
-            + " sidecar follow-up.");
+  void claudeCodeDeniesReadsOfTheContainerCredentialsAndKeysInEveryFileItRunsUnder() {
+    var files =
+        Map.of(
+            "the hooks file every run reads",
+            HarnessHooks.render(CLAUDE_CODE),
+            "a live member's file",
+            HarnessHooks.renderLive(CLAUDE_CODE).orElseThrow());
+    files.forEach(
+        (file, json) ->
+            assertEquals(
+                List.of(
+                    "Read(//var/lib/sail/run/box.credential)",
+                    "Read(//home/dev/.ssh/**)",
+                    "Read(//home/dev/.git-credentials)",
+                    "Read(//home/dev/.config/gh/**)",
+                    "Read(//home/dev/.sail/runs/**/launch.env)"),
+                ((Map<String, Object>) YamlUtil.parseMap(json).get("permissions")).get("deny"),
+                file
+                    + ": each rule an absolute path written //, which Claude Code reads from the"
+                    + " root; one leading / is read from the settings file's own folder and"
+                    + " matched nothing (probe 2, 03a and 03f), and the // rules refused Read and"
+                    + " cat of every path in both lanes, --dangerously-skip-permissions included"
+                    + " (probe 3, 03a and 03b)"));
   }
 
   @Test
