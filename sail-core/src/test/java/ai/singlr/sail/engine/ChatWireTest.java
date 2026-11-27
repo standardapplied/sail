@@ -48,8 +48,8 @@ class ChatWireTest {
   @Test
   void sailsOwnEntriesSayTheirFieldsAsAnItemDoes() {
     assertEquals(
-        Map.of("text", "look", "attachments", List.of("shots/red.png"), "queued", true),
-        ChatWire.fields(new ChatWire.Message("look", List.of("shots/red.png"), true)));
+        Map.of("text", "look", "queued", true),
+        ChatWire.fields(new ChatWire.Message("look", true)));
     assertEquals(Map.of("message", 7L), ChatWire.fields(new ChatWire.Delivered(7)));
     assertEquals(
         Map.of("words", "Sail restarted."), ChatWire.fields(new ChatWire.Told("Sail restarted.")));

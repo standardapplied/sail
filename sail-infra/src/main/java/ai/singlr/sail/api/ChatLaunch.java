@@ -38,7 +38,7 @@ import java.util.Objects;
  */
 final class ChatLaunch {
 
-  /** Where a chat's process runs, and the only folder its attachments are read from. */
+  /** Where a chat's process runs. */
   static final String WORKSPACE = ContainerExec.DEV_WORKSPACE;
 
   private static final String CHATS = ContainerExec.DEV_HOME + "/.sail/chats/";

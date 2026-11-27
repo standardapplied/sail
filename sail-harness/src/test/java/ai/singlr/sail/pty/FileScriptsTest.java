@@ -313,39 +313,6 @@ class FileScriptsTest {
         "a path that climbs out is refused once resolved");
   }
 
-  /** A chat's attachment: a file within the home, at most the cap, printed as base64. */
-  @Test
-  void anImageWithinTheHomeIsPrintedWholeAsBase64AndOneOutsideOrTooLargeIsRefused()
-      throws Exception {
-    var red = Files.write(home.resolve("red.png"), new byte[] {(byte) 0x89, 'P', 'N', 'G'});
-    Files.writeString(outside.resolve("secret.png"), "secret");
-    Files.createSymbolicLink(home.resolve("away.png"), outside.resolve("secret.png"));
-
-    var read = image(red, 4);
-
-    assertEquals(List.of(0, "iVBORw=="), read);
-    assertEquals(FileScripts.OUTSIDE_HOME, image(home.resolve("away.png"), 4).getFirst());
-    assertEquals(FileScripts.TOO_LARGE, image(red, 3).getFirst());
-    assertEquals(FileScripts.IS_FOLDER, image(home, 4).getFirst());
-  }
-
-  /**
-   * What {@link FileScripts#IMAGE_COMMAND} answers for {@code path} within the home, at most {@code
-   * cap} bytes: its exit, then what it printed.
-   */
-  private List<Object> image(Path path, long cap) throws Exception {
-    var command = new ArrayList<>(FileScripts.IMAGE_COMMAND);
-    command.addAll(List.of(home.toString(), Long.toString(cap)));
-    var process = new ProcessBuilder(command).start();
-    try (var input = process.getOutputStream()) {
-      input.write((path + "\0").getBytes(java.nio.charset.StandardCharsets.UTF_8));
-    }
-    var printed =
-        new String(
-            process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-    return List.of(process.waitFor(), printed);
-  }
-
   @Test
   void eachRefusalIsItsOwnStatus() throws Exception {
     var locked = Files.createDirectory(home.resolve("build"));

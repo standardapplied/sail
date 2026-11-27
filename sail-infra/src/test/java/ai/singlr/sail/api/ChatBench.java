@@ -41,7 +41,6 @@ import java.util.function.Supplier;
 final class ChatBench implements AutoCloseable {
 
   static final Instant START = Instant.parse("2026-11-27T09:00:00Z");
-  static final String IMAGE = "iVBORw0KGgo=";
 
   /**
    * Each step of an end: a stand-in ends at once when its stdin closes, so this is waited out only
@@ -115,8 +114,7 @@ final class ChatBench implements AutoCloseable {
             .onOk("incus storage list --format json", TestWorkspaces.POOL)
             .onOk(
                 "incus list --format json",
-                "[" + workspace("try", "sam", samId) + ", " + workspace("tom", "tom", tomId) + "]")
-            .onOk("sail-files", IMAGE + "\n");
+                "[" + workspace("try", "sam", samId) + ", " + workspace("tom", "tom", tomId) + "]");
     door =
         new HostLanes.Pty(
             db,
@@ -141,7 +139,6 @@ final class ChatBench implements AutoCloseable {
     return new ChatHost(
         store,
         new ChatLaunch(door, fdes, ProjectReader.ofCatalog(new ProjectStore(db)), processes),
-        new ChatAttachments(incus),
         new ChatTiming(
             clock::instant,
             window -> {
@@ -197,7 +194,7 @@ final class ChatBench implements AutoCloseable {
   }
 
   ChatHost.Sent send(String session, String text) {
-    return as("sam", () -> host.send(session, text, List.of()));
+    return as("sam", () -> host.send(session, text));
   }
 
   ChatHost.Read read(String session, long after) {

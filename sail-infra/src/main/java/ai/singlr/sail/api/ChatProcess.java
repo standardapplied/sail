@@ -17,7 +17,6 @@ import ai.singlr.sail.harness.HarnessChat;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
 
@@ -37,14 +36,8 @@ final class ChatProcess {
   private static final Duration EXIT_GRACE = Duration.ofSeconds(5);
 
   /** What the host does for a process beside driving it. */
+  @FunctionalInterface
   interface Host {
-
-    /**
-     * The images {@code attachments} name, read again for a message handed after it was logged.
-     *
-     * @throws ApiException when one is gone, or no longer readable
-     */
-    List<LiveStream.Image> images(List<String> attachments);
 
     /** {@code process} ended: nothing holds its conversation now. */
     void gone(ChatProcess process);
@@ -181,41 +174,34 @@ final class ChatProcess {
     if (item instanceof ChatItem.TurnEnded) {
       turnOpen = false;
       log.turn(false);
-      handNext(0, List.of());
+      handNext();
     }
   }
 
   /**
    * Logs what the person said, and hands it to the process at once unless a turn is open or an
-   * earlier message still waits, as each turn's end hands the next; {@code images} are its
-   * attachments, read as it was sent.
+   * earlier message still waits, as each turn's end hands the next.
    */
-  synchronized ChatHost.Sent send(
-      String text, List<String> attachments, List<LiveStream.Image> images) {
+  synchronized ChatHost.Sent send(String text) {
     var queued = turnOpen || ending || !log.unhanded().isEmpty();
-    var seq = log.log(new ChatWire.Message(text, attachments, queued));
+    var seq = log.log(new ChatWire.Message(text, queued));
     if (!turnOpen && !ending) {
-      handNext(seq, images);
+      handNext();
     }
     return new ChatHost.Sent(seq, queued);
   }
 
   /**
-   * Hands the oldest message not yet handed to the process: {@code images} when it is {@code
-   * fresh}, the one just sent, else its attachments read again, any no longer readable said and
-   * left out. A process that no longer reads is ended, and the message waits for the next.
+   * Hands the oldest message not yet handed to the process. A process that no longer reads is
+   * ended, and the message waits for the next.
    */
-  private void handNext(long fresh, List<LiveStream.Image> images) {
+  private void handNext() {
     var next = log.unhanded().stream().findFirst();
     if (next.isEmpty()) {
       return;
     }
     var message = YamlUtil.parseJsonLine(next.get().payload(), LiveStream.MAX_LINE_CHARS);
-    var attachments =
-        ((List<?>) message.get("attachments")).stream().map(String.class::cast).toList();
-    var shown = next.get().seq() == fresh ? images : again(attachments);
-    var text = (String) message.get("text");
-    if (!write(LiveStream.userMessage(text, shown.toArray(LiveStream.Image[]::new)))) {
+    if (!write(LiveStream.userMessage((String) message.get("text")))) {
       return;
     }
     log.handed(next.get().seq());
@@ -240,18 +226,6 @@ final class ChatProcess {
           .name("sail-chat-broken-" + session)
           .start(() -> end(timing.grace().afterInt(), null));
       return false;
-    }
-  }
-
-  /**
-   * The images {@code attachments} name, read again; those no longer readable said and left out.
-   */
-  private List<LiveStream.Image> again(List<String> attachments) {
-    try {
-      return host.images(attachments);
-    } catch (ApiException unreadable) {
-      log.log(new ChatWire.Told(unreadable.getMessage() + " The message went without its images."));
-      return List.of();
     }
   }
 

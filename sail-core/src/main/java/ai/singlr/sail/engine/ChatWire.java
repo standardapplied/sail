@@ -35,11 +35,10 @@ public final class ChatWire {
   public sealed interface Own {}
 
   /**
-   * What the person said: {@code text}, with the workspace files at {@code attachments} shown to
-   * the agent; {@code queued} when it was said while a turn was open, so it waits for the turn's
-   * end.
+   * What the person said, {@code text}; {@code queued} when it was said while a turn was open, so
+   * it waits for the turn's end.
    */
-  public record Message(String text, List<String> attachments, boolean queued) implements Own {}
+  public record Message(String text, boolean queued) implements Own {}
 
   /** The person's message logged as {@code message}, which waited for a turn's end, went in. */
   public record Delivered(long message) implements Own {}

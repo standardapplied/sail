@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.store.ChatStore;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -79,7 +78,6 @@ public final class ChatHost implements AutoCloseable {
 
   private final ChatStore store;
   private final ChatLaunch launch;
-  private final ChatAttachments attachments;
   private final ChatTiming timing;
   private final Map<String, ChatProcess> live = new ConcurrentHashMap<>();
   private final Map<String, Object> locks = new ConcurrentHashMap<>();
@@ -87,13 +85,11 @@ public final class ChatHost implements AutoCloseable {
   private final PeriodicPass sweepPass = new PeriodicPass("chats", this::sweep);
 
   /**
-   * The chats {@code store} holds, admitted and started through {@code launch}, their images read
-   * through {@code attachments}, on {@code timing}.
+   * The chats {@code store} holds, admitted and started through {@code launch}, on {@code timing}.
    */
-  ChatHost(ChatStore store, ChatLaunch launch, ChatAttachments attachments, ChatTiming timing) {
+  ChatHost(ChatStore store, ChatLaunch launch, ChatTiming timing) {
     this.store = Objects.requireNonNull(store, "store");
     this.launch = Objects.requireNonNull(launch, "launch");
-    this.attachments = Objects.requireNonNull(attachments, "attachments");
     this.timing = Objects.requireNonNull(timing, "timing");
   }
 
@@ -154,19 +150,17 @@ public final class ChatHost implements AutoCloseable {
   }
 
   /**
-   * Sends {@code text}, with the workspace images {@code paths} names, to the caller's chat {@code
-   * session}: logged, then handed to the process that holds its conversation, started when none
-   * does; held, and said to be, while a turn is open.
+   * Sends {@code text} to the caller's chat {@code session}: logged, then handed to the process
+   * that holds its conversation, started when none does; held, and said to be, while a turn is
+   * open.
    */
-  public Sent send(String session, String text, List<String> paths) {
+  public Sent send(String session, String text) {
     Strings.requireNonBlank(text, "text");
-    ChatAttachments.requireFew(paths);
     var chat = yours(session);
     synchronized (lock(session)) {
       if (store.find(session).map(ChatStore.Chat::ended).orElse(true)) {
         throw ended(chat);
       }
-      var images = attachments.images(chat, paths);
       var process = live.get(session);
       if (process == null || process.over()) {
         process = start(chat);
@@ -178,7 +172,7 @@ public final class ChatHost implements AutoCloseable {
             .start(() -> ended.end(timing.grace().afterInt(), null));
         throw ended(chat);
       }
-      return process.send(text, List.copyOf(paths), images);
+      return process.send(text);
     }
   }
 
@@ -275,17 +269,9 @@ public final class ChatHost implements AutoCloseable {
             started.handle(),
             timing,
             started.maxIdle(),
-            new ChatProcess.Host() {
-              @Override
-              public List<LiveStream.Image> images(List<String> paths) {
-                return attachments.images(chat, paths);
-              }
-
-              @Override
-              public void gone(ChatProcess ended) {
-                live.remove(ended.session(), ended);
-                Thread.ofVirtual().name("sail-chat-withdraw").start(started.withdraw());
-              }
+            ended -> {
+              live.remove(ended.session(), ended);
+              Thread.ofVirtual().name("sail-chat-withdraw").start(started.withdraw());
             });
     live.put(chat.id(), process);
     process.read();

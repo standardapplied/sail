@@ -9,7 +9,6 @@
       "items": [
         {
           "at": "2026-11-11T09:00:00.656Z",
-          "attachments": [],
           "queued": false,
           "seq": 6,
           "text": "again",
@@ -17,7 +16,6 @@
         },
         {
           "at": "2026-11-11T09:00:00.656Z",
-          "attachments": [],
           "queued": true,
           "seq": 7,
           "text": "and this",

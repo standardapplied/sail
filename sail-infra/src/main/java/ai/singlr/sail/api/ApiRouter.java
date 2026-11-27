@@ -827,21 +827,10 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     return ApiResponse.ok(operations.chats().read(call.param("session"), after));
   }
 
-  /** {@code POST /v1/sessions/{id}/chat/messages} with {@code {"text", "attachments"?}}. */
+  /** {@code POST /v1/sessions/{id}/chat/messages} with {@code {"text"}}. */
   private ApiResponse sendChat(Call call) throws IOException {
-    var body = call.body();
-    var attachments = body.getOrDefault("attachments", List.of());
-    if (!(attachments instanceof List<?> paths)
-        || !paths.stream().allMatch(String.class::isInstance)) {
-      throw new IllegalArgumentException("attachments must be a list of paths");
-    }
     return ApiResponse.ok(
-        operations
-            .chats()
-            .send(
-                call.param("session"),
-                text(body, "text"),
-                paths.stream().map(String.class::cast).toList()));
+        operations.chats().send(call.param("session"), text(call.body(), "text")));
   }
 
   /** {@code POST /v1/sessions/{id}:end}: the chat's process ended and the chat marked ended. */

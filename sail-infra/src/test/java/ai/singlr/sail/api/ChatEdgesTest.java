@@ -21,7 +21,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,24 +71,6 @@ class ChatEdgesTest {
   }
 
   @Test
-  void anImageGoneBeforeItsMessageWasHandedIsSaidAndTheMessageGoesWithoutIt() {
-    var session = bench.samsChat();
-    bench.send(session, "first");
-    bench.says(INIT);
-    as("sam", () -> bench.host.send(session, "look", List.of("red.png")));
-    bench.incus.on("sail-files", new ShellExec.Result(20, "", ""));
-
-    var fake = bench.says(ENDS);
-
-    assertEquals(
-        List.of(LiveStream.userMessage("first"), LiveStream.userMessage("look")), fake.written);
-    assertEquals(
-        "Attachment red.png is not a file Sail may read in workspace try. The message went"
-            + " without its images.",
-        bench.items(session).get(4).get("words"));
-  }
-
-  @Test
   void textWhoseWindowClosesWithNoLineAfterItIsLoggedOnItsOwn() throws Exception {
     bench.windowsWait();
     var session = bench.samsChat();
@@ -135,7 +116,7 @@ class ChatEdgesTest {
     var patient = Duration.ofMinutes(5);
     var host = bench.restarted(new ProcessEnd.Grace(patient, patient, patient, patient));
     var session = bench.samsChat();
-    as("sam", () -> host.send(session, "hi", List.of()));
+    as("sam", () -> host.send(session, "hi"));
     var fake = bench.says(INIT, ENDS);
     fake.onClose(() -> {});
     var ending = Thread.ofVirtual().start(host::close);
@@ -163,7 +144,7 @@ class ChatEdgesTest {
     var patient = Duration.ofMinutes(5);
     var host = bench.restarted(new ProcessEnd.Grace(patient, patient, patient, patient));
     var session = bench.samsChat();
-    as("sam", () -> host.send(session, "hi", List.of()));
+    as("sam", () -> host.send(session, "hi"));
     var fake = bench.says(INIT, ENDS);
 
     host.close();
@@ -213,80 +194,6 @@ class ChatEdgesTest {
     var unanswered = assertThrows(ApiException.class, () -> bench.read(session, 0));
 
     assertEquals(List.of("not_found", "container_error"), List.of(gone.code(), unanswered.code()));
-  }
-
-  @Test
-  void anImageTheWorkspaceCannotBeAskedForIsRefusedAsTheContainersFault() {
-    var session = bench.samsChat();
-    bench.incus.onThrow("sail-files", new IOException("incus is down"));
-
-    var refused =
-        assertThrows(
-            ApiException.class,
-            () -> as("sam", () -> bench.host.send(session, "look", List.of("red.png"))));
-
-    assertEquals(
-        List.of("container_error", "Attachment red.png could not be read in workspace try."),
-        List.of(refused.code(), refused.reason()));
-  }
-
-  /** I10: what is no path in the workspace is refused before anything reaches it. */
-  @Test
-  void anAttachmentThatIsNoPathIsRefusedBeforeTheWorkspaceIsAsked() {
-    var session = bench.samsChat();
-    var asked = bench.incus.invocations().size();
-
-    var refused =
-        Stream.of(" ", "a\0b.png", "a".repeat(4097) + ".png")
-            .map(
-                path ->
-                    assertThrows(
-                            IllegalArgumentException.class,
-                            () -> as("sam", () -> bench.host.send(session, "look", List.of(path))))
-                        .getMessage())
-            .distinct()
-            .toList();
-
-    assertEquals(List.of("An attachment is a path in the workspace."), refused);
-    assertEquals(
-        List.of(),
-        bench.incus.invocations().subList(asked, bench.incus.invocations().size()).stream()
-            .filter(command -> command.contains("sail-files"))
-            .toList());
-  }
-
-  /** A read of an attachment cut short by an interrupt keeps the interrupt and says so. */
-  @Test
-  void anAttachmentsReadInterruptedKeepsTheInterrupt() {
-    ShellExec interrupted =
-        new ShellExec() {
-          @Override
-          public Result exec(List<String> command) throws InterruptedException {
-            throw new InterruptedException("stopping");
-          }
-
-          @Override
-          public Result exec(List<String> command, Path workDir, Duration timeout)
-              throws InterruptedException {
-            throw new InterruptedException("stopping");
-          }
-
-          @Override
-          public boolean isDryRun() {
-            return false;
-          }
-        };
-    var chat = bench.store.find(bench.samsChat()).orElseThrow();
-
-    var refused =
-        assertThrows(
-            ApiException.class,
-            () -> new ChatAttachments(interrupted).images(chat, List.of("red.png")));
-
-    assertTrue(Thread.interrupted(), "the interrupt is kept");
-    assertEquals(
-        List.of("container_error", "Attachment red.png could not be read in workspace try."),
-        List.of(refused.code(), refused.reason()));
   }
 
   @Test

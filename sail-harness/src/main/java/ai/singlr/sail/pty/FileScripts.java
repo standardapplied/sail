@@ -18,7 +18,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 
 /**
  * The shell that reads a workspace's files, sent with each {@code incus exec} as the dev user
@@ -30,7 +29,7 @@ import java.util.stream.Stream;
  * {@code stat -L} of the resolved file: device, inode, size, and modification and change times in
  * nanoseconds. Nothing here knows a frame or a connection.
  */
-public final class FileScripts {
+final class FileScripts {
 
   /**
    * The prefix of the temporaries a save puts beside the file it replaces, in its folder: no
@@ -56,7 +55,7 @@ public final class FileScripts {
   static final int NOT_FOUND = 20;
 
   static final int NOT_PERMITTED = 21;
-  public static final int OUTSIDE_HOME = 22;
+  static final int OUTSIDE_HOME = 22;
   static final int IS_FOLDER = 23;
   static final int NOT_A_FOLDER = 24;
   static final int NOT_A_FILE = 25;
@@ -90,7 +89,7 @@ public final class FileScripts {
   static final int BAD_DIGEST = 48;
 
   /** A save over a file larger than a whole read may be, which never has a whole read's digest. */
-  public static final int TOO_LARGE = 49;
+  static final int TOO_LARGE = 49;
 
   /** The changes' and a diff's exit when the workspace has no {@code git}. */
   static final int NO_GIT = 60;
@@ -185,30 +184,6 @@ public final class FileScripts {
           find "$path" -maxdepth 0 -printf '%%y\\0%%Y\\0%%s\\0%%T@\\0%%m\\0%%f\\0' || exit 1
           """
               .formatted(VERSION);
-
-  /**
-   * Prints the file as base64, when it is a file of at most {@code $2} bytes the dev user may read
-   * within the home: a chat's attachment, which the files door wrote there. Refused, by its exit,
-   * as every read is, and {@link #TOO_LARGE} when it is larger.
-   */
-  static final String IMAGE =
-      RESOLVED
-          + """
-          [ -d "$at" ] && exit 23
-          [ -f "$at" ] || exit 25
-          [ -r "$at" ] || exit 21
-          size=$(stat -L --printf '%s' -- "$at") || exit 1
-          [ "$size" -le "$2" ] || exit 49
-          base64 -w 0 -- "$at"
-          """;
-
-  /**
-   * The argv, after the one that enters the container as the dev user, that prints a file as base64
-   * ({@link #IMAGE}), to which a caller adds the home it must be within and the most bytes it may
-   * hold; the file's path goes on its input, then a NUL, never on a command line.
-   */
-  public static final List<String> IMAGE_COMMAND =
-      Stream.concat(SHELL.stream(), Stream.of(IMAGE, "sail-files")).toList();
 
   /**
    * Reads at most {@code $3} bytes of the file from {@code $2}: its version and its size, each

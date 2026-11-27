@@ -592,7 +592,7 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-project-section-repos-same-path",
     "refusal-chat-not-your-workspace", "refusal-chat-no-chat-form", "refusal-chat-mode-not-offered",
     "refusal-chat-inside-invalid", "refusal-chat-not-found", "refusal-chat-invalid-id",
-    "refusal-chat-after-invalid", "refusal-chat-attachments-invalid", "refusal-chat-ended",
+    "refusal-chat-after-invalid", "refusal-chat-ended",
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.

@@ -4398,14 +4398,14 @@ harness has exactly two ways in, its own sign-in or one stored key (`HarnessCont
 later harness is one adapter and no client change. Each refusal is the API's error shape (`code`,
 `message`, `action`, `remedy`).
 
-**A chat** (`ChatHost` over `ChatLaunch`, `ChatAttachments`, `ChatProcess` and `ChatLog`, kept in
+**A chat** (`ChatHost` over `ChatLaunch`, `ChatProcess` and `ChatLog`, kept in
 `ChatStore`) is a session the server holds for a person
 with an agent in their own workspace, with no pty. `POST /v1/projects/{p}/workspaces/{w}/chats`
 `{"harness", "mode", "inside"}` answers `201 {"session"}`, an id from `Ids`; it is admitted as a
 pty `Create` of an agent is, through the same `HostPty.admitWorkspace` and `admitAgent`
 (`AgentStarts`, `RunLogins`), so its refusals are theirs word for word, and only a harness with a
 chat form (`Harness.chat`), in one of its chat `modes` (`Harness.Mode.named`). Nothing starts then.
-`POST /v1/sessions/{id}/chat/messages` `{"text", "attachments"?}` logs the message and answers
+`POST /v1/sessions/{id}/chat/messages` `{"text"}` logs the message and answers
 `{"seq", "queued"}`: with no process holding the chat's conversation, it starts one as an agent
 start is signed in (`admitAgent`, `enterWorkspace`, `handOver` of the login file the launch reads
 and removes, `withdraw` when the process ends), `AgentProcess` over pipes in `~/workspace` with the
@@ -4414,9 +4414,6 @@ the mode it last said (its first chat mode when what it said is no mode's name a
 a message said while a turn is open, or while an earlier one waits, is `queued`, held in the log
 past the chat's `handed` mark, and handed when the turn ends (a `delivered` item names it). At most
 one process holds a chat: a message is sent under the chat's lock, and only a message starts one.
-An attachment is a path the files door wrote in the workspace, read as the dev user by
-`FileScripts.IMAGE_COMMAND` (the path on its input, resolved inside `~/workspace`, a link's target
-included, at most 3,840 KiB, a png, jpeg, gif or webp by name) into the harness's image block.
 `GET /v1/sessions/{id}/chat?after=<seq>` answers `{"items", "ended"}`, each item `{"seq", "at",
 "type", ...its fields}` as `ChatWire` writes a `ChatItem` or Sail's own (`message`, `delivered`,
 `told`), at most 500 after `seq` at once, else as soon as one is logged or 25 seconds pass; it never

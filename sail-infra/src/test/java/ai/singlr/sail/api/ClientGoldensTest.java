@@ -1765,13 +1765,6 @@ class ClientGoldensTest {
       record(goldens, "refusal-chat-invalid-id", "GET", "/v1/sessions/nobody/chat", dana, null);
       record(
           goldens, "refusal-chat-after-invalid", "GET", session + "/chat?after=last", dana, null);
-      record(
-          goldens,
-          "refusal-chat-attachments-invalid",
-          "POST",
-          messages,
-          dana,
-          Map.of("text", "look", "attachments", "shot.png"));
       record(goldens, "chat-ended", "POST", session + ":end", dana, null);
       record(goldens, "chat-items-ended", "GET", session + "/chat?after=10", dana, null);
       record(goldens, "refusal-chat-ended", "POST", messages, dana, Map.of("text", "more"));

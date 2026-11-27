@@ -19,7 +19,6 @@ import ai.singlr.sail.engine.LiveChat;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.Recorded;
 import ai.singlr.sail.engine.SessionLogin;
-import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
@@ -514,7 +513,7 @@ class ChatHostTest {
 
     var cut = restarted.reclaim();
     var again = bench.restarted().reclaim();
-    as("sam", () -> restarted.send(session, "again", List.of()));
+    as("sam", () -> restarted.send(session, "again"));
 
     assertEquals(1, cut);
     assertEquals(
@@ -560,55 +559,6 @@ class ChatHostTest {
     assertEquals(tom.reason(), ada.reason());
     assertEquals("There is no chat " + none + " of yours here.", absent.reason());
     assertTrue(malformed.getMessage().contains("../../etc"), malformed.getMessage());
-  }
-
-  /** I10: an attachment is an image read within the workspace by the files door's rules. */
-  @Test
-  void anAttachmentIsAnImageReadWithinTheWorkspaceItsPathOnTheReadsInput() {
-    var session = bench.samsChat();
-
-    as("sam", () -> bench.host.send(session, "what is this?", List.of("shots/red.png")));
-
-    assertEquals(
-        List.of(
-            LiveStream.userMessage(
-                "what is this?", new LiveStream.Image("image/png", ChatBench.IMAGE))),
-        bench.processes.latest().written);
-    assertTrue(bench.incus.inputs().contains("shots/red.png\0"));
-    assertTrue(
-        bench.incus.invocations().stream().noneMatch(command -> command.contains("red.png")));
-  }
-
-  @Test
-  void anAttachmentOutsideTheWorkspaceTooLargeOrNoImageIsRefusedBeforeAnythingIsLogged() {
-    var session = bench.samsChat();
-    var outside = refusal(session, 22, List.of("../secret.png"));
-    var large = refusal(session, 49, List.of("big.png"));
-    var missing = refusal(session, 20, List.of("gone.png"));
-    var notImage = refusal(session, 0, List.of("notes.txt"));
-    var many = refusal(session, 0, java.util.Collections.nCopies(9, "a.png"));
-
-    assertEquals(
-        List.of(
-            "Attachment ../secret.png is outside workspace try.",
-            "Attachment big.png is larger than 3840 KiB.",
-            "Attachment gone.png is not a file Sail may read in workspace try.",
-            "Attachment notes.txt is not an image: a chat attaches png, jpeg, gif or webp.",
-            "A message attaches at most 8 files."),
-        List.of(outside, large, missing, notImage, many));
-    assertEquals(List.of(), bench.kinds(session));
-  }
-
-  private String refusal(String session, int exit, List<String> attachments) {
-    bench.incus.on("sail-files", new ShellExec.Result(exit, ChatBench.IMAGE, ""));
-    try {
-      as("sam", () -> bench.host.send(session, "look", attachments));
-      throw new AssertionError("not refused: " + attachments);
-    } catch (ApiException refused) {
-      return refused.reason();
-    } catch (IllegalArgumentException refused) {
-      return refused.getMessage();
-    }
   }
 
   /** Sail stopping ends every process; their chats stay open, to resume. */
