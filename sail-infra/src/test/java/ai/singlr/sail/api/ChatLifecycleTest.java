@@ -81,9 +81,9 @@ class ChatLifecycleTest {
     as("sam", () -> restarted.send(session, "again"));
 
     assertEquals(1, cut);
-    assertFalse(bench.container.alive(old.runId), "the process left is gone");
+    assertFalse(bench.processes.container().alive(old.runId), "the process left is gone");
     assertFalse(
-        bench.container.commandsContaining(AgentUnit.chat(session).pidPath()).isEmpty(),
+        bench.processes.container().commandsContaining(AgentUnit.chat(session).pidPath()).isEmpty(),
         "found by its chat's own pid file");
     assertEquals(2, bench.processes.starts.size());
     assertEquals(
@@ -98,13 +98,13 @@ class ChatLifecycleTest {
     var session = bench.samsChat();
     bench.send(session, "hi");
     bench.says(INIT);
-    bench.container.survivesKill(true);
+    bench.processes.container().survivesKill(true);
     var restarted = bench.restarted();
 
     var cut = restarted.reclaim();
     var refused =
         assertThrows(ApiException.class, () -> as("sam", () -> restarted.send(session, "again")));
-    bench.container.survivesKill(false);
+    bench.processes.container().survivesKill(false);
     as("sam", () -> restarted.send(session, "again"));
 
     assertEquals(0, cut, "a turn whose process is not proved gone is not cut yet");
@@ -205,11 +205,11 @@ class ChatLifecycleTest {
   void aPageCutShortNeverSaysTheChatEnded() {
     var session = bench.samsChat();
     for (var i = 0; i < ChatHost.PAGE + 1; i++) {
-      bench.store.append(session, "told", "{\"words\": \"" + i + "\"}", ChatBench.START);
+      bench.store.append(session, "told", "{\"words\": \"" + i + "\"}", bench.clock.instant());
     }
     var large = "{\"words\": \"" + "a".repeat(ChatHost.PAGE_CHARS / 2 + 1) + "\"}";
-    bench.store.append(session, "told", large, ChatBench.START);
-    bench.store.append(session, "told", large, ChatBench.START);
+    bench.store.append(session, "told", large, bench.clock.instant());
+    bench.store.append(session, "told", large, bench.clock.instant());
     as(
         "sam",
         () -> {
@@ -389,7 +389,7 @@ class ChatLifecycleTest {
   void aTurnIsCutOnce() {
     var session = bench.samsChat();
     bench.store.turn(session, true);
-    var log = new ChatLog(bench.store, session, bench.timing(), () -> {});
+    var log = new ChatLog(bench.store, session, ChatTiming.real(), () -> {});
 
     log.cut("first");
     log.cut("second");
@@ -417,14 +417,14 @@ class ChatLifecycleTest {
         new ChatProcess(
             session,
             "Claude Code",
-            new ChatLog(bench.store, session, bench.timing(), () -> {}),
+            new ChatLog(bench.store, session, ChatTiming.real(), () -> {}),
             Harnesses.of("claude-code").chat().orElseThrow(),
             fake,
-            bench.timing(),
+            ChatTiming.real(),
             Duration.ofMinutes(20),
             ended -> {});
     process.read();
-    process.endChat(Duration.ZERO);
+    process.end().endChat(Duration.ZERO);
 
     var refused =
         assertThrows(
@@ -471,8 +471,12 @@ class ChatLifecycleTest {
 
     assertEquals(
         1,
-        bench.container.commandsContaining("rm -rf -- " + AgentUnit.chatDir(session)).size(),
-        String.valueOf(bench.container.commands()));
+        bench
+            .processes
+            .container()
+            .commandsContaining("rm -rf -- " + AgentUnit.chatDir(session))
+            .size(),
+        String.valueOf(bench.processes.container().commands()));
     assertTrue(bench.read(session, 0).ended());
   }
 
@@ -482,7 +486,7 @@ class ChatLifecycleTest {
   void anItemAsLargeAsAnyIsReadBack() {
     var session = bench.samsChat();
     var words = "a".repeat(ChatStore.MAX_PAYLOAD_CHARS - "{\"words\": \"\"}".length());
-    bench.store.append(session, "told", "{\"words\": \"" + words + "\"}", ChatBench.START);
+    bench.store.append(session, "told", "{\"words\": \"" + words + "\"}", bench.clock.instant());
 
     var read = bench.read(session, 0);
 

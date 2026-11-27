@@ -295,11 +295,12 @@ class ChatHostTest {
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aReadWithNothingNewAnswersEmptyOnceItsBoundPasses() {
     var session = bench.samsChat();
+    var asked = bench.clock.instant();
 
     var read = bench.read(session, 0);
 
     assertEquals(new ChatHost.Read(List.of(), false), read);
-    assertEquals(ChatBench.START.plusSeconds(25), bench.clock.instant(), "the bound is 25 s");
+    assertEquals(asked.plusSeconds(25), bench.clock.instant(), "the bound is 25 s");
     assertEquals(List.of(), bench.processes.starts, "reading never starts a process");
   }
 
@@ -713,7 +714,7 @@ class ChatHostTest {
     bench.processes.onStart(
         fake -> {
           fake.onClose(fake::exitsIfRunning);
-          bench.store.ended(session, ChatBench.START);
+          bench.store.ended(session, bench.clock.instant());
         });
 
     var refused = assertThrows(ApiException.class, () -> bench.send(session, "hi"));

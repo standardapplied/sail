@@ -16,7 +16,6 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
-import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.ChatStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
@@ -42,8 +41,6 @@ import java.util.function.Supplier;
  */
 final class ChatBench implements AutoCloseable {
 
-  static final Instant START = Instant.parse("2026-11-27T09:00:00Z");
-
   /**
    * Each step of an end: a stand-in ends at once when its stdin closes, so this is waited out only
    * by one that does not.
@@ -54,14 +51,17 @@ final class ChatBench implements AutoCloseable {
   final FdeStore fdes;
   final ChatStore store;
   final ScriptedShellExecutor incus;
-  final RoleRule roles;
   final HostLanes.Pty door;
+  private final ChatLaunch launch;
 
-  /** The workspaces' insides, where a chat's process is found by its pid file and signalled. */
-  final FakeContainer container = new FakeContainer("acme");
+  /**
+   * The processes a chat starts, found inside their workspace by their pid file and signalled there
+   * ({@link FakeAgentProcess#container}).
+   */
+  final FakeAgentProcess processes = new FakeAgentProcess(new FakeContainer("acme"));
 
-  final FakeAgentProcess processes = new FakeAgentProcess(container);
-  final ManualClock clock = new ManualClock(START, Duration.ofDays(40));
+  final ManualClock clock =
+      new ManualClock(Instant.parse("2026-11-27T09:00:00Z"), Duration.ofDays(40));
   final ChatHost host;
   final String samId;
 
@@ -122,7 +122,7 @@ final class ChatBench implements AutoCloseable {
             .onOk(
                 "incus list --format json",
                 "[" + workspace("try", "sam", samId) + ", " + workspace("tom", "tom", tomId) + "]");
-    roles = TestAuth.roles(db, new SyncConfig("main", null, "ada", "box"));
+    var roles = TestAuth.roles(db, new SyncConfig("main", null, "ada", "box"));
     door =
         new HostLanes.Pty(
             db,
@@ -133,7 +133,15 @@ final class ChatBench implements AutoCloseable {
             ProjectReader.ofCatalog(new ProjectStore(db)),
             handle -> WorkspaceOwner.onThisBox(fdes, handle, "ada"),
             incus);
-    container.holds("try");
+    launch =
+        new ChatLaunch(
+            door,
+            fdes,
+            ProjectReader.ofCatalog(new ProjectStore(db)),
+            processes,
+            processes.container(),
+            roles);
+    processes.container().holds("try");
     processes.onStart(fake -> fake.onClose(fake::exitsIfRunning));
     host = restarted();
   }
@@ -147,36 +155,26 @@ final class ChatBench implements AutoCloseable {
   ChatHost restarted(ProcessEnd.Grace grace) {
     return new ChatHost(
         store,
-        new ChatLaunch(
-            door, fdes, ProjectReader.ofCatalog(new ProjectStore(db)), processes, container, roles),
-        timing(grace));
-  }
-
-  /** The time a host of this box's chats reads, each step of an end waiting {@link #GRACE}. */
-  ChatTiming timing() {
-    return timing(new ProcessEnd.Grace(GRACE, GRACE, GRACE, GRACE));
-  }
-
-  private ChatTiming timing(ProcessEnd.Grace grace) {
-    return new ChatTiming(
-        clock::instant,
-        window -> {
-          if (!windowsWait) {
-            throw new InterruptedException("the window is the next line's to close");
-          }
-          windows.acquire();
-        },
-        (arrivals, within) -> {
-          if (readsWait) {
-            held.release();
-            arrivals.wait();
-          } else {
-            clock.advance(within);
-          }
-        },
-        Duration.ofSeconds(25),
-        Duration.ofMinutes(5),
-        grace);
+        launch,
+        new ChatTiming(
+            clock::instant,
+            window -> {
+              if (!windowsWait) {
+                throw new InterruptedException("the window is the next line's to close");
+              }
+              windows.acquire();
+            },
+            (arrivals, within) -> {
+              if (readsWait) {
+                held.release();
+                arrivals.wait();
+              } else {
+                clock.advance(within);
+              }
+            },
+            Duration.ofSeconds(25),
+            Duration.ofMinutes(5),
+            grace));
   }
 
   /** How many chats this box holds. */

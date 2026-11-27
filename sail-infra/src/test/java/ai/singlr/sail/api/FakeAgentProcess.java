@@ -99,6 +99,11 @@ final class FakeAgentProcess implements AgentProcess {
     this.container = container;
   }
 
+  /** The container its processes run in, which finds each by its pid file. */
+  FakeContainer container() {
+    return container;
+  }
+
   /** Every start from now on fails with {@code refusal}, as a host with no incus would. */
   void refusing(IOException refusal) {
     this.refusal = refusal;

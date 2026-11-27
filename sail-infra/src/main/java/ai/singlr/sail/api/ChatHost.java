@@ -209,14 +209,14 @@ public final class ChatHost implements AutoCloseable {
         throw ended(chat);
       }
       var process = live.get(session);
-      if (process == null || process.over()) {
+      if (process == null || process.end().over()) {
         process = startProcess(store.find(session).orElseThrow(() -> unknown(session)));
       }
       if (ended(session)) {
         var started = process;
         Thread.ofVirtual()
             .name("sail-chat-ended-" + session)
-            .start(() -> started.endChat(timing.grace().afterInt()));
+            .start(() -> started.end().endChat(timing.grace().afterInt()));
         throw ended(chat);
       }
       return process.send(text, () -> ended(chat));
@@ -245,7 +245,7 @@ public final class ChatHost implements AutoCloseable {
     arrived(session);
     var process = live.get(session);
     if (process != null) {
-      process.endChat(timing.grace().afterInt());
+      process.end().endChat(timing.grace().afterInt());
     } else if (!chat.launched()) {
       launch.forget(chat);
     }
@@ -298,13 +298,15 @@ public final class ChatHost implements AutoCloseable {
 
   private void holdToBounds(ChatProcess process, Instant now) {
     if (store.find(process.session()).isEmpty()) {
-      process.end(timing.grace().afterInt(), null);
+      process.end().end(timing.grace().afterInt(), null);
     } else if (process.overBound(now, timing.requestBound())) {
-      process.end(
-          timing.grace().afterInt(),
-          process.agent()
-              + "'s turn could not be stopped, so Sail ended its process; your next message"
-              + " starts it again.");
+      process
+          .end()
+          .end(
+              timing.grace().afterInt(),
+              process.agent()
+                  + "'s turn could not be stopped, so Sail ended its process; your next message"
+                  + " starts it again.");
     } else if (process.endIfIdle(now)) {
       Thread.ofVirtual().name("sail-chat-idle-" + process.session()).start(process::awaitIdleEnd);
     }
@@ -319,7 +321,8 @@ public final class ChatHost implements AutoCloseable {
     sweepPass.close();
     try (var ending = Executors.newVirtualThreadPerTaskExecutor()) {
       live.values()
-          .forEach(process -> ending.execute(() -> process.end(timing.grace().result(), STOPPED)));
+          .forEach(
+              process -> ending.execute(() -> process.end().end(timing.grace().result(), STOPPED)));
     }
   }
 
@@ -393,7 +396,7 @@ public final class ChatHost implements AutoCloseable {
       if (!live.remove(session, ended)) {
         return;
       }
-      if (ended.known()) {
+      if (ended.end().known()) {
         released(session);
       }
       if (closing) {
