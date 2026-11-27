@@ -7,9 +7,9 @@ import SailWorkbench
 /// A workspace row's New Session popover (`first-impressions-mockup.html`, 3A): what its agents
 /// route answered, in a 388 pt box 4 pt under the row, its trailing edge on the row's ⋯, always
 /// within what shows of the page less 8 pt each side (spanning that where the page is drawn narrow,
-/// as at the least window), and over the row when the window has no room under it. It is placed
-/// once, by the tallest of its kinds in each of their modes, and its top stays there while it is
-/// open; its rows scroll in what that leaves. Every kind is an equal row, the route's harnesses
+/// as at the least window), and over the row when the window has no room under it, else covering the
+/// row whole. It is placed once, by the tallest of its kinds in each of their modes, and its top
+/// stays there while it is open; its rows scroll in what that leaves. Every kind is an equal row, the route's harnesses
 /// in its order then the Shell: a tile, the name, and how it signs in as its Sign in is set, or
 /// the server's few words for why it does not start. The chosen harness's options stand under its
 /// own name: Mode, a pop-up of its modes (one mode shown off, with the server's note), its words
@@ -113,7 +113,8 @@ package final class NewSessionPanel: NSObject {
     /// Opens for `workspace` saying `answer`, under `row` (in `page`'s window, its frame there),
     /// its modes as `memory` remembers them; `anchor`, the row's +, toggles it. Its top is placed by
     /// the tallest of its kinds in each of their modes: hanging under the row where that fits, else
-    /// over the row where that fits, else as high as it needs within the page; never so high that
+    /// over the row where that fits, else covering the row whole, its top at the row's top edge,
+    /// where that stays in the page, else as high as it needs within the page; never so high that
     /// the room its shadow keeps reaches over the screen's menu bar, where AppKit would push the box
     /// down.
     func open(_ answer: Answer, workspace: String, memory: ModeMemory, under row: NSRect, page: NSView, narrow: Bool, anchor: NSView?) {
@@ -132,7 +133,8 @@ package final class NewSessionPanel: NSObject {
         let ceiling = min(Double(area.maxY) - Self.inset, window.screen.map { Double($0.visibleFrame.maxY) - Popover.room } ?? .infinity)
         let under = Double(row.minY) - Self.gap, over = Double(row.maxY) + Self.gap
         lowest = Double(area.minY) + Self.inset
-        top = min(under - tallest >= lowest ? under : over + tallest <= ceiling ? over + tallest : lowest + tallest, ceiling)
+        let covering = Double(row.maxY)
+        top = min(under - tallest >= lowest ? under : over + tallest <= ceiling ? over + tallest : covering - tallest >= lowest && covering <= ceiling ? covering : lowest + tallest, ceiling)
         draw(width: width)
         placed = NSRect(x: x, y: top - view.height, width: width, height: view.height)
         popover.open(over: window, anchor: anchor, at: placed, withKeys: false)

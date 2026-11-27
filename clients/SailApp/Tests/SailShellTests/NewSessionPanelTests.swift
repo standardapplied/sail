@@ -1015,6 +1015,27 @@ import Testing
         #expect(faults.isEmpty, "\(faults.joined(separator: "\n"))")
     }
 
+    /// Where its tallest kind fits neither under its row nor over it (dock in the design's 1024 × 684
+    /// window, with the three kinds of the drive's `a1-new-session`), the panel covers the row whole,
+    /// its top at the row's top edge, so none of the row's actions shows half under it. At the least
+    /// window, where even that leaves the page, it stands as high as the page needs: over the row's
+    /// top edge, the row still whole under it.
+    @Test func withNoRoomUnderOrOverItsRowThePanelCoversItWhole() async throws {
+        for (at, (width, height)) in Self.windows.enumerated() {
+            let (view, window) = try await Self.atTheTop(try Exchange("workspace-agents-dock"), width: width, height: height)
+            defer { window.orderOut(nil) }
+            let panel = try await Self.open("dock", in: view)
+            let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) }), box = panel.popover.frame
+            let page = Self.shown(view.project, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
+            #expect(box.minY < row.minY && page.contains(box), "at \(width) × \(height) the panel \(box) hangs under dock \(row), or leaves the page \(page)")
+            if at == 0 {
+                #expect(near(box.maxY, row.maxY), "at \(width) × \(height) the panel's top \(box.maxY) is not dock's top edge \(row.maxY)")
+            } else {
+                #expect(box.maxY >= row.maxY - 0.5, "at \(width) × \(height) the panel's top \(box.maxY) cuts through dock \(row)")
+            }
+        }
+    }
+
     /// The panel follows its row or closes: the list scrolled, or drawn again with its row gone or
     /// stopped by someone else, it closes, never floating over another row while Start acts on dock.
     @Test func thePanelFollowsItsRowOrCloses() async throws {
