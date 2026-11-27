@@ -4518,16 +4518,18 @@ process or waits on one). Each process holds every request a person can answer (
 keyed by its id under the process's monitor, until it is answered, withdrawn, its turn ends or the
 process ends; an `unreadable` request is never held. `POST /v1/sessions/{id}/chat/requests/{request}`
 `{"decision", "message", "answers"}` (`allow`, `allow_always`, `deny`, `answer`; no other field)
-takes the held step out, logs `answered {request, decision, message?, answers?, by}` and only then
-writes one `control_response` (`LiveReply.reply`), and answers `{"seq"}`: an allow hands back the
+logs `answered {request, decision, message?, answers?, by}`, takes the held step out and only then
+writes one `control_response` (`LiveReply.reply`), and answers `{"seq"}` (an answer whose log write
+fails leaves the step held, so its retry is the one): an allow hands back the
 step's own input, `allow_always` its own `permission_suggestions` exactly and only when its item
 offers an `always`, a denial the person's words untrimmed (at most `CONTENT_CODE_POINTS`, else "The
 person did not allow this."), and an answer one per question by its exact text, labels of its own
 choices joined by `", "` as Claude Code reads them, or the person's own words (`chat-probe5` 02, 03).
 A request this sail's process does not hold is refused from what the log says of it
 (`ChatLog.about`): never asked here, an `unreadable` one included, `404 not_found`; answered,
-`409 request_answered` "You answered this at HH:MM:SS: <decision>."; otherwise, as when its process
-is ending, no longer read or its turn being stopped, `409 request_withdrawn`. Claude Code drops a
+`409 request_answered` "You answered this at HH:MM:SS UTC: <decision>."; otherwise, as when its
+process is ending, no longer read or its turn being stopped, `409 request_withdrawn`, in the words of
+the chat's harness ("<harness> no longer waits for this answer…"). Claude Code drops a
 second answer and one to a request it cancelled without a word (`chat-probe5` 04, 05), so this
 refusal is the person's only signal. A write the process does not take is said in the cut of the
 turn ("…did not get your answer…"), and `ChatLog.open` counts `answered` as closed, so a request is
