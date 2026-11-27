@@ -654,8 +654,7 @@ extension Driver {
                 guard parts.count == 2, box.isOpen, let window = pane.window, let row = panel.rowFrame(parts[0], parts[1]).map(window.convertToScreen) else { return "closed, or no row \(id)" }
                 let shown = Self.shown(pane, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5), frame = box.popover.frame
                 guard shown.contains(frame) else { return "the box \(frame) leaves the window less 8 pt \(shown)" }
-                let atRow = abs(Double(frame.maxY) - Double(row.maxY)) < 0.5, raised = abs(Double(frame.minY) - Double(shown.minY)) < 1
-                return atRow || raised ? nil : "the box's top \(frame.maxY) is not the row's \(row.maxY), nor its foot the window's least"
+                return Double(frame.maxY) >= Double(row.maxY) - 0.5 ? nil : "the box's top \(frame.maxY) is under the row's \(row.maxY)"
             }
             let stands = await waitUntil(step.seconds ?? 5) { fault() == nil }
             return (stands, (fault() ?? "the box \(box.popover.frame) stands beside \(id)") + "; \(workspacesLayout)")

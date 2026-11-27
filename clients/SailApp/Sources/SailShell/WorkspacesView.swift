@@ -170,7 +170,7 @@ public final class WorkspacesView: NSView {
         panel.onOpen = { [weak self] project, name in self?.onOpen(project, name) }
         panel.onNewSession = { [weak self] project, name in
             guard let self, let client else { return }
-            choose(project, row: name)
+            choose(project, row: name, keepingThePanel: true)
             askAgents(name, project: project, client, again: false, inPanel: true)
         }
         panel.onTryAgain = { [weak self] in self?.askAgain(nil) }
@@ -371,13 +371,14 @@ public final class WorkspacesView: NSView {
     }
 
     /// Chooses `name` in the panel: This Mac, its page asking the control plane nothing, or a project,
-    /// its page with workspace `row` chosen (none for the project's own row).
-    private func choose(_ name: String, row: String? = nil) {
+    /// its page with workspace `row` chosen (none for the project's own row). The panel shown over
+    /// the content goes, unless `keepingThePanel` (a row's +, whose New Session opens beside it).
+    private func choose(_ name: String, row: String? = nil, keepingThePanel: Bool = false) {
         let thisMac = name == WorkspacesModel.thisMac
         let shown = thisMac ? model.thisMacChosen : name == model.chosen && !model.thisMacChosen
         guard !shown || (!thisMac && model.chosenRow != row) else { return }
         newSession.close()
-        if overlaid {
+        if overlaid, !keepingThePanel {
             overlaid = false
             arrange()
         }

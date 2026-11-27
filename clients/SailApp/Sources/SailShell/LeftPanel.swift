@@ -277,8 +277,8 @@ package final class LeftPanel: NSView {
         case (inward, .project(let project)):
             if !project.expanded { onToggle(project.name) } else if let first = next(after: id), kinds[first].map(Self.isUnder) == true { list.choose(first) }
             return true
-        case (outward, .project(let project)):
-            if project.expanded { onToggle(project.name) }
+        case (outward, .project(let project)) where project.expanded:
+            onToggle(project.name)
             return true
         case (outward, .workspace(let project, _)), (outward, .others(let project)):
             list.choose(project)

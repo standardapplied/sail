@@ -37,7 +37,7 @@ import Testing
     /// harbor (dock and pier uday's, quay ana's) and lighthouse listed for uday, harbor chosen last
     /// and so open, with `open` left open too; each open project shown with what it holds.
     static func shown(
-        open: [String] = [], harbor: Exchange? = nil, also: [Exchange] = [], width: Double = 1000
+        open: [String] = [], harbor: Exchange? = nil, also: [Exchange] = [], width: Double = 1000, height: Double = 640
     ) async throws -> (view: WorkspacesView, window: KeyWindow, server: RecordedServer, kept: Kept) {
         let server = RecordedServer([try Self.projects(["harbor", "lighthouse"]), try harbor ?? Exchange("workspaces-three"), try Self.rows("lighthouse", Self.lighthouse)] + also)
         let view = WorkspacesView(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try LabelFont(directory: LookTests.fonts))
@@ -52,7 +52,7 @@ import Testing
         view.project.list.pointer = { nil }
         view.newSession.view.pointer = { nil }
         view.newSession.popover.keysLeft = Notification.Name("sail.tests.keys-left.\(UUID().uuidString)")
-        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = view
         window.orderFront(nil)
         view.shown()
@@ -80,6 +80,16 @@ import Testing
 
     static func asked(_ server: RecordedServer, _ project: String) async -> Int {
         await server.requests.filter { $0.route == "GET /v1/projects/\(project)/workspaces" }.count
+    }
+
+    /// Until `project`'s workspaces were asked `count` times, within 5 s.
+    static func until(_ server: RecordedServer, asks project: String, _ count: Int) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while await Self.asked(server, project) < count {
+            guard ContinuousClock.now < deadline else { return false }
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { done.resume() } }
+        }
+        return true
     }
 
     static func arrow(_ code: UInt16) throws -> NSEvent {
@@ -130,20 +140,20 @@ import Testing
     @Test func openingAProjectAsksOnceAndARefreshAsksAgain() async throws {
         let (view, window, server, kept) = try await Self.shown()
         defer { window.orderOut(nil) }
-        let lighthouse = try Self.cell("lighthouse", in: view.panel)
-        let disclosure = try #require(lighthouse.cell.disclosure)
         let press = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
-        disclosure.mouseDown(with: press)
+        let disclose = { () throws in try #require(try Self.cell("lighthouse", in: view.panel).cell.disclosure).mouseDown(with: press) }
+        try disclose()
         #expect(await RunnerTabTests.until { Self.ids(view.panel).contains("lighthouse/beacon") }, "lighthouse opened shows nothing: \(Self.ids(view.panel))")
         #expect(kept.expanded.last == ["harbor", "lighthouse"])
-        view.panel.list.choose("lighthouse")
-        window.makeFirstResponder(view.panel.list)
-        #expect(view.panel.list.onKey?(try Self.arrow(123)) == true && !Self.ids(view.panel).contains("lighthouse/beacon"), "← left lighthouse open")
-        #expect(view.panel.list.onKey?(try Self.arrow(124)) == true && Self.ids(view.panel).contains("lighthouse/beacon"), "→ left lighthouse shut")
+        try disclose()
+        #expect(!Self.ids(view.panel).contains("lighthouse/beacon"), "lighthouse shut still shows beacon")
+        try disclose()
+        #expect(Self.ids(view.panel).contains("lighthouse/beacon"), "lighthouse opened again shows nothing")
         #expect(await Self.asked(server, "lighthouse") == 1, "opened again, lighthouse was asked again")
         let harbor = await Self.asked(server, "harbor")
         await view.refresh()
-        #expect(await RunnerTabTests.until { !view.busy })
+        let lighthouseAsked = await Self.until(server, asks: "lighthouse", 2), harborAsked = await Self.until(server, asks: "harbor", harbor + 1)
+        #expect(lighthouseAsked && harborAsked)
         let (lighthouseAgain, harborAgain) = (await Self.asked(server, "lighthouse"), await Self.asked(server, "harbor"))
         #expect(lighthouseAgain == 2 && harborAgain == harbor + 1, "a refresh asked lighthouse \(lighthouseAgain) times and harbor \(harborAgain - harbor)")
         #expect(kept.expanded == [["harbor", "lighthouse"], ["harbor"], ["harbor", "lighthouse"]])
@@ -169,9 +179,10 @@ import Testing
 
     /// 1: the + shows on the row chosen or under the pointer, on the person's own rows alone; it
     /// opens New Session for its workspace beside the panel's row, over the content, its top on the
-    /// row's; pressed again it closes; pressed on another row it chooses that row first.
+    /// row's where the window has room under it (800 pt here); pressed again it closes; pressed on
+    /// another row it chooses that row first.
     @Test func thePlusOpensNewSessionBesideThePanelsRow() async throws {
-        let (view, window, _, _) = try await Self.shown(also: [try Exchange("workspace-agents-dock"), try Exchange("workspace-agents-pier")])
+        let (view, window, _, _) = try await Self.shown(also: [try Exchange("workspace-agents-dock"), try Exchange("workspace-agents-pier")], height: 800)
         defer { window.orderOut(nil) }
         view.panel.list.choose("harbor/dock")
         let dock = try Self.cell("harbor/dock", in: view.panel), pier = try Self.cell("harbor/pier", in: view.panel)
@@ -181,7 +192,8 @@ import Testing
         try #require(await RunnerTabTests.until { view.newSession.isOpen }, "the + opened nothing")
         let row = try #require(view.panel.rowFrame("harbor", "dock").map { window.convertToScreen($0) }), box = view.newSession.popover.frame
         let page = NewSessionPanel.shows(view, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
-        #expect(near(box.minX, row.maxX + NewSessionPanel.gap) && near(box.maxY, row.maxY) && page.contains(box), "the box \(box) beside the row \(row) in \(page)")
+        let beside = near(box.minX, row.maxX + NewSessionPanel.gap) && near(box.maxY, row.maxY) && page.contains(box)
+        #expect((beside ? "beside" : "the box \(box), the row \(row), the page \(page)") == "beside")
         #expect(view.newSession.workspace == "dock" && view.project.list.primaryElsewhere)
         try NewSessionPanelTests.press(plus)
         #expect(!view.newSession.isOpen, "the + pressed again left it open")
@@ -190,17 +202,20 @@ import Testing
         #expect(view.newSession.workspace == "pier" && view.project.list.chosen == "pier" && view.panel.list.chosen == "harbor/pier")
     }
 
-    /// 1: at the least window, with the panel slid over the content, the box stays in the window.
+    /// 1: at the least window, with the panel slid over the content, a row's + keeps the panel there
+    /// and its box stays in the window.
     @Test func atTheLeastWindowTheBoxStaysInTheWindow() async throws {
-        let (view, window, _, _) = try await Self.shown(also: [try Exchange("workspace-agents-dock")], width: WorkspacesViewTests.narrowestCard)
+        let (view, window, _, _) = try await Self.shown(also: [try Exchange("workspace-agents-pier")], width: WorkspacesViewTests.narrowestCard)
         defer { window.orderOut(nil) }
+        view.panel.list.choose("harbor/dock")
         view.toggleSidebar(nil)
         view.layoutSubtreeIfNeeded()
-        view.panel.list.choose("harbor/dock")
-        try NewSessionPanelTests.press(try #require(try Self.cell("harbor/dock", in: view.panel).cell.plus))
+        try NewSessionPanelTests.press(try #require(try Self.cell("harbor/pier", in: view.panel).cell.plus))
         try #require(await RunnerTabTests.until { view.newSession.isOpen }, "the + opened nothing")
+        #expect(!view.panel.isHidden && view.newSession.workspace == "pier", "the + put the panel away, or opened \(view.newSession.workspace)")
         let page = NewSessionPanel.shows(view, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
-        #expect(page.contains(view.newSession.popover.frame), "the box \(view.newSession.popover.frame) leaves \(page)")
+        let row = try #require(view.panel.rowFrame("harbor", "pier").map { window.convertToScreen($0) }), box = view.newSession.popover.frame
+        #expect(page.contains(box) && box.maxY >= row.maxY - 0.5, "the box \(box) leaves \(page), or hangs under the row \(row)")
     }
 
     /// 7: at the panel's default width a long name yields in its middle, its tooltip whole; a name

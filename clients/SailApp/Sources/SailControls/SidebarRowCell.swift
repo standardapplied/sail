@@ -126,8 +126,8 @@ public final class SidebarRowCell: NSView {
             nameTip.onlyWhenCut = true
             nameTip.attach(to: label, saying: name)
         }
-        let leading: NSView? = tile ?? square
-        let end: NSView? = pill ?? self.plus
+        let leading: NSView? = tile.map { $0 as NSView } ?? square
+        let end: NSView? = pill.map { $0 as NSView } ?? self.plus
         let views: [NSView] = [disclosure, leading, label, end].compactMap { $0 }
         for view in views {
             view.translatesAutoresizingMaskIntoConstraints = false

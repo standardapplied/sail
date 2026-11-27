@@ -383,8 +383,8 @@ struct Step: Decodable {
     var panelHover: String?
     /// The + of the left panel's row of this id clicked; New Session then opens.
     var panelPlus: String?
-    /// New Session stands in the window less 8 pt, its top on the top of the left panel's row of this
-    /// id, or, where it cannot hang from there, its foot on the window's least.
+    /// New Session stands in the window less 8 pt, its top never under the top of the left panel's
+    /// row of this id (on it where the window has room, else as high as the box needs).
     var newSessionBeside: String?
     /// Workspaces is the signed-in person's at this control plane address from now on, the
     /// requests still going where they went: what its host draws, seen with the goldens' answers;
