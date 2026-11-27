@@ -96,6 +96,15 @@ final class ClaudeCodeChat implements HarnessChat {
    * before {@code rm} outside it. "Any folder you let it work in" is its documentation's {@code
    * additionalDirectories}: said so as never to say less than it grants.
    */
+  /**
+   * Yes, the owner's stated default: internal staff may chat on the sign-in each made in their own
+   * workspace. A ruling otherwise changes this line.
+   */
+  @Override
+  public boolean signsInInside() {
+    return true;
+  }
+
   @Override
   public List<Harness.Mode> modes() {
     return List.of(

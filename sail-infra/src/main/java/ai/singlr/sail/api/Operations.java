@@ -22,6 +22,9 @@ public interface Operations extends LocalLaneOperations {
   /** The chats this box holds ({@link ChatHost}). */
   ChatHost chats();
 
+  /** The caller's own chats in a workspace, read from their logs alone ({@link ChatListing}). */
+  ChatListing chatListing();
+
   /**
    * The FDE this box stands for, as the role rule that resolves its credentials reads it: whom
    * operating the box answers to. Null on a box that names none.
@@ -198,6 +201,9 @@ public interface Operations extends LocalLaneOperations {
 
   /** The doors to a person's own passkeys. No agent or container lane reaches them. */
   PasskeyOperations passkeys();
+
+  /** The doors to a person's own preferences. No agent or container lane reaches them. */
+  PreferenceOperations preferences();
 
   /**
    * The measures of the specs {@code filter} lists, done between {@code doneSince} and {@code

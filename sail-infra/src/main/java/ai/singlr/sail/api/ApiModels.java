@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.TemplateBuildService;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.SessionForm;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.ChangeLog;
@@ -37,6 +38,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,6 +46,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Stream;
 
 record HealthResponse(String status) implements Mappable {
   @Override
@@ -70,15 +73,30 @@ record TicketResponse(String ticket, String address, String expiresAt) implement
 }
 
 /**
- * The terminal sessions in one workspace that the caller may attach to: what an app lists so a
- * person comes back to what runs there. {@code writer} is who holds the keyboard, blank for no one.
+ * The sessions in one workspace the caller holds: the terminals they may attach to and their own
+ * chats ({@link ChatListing}), in one list, newest first, then by name. {@code writer} is who holds
+ * a terminal's keyboard, blank for no one.
  */
-record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
+record WorkspaceSessionsResponse(List<Session> sessions, List<ChatListing.Row> chats)
+    implements Mappable {
+
+  /** A session as the listing says it, whatever its form. */
+  interface Listed extends Mappable {
+    String name();
+
+    Instant createdAt();
+  }
+
+  /** The listing's order: newest first, then by name. */
+  static final Comparator<Listed> NEWEST =
+      Comparator.comparing(Listed::createdAt).reversed().thenComparing(Listed::name);
+
   /**
-   * One session: {@code writer} holds its keyboard (blank for no one), {@code command} is what it
-   * runs ({@code ["bash", "-l"]} for the login shell, the harness's own command for an agent, never
-   * what started it), {@code agent} the harness it runs with its name as a person reads it (null
-   * for a command), and {@code endedReason} the host's words for its end, null while it lives.
+   * One terminal session: {@code writer} holds its keyboard (blank for no one), {@code command} is
+   * what it runs ({@code ["bash", "-l"]} for the login shell, the harness's own command for an
+   * agent, never what started it), {@code agent} the harness it runs with its name as a person
+   * reads it (null for a command), and {@code endedReason} the host's words for its end, null while
+   * it lives.
    */
   record Session(
       String name,
@@ -90,7 +108,7 @@ record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
       PtyMessage.Agent agent,
       Instant createdAt,
       String endedReason)
-      implements Mappable {
+      implements Listed {
     static Session of(PtyMessage.SessionInfo info) {
       return new Session(
           info.name(),
@@ -108,6 +126,7 @@ record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
     public Map<String, Object> toMap() {
       var m = new LinkedHashMap<String, Object>();
       m.put("name", name);
+      m.put("form", SessionForm.TERMINAL.wire());
       m.put("live", live);
       m.put("attached", attached);
       m.put("writer", writer);
@@ -117,25 +136,40 @@ record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
           "agent",
           agent.none()
               ? null
-              : Map.of(
-                  "harness",
-                  agent.harness(),
-                  "display",
-                  Harnesses.displayName(agent.harness()),
-                  "mode",
-                  agent.mode(),
-                  "login",
-                  agent.inside() ? "inside" : "stored"));
+              : WorkspaceSessionsResponse.agent(agent.harness(), agent.mode(), agent.inside()));
       m.put("created_at", DateTimeUtils.format(createdAt));
       if (endedReason != null) m.put("ended_reason", endedReason);
       return m;
     }
   }
 
+  /** The terminals listed, with the caller's {@code chats} beside them. */
+  WorkspaceSessionsResponse with(List<ChatListing.Row> chats) {
+    return new WorkspaceSessionsResponse(sessions, chats);
+  }
+
+  /** The agent a session runs: its harness, as a person reads its name, its mode and its login. */
+  static Map<String, Object> agent(String harness, String mode, boolean inside) {
+    return Map.of(
+        "harness",
+        harness,
+        "display",
+        Harnesses.displayName(harness),
+        "mode",
+        mode,
+        "login",
+        inside ? "inside" : "stored");
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
-    m.put("sessions", sessions.stream().map(Session::toMap).toList());
+    m.put(
+        "sessions",
+        Stream.concat(sessions.stream(), chats.stream())
+            .sorted(NEWEST)
+            .map(Listed::toMap)
+            .toList());
     return m;
   }
 }
@@ -2197,7 +2231,9 @@ record AgentOffersResponse(
  * inside it ({@code inside}), its own sign-in ({@code sign_in}) and whether the workspace holds it
  * ({@code signed_in}), said only when that was read ({@code signedIn} null when not); and why it
  * does not start at all ({@code refusal}), with the few words a list row says of it ({@code
- * unavailable}).
+ * unavailable}); and the forms a session of it takes ({@link Harness#forms}), with, when it chats,
+ * its chat's modes, the one a chat starts in, and whether a chat may take its sign-in inside
+ * ({@code chat}), the same {@link Harness#chat} a chat's open reads.
  */
 record AgentOffer(
     Harness harness,
@@ -2211,19 +2247,7 @@ record AgentOffer(
     var m = new LinkedHashMap<String, Object>();
     m.put("harness", harness.yamlName());
     m.put("display", harness.displayName());
-    m.put(
-        "modes",
-        harness.modes().stream()
-            .map(
-                mode -> {
-                  var shown = new LinkedHashMap<String, Object>();
-                  shown.put("mode", mode.name());
-                  shown.put("label", mode.label());
-                  shown.put("about", mode.about());
-                  shown.put("risky", mode.risky());
-                  return shown;
-                })
-            .toList());
+    m.put("modes", modes(harness.modes()));
     m.put("mode_default", harness.modes().getFirst().name());
     harness.modesNote().ifPresent(note -> m.put("note", note));
     if (login != null) {
@@ -2243,7 +2267,32 @@ record AgentOffer(
       m.put("refusal", refusal.why().error().toMap());
       m.put("unavailable", refusal.unavailable());
     }
+    m.put("forms", harness.forms().stream().map(SessionForm::wire).toList());
+    harness
+        .chat()
+        .ifPresent(
+            chat -> {
+              var said = new LinkedHashMap<String, Object>();
+              said.put("modes", modes(chat.modes()));
+              said.put("mode_default", chat.modes().getFirst().name());
+              said.put("inside", inside && chat.signsInInside());
+              m.put("chat", said);
+            });
     return m;
+  }
+
+  private static List<Map<String, Object>> modes(List<Harness.Mode> modes) {
+    return modes.stream()
+        .map(
+            mode -> {
+              var shown = new LinkedHashMap<String, Object>();
+              shown.put("mode", mode.name());
+              shown.put("label", mode.label());
+              shown.put("about", mode.about());
+              shown.put("risky", mode.risky());
+              return (Map<String, Object>) shown;
+            })
+        .toList();
   }
 }
 

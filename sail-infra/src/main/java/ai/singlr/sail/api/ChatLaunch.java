@@ -91,12 +91,13 @@ final class ChatLaunch {
   /**
    * Admits the caller's chat with {@code harness} in {@code mode} in their workspace {@code
    * workspace} of {@code project}, signed in with their stored login or, {@code inside}, the
-   * harness's own there: only a harness with a chat form, in one of its chat modes, and as a pty
-   * agent start of it is admitted. Returns the caller's FDE id, the chat's opener.
+   * harness's own there: only a harness with a chat form, in one of its chat modes, inside only
+   * where its chat signs in inside, and as a pty agent start of it is admitted. Returns the
+   * caller's FDE id, the chat's opener.
    */
   String admit(String project, String workspace, String harness, String mode, boolean inside) {
     var agent = Harnesses.of(Strings.requireNonBlank(harness, "harness"));
-    Harness.Mode.named(form(agent).modes(), mode, agent.displayName());
+    Harness.Mode.named(form(agent, inside).modes(), mode, agent.displayName());
     var person = person();
     act(() -> doors.admitWorkspace(project, workspace, person));
     ask(
@@ -252,6 +253,23 @@ final class ChatLaunch {
             () ->
                 new IllegalArgumentException(
                     harness.displayName() + " has no chat form; start it in a terminal."));
+  }
+
+  /**
+   * {@code harness}'s chat form, for a chat signed in {@code inside} the workspace only when that
+   * form signs in inside ({@link HarnessChat#signsInInside}).
+   *
+   * @throws IllegalArgumentException for a harness with no chat form, or an inside sign-in its chat
+   *     does not take
+   */
+  static HarnessChat form(Harness harness, boolean inside) {
+    var form = form(harness);
+    if (inside && !form.signsInInside()) {
+      throw new IllegalArgumentException(
+          harness.displayName()
+              + "'s chat takes your stored API key here, not the sign-in made in the workspace.");
+    }
+    return form;
   }
 
   private static PtyIdentity.Person person() {

@@ -3750,6 +3750,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no | no |
 | Keep logins | store, replace, choose the default of, list or remove your own harness logins and git tokens | yes | yes | yes | no | no | no |
 | Keep passkeys | list or remove your own passkeys | yes | yes | yes | no | no | no |
+| Keep preferences | read or set your own preferences | yes | yes | yes | no | no | no |
 | Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no | no |
 | Operate the box | sync now; read sync health and bus stats; point the box at another main | owner | owner | yes | no | no | no |
 

@@ -12,7 +12,7 @@ import ai.singlr.sail.pty.PtyMessage;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Instant;
-import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -148,12 +148,10 @@ public final class TerminalTickets {
             .filter(
                 info ->
                     info.live() || since == null || info.createdAtMillis() >= since.toEpochMilli())
-            .sorted(
-                Comparator.comparingLong(PtyMessage.SessionInfo::createdAtMillis)
-                    .reversed()
-                    .thenComparing(PtyMessage.SessionInfo::name))
             .map(WorkspaceSessionsResponse.Session::of)
-            .toList());
+            .sorted(WorkspaceSessionsResponse.NEWEST)
+            .toList(),
+        List.of());
   }
 
   private static ErrorCode code(PtyMessage.TicketRefusal kind) {

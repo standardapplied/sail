@@ -132,6 +132,10 @@ public enum Action {
    * admin removes another person's only on the host.
    */
   KEEP_PASSKEYS("Keep passkeys", "list or remove your own passkeys", "keep", "passkeys"),
+  /**
+   * Keeping one's own preferences on a box: reading or setting them, each door the caller's own.
+   */
+  KEEP_PREFERENCES("Keep preferences", "read or set your own preferences", "keep", "preferences"),
   /** Changing the roster: adding, re-roling, granting, removing, pairing, minting tokens. */
   MANAGE_PEOPLE("Manage people", "add, change role, grant, remove, pair, mint tokens", "manage"),
   /** Acting for a box: a sync round, its sync health and bus stats, the main it points at. */
