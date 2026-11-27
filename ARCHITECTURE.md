@@ -825,10 +825,23 @@ definition or one `--section` in `$EDITOR` as JSON and writes each section that 
 HTTP, `GET /v1/projects/{p}/definition` answers the document with each section's tag,
 `PUT /v1/projects/{p}/definition/{section}` writes `{"value": …}` (null unsets it) over the tag
 its `If-Match` names and answers 412 when the section changed, and `POST /v1/projects`
-creates one, 409 when the name is taken or an instance holds it, its `field_errors` naming
-`name` so a client says it under the name; each is a project not found to a caller whose scope
-does not admit it
-(`ProjectStoreTest.aSectionWriteIsOneRevisionOverTheSectionItsWriterRead`,
+creates one, 409 when the name is taken or an instance holds it and 422 `invalid_request` when
+the project-name rule refuses it, its `field_errors` naming `name` so a client says it under the
+name. A definition that clones two repositories to one path (`app` and `app/` are one), or lists
+one before the repository whose path holds it (`app/web` before `app`; `app` before `app/web` is a
+nest a run branches in by its deepest repository), is refused where it is written, as a port
+claimed twice is (`ProjectDefinition.requireWritable`): at the create and at the section's write
+alike, with 422 and a `field_errors` entry for each such row's `repos[i].path`, the second clone
+never reaching the build. A definition stored or synced before the rule is still read, listed,
+repaired, deleted and synced. A section's write is decided before its value is checked, so one who
+may not write learns nothing of the definition from the refusal. Each is a project not found to a
+caller whose scope does not admit it
+(`ProjectDefinitionTest.twoRepositoriesClonedToOnePathAreReadButRefusedWhereTheyAreWrittenNamingEachRow`,
+`ProjectDefinitionTest.aRepositoryListedBeforeTheOneHoldingItIsRefusedNamingBothRowsAndANestInOrderIsKept`,
+`ProjectStoreTest.aDefinitionStoredWithTwoRepositoriesAtOnePathStaysReadableRepairableDeletableAndSynced`,
+`ProjectDefinitionOperationsTest.aSectionWriteIsDecidedBeforeItsValueIsChecked`,
+`ProjectDefinitionOperationsTest.anInvalidNameAndTwoRepositoriesAtOnePathAreRefusedUnderTheirFields`,
+`ProjectStoreTest.aSectionWriteIsOneRevisionOverTheSectionItsWriterRead`,
 `ProjectStoreTest.aWriteOfSeveralSectionsIsOneRevisionOrNone`,
 `ProjectStoreTest.createRefusesANameTheCatalogHolds`,
 `ProjectDefinitionOperationsTest.aSectionIsWrittenOverTheTagItWasReadAtAndAStaleOneIsRefused`,
@@ -3704,6 +3717,12 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Keep passkeys | list or remove your own passkeys | yes | yes | yes | no | no | no |
 | Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no | no |
 | Operate the box | sync now; read sync health and bus stats; point the box at another main | owner | owner | yes | no | no | no |
+
+`GET /v1/whoami` shows a principal its role, its lane and its `capabilities` (`Whoami`): `read`,
+`write` and `admin` from its role's column, and `build` when its role and lane may build a
+template, `Access.atAll` of the action the template's build route decides, so a client offers a
+build, or a create that ends in one, only to whom the route lets build
+(`AccessTest.whoamiSaysBuildExactlyWhenTheTemplateBuildIsAllowed`).
 
 A person reads the column of their role on every lane they come in by, a push over sync included.
 An agent reads its role's column too (its person's, capped by the lane), and its lane's column

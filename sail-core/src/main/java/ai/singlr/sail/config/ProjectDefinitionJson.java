@@ -12,9 +12,10 @@ import java.util.Map;
 /**
  * The one codec of a {@link ProjectDefinition}: its JSON document, and each of its sections as the
  * JSON value it holds. A definition read is held to each section's own rules; one written ({@link
- * #validated}, {@link #withSection}) is held to the rules across sections too (a port claimed
- * once), so a door writes only what every box can serve, while a sync merge of sections each sound
- * alone is still read.
+ * #validated}, {@link #withSection}) is held to the rules it is written under too ({@link
+ * ProjectDefinition#requireWritable}: a port claimed once, each repository at a path of its own),
+ * so a door writes only what every box can serve and build, while a sync merge of sections each
+ * sound alone, or a definition a release before a rule stored, is still read.
  */
 public final class ProjectDefinitionJson {
 
@@ -32,10 +33,10 @@ public final class ProjectDefinitionJson {
 
   /**
    * {@code definition} as it is once written and read back: checked whole, its sections' rules and
-   * those across sections, refused if not. What every local write holds a definition to.
+   * those it is written under, refused if not. What every local write holds a definition to.
    */
   public static ProjectDefinition validated(ProjectDefinition definition) {
-    return ProjectDefinition.fromMap(definition.toMap()).requirePortsClaimedOnce();
+    return ProjectDefinition.fromMap(definition.toMap()).requireWritable();
   }
 
   /** The JSON value {@code definition} holds in {@code section}, {@code null} when unset. */
@@ -83,7 +84,7 @@ public final class ProjectDefinitionJson {
     } else {
       map.put(section.key(), value);
     }
-    return ProjectDefinition.fromMap(map).requirePortsClaimedOnce();
+    return ProjectDefinition.fromMap(map).requireWritable();
   }
 
   /**

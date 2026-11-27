@@ -14,8 +14,10 @@ import ai.singlr.sail.Main;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.api.FieldError;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.CliOperator;
@@ -170,6 +172,19 @@ class CliCommandTest {
     assertEquals("internal", remedied.code());
     assertEquals("Gone.", remedied.message());
     assertEquals("Make it.", remedied.action());
+  }
+
+  @Test
+  void aJsonRefusalNamesTheFieldsTheApiWouldName() {
+    var refused =
+        CliCommand.refusalOf(
+            new FieldsRefused("Invalid project name.", Map.of("name", "Invalid project name.")));
+
+    assertEquals("invalid_request", refused.code());
+    assertEquals("Invalid project name.", refused.message());
+    assertEquals(List.of(FieldError.of("name", "Invalid project name.")), refused.fieldErrors());
+    assertEquals(
+        "IllegalStateException", CliCommand.refusalOf(new IllegalStateException()).message());
   }
 
   @Test

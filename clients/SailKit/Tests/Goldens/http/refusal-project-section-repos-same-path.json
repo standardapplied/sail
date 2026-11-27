@@ -1,0 +1,38 @@
+{
+  "request": {
+    "body": {
+      "value": [
+        {
+          "path": "app",
+          "url": "https://github.com/harbor/app.git"
+        },
+        {
+          "path": "app",
+          "url": "https://github.com/harbor/site.git"
+        }
+      ]
+    },
+    "method": "PUT",
+    "path": "/v1/projects/marina/definition/repos"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [
+          {
+            "field": "repos[0].path",
+            "message": "More than one repository is cloned to app: give each its own path."
+          },
+          {
+            "field": "repos[1].path",
+            "message": "More than one repository is cloned to app: give each its own path."
+          }
+        ],
+        "message": "More than one repository is cloned to app: give each its own path."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}
