@@ -77,7 +77,7 @@ import Testing
     /// prompt and cursor.
     @Test func theTerminalIsTheFirstImpressionsMockups() {
         #expect(LineIcon.terminal.strokes == [
-            Self.line((5.5, 4.5), (18.5, 4.5)), .arc(.init(18.5, 7), radius: 2.5, from: 270, to: 360),
+            Self.line((5.5, 4.5), (18.5, 4.5)), .arc(.init(18.5, 7), radius: 2.5, from: -90, to: 0),
             Self.line((21, 7), (21, 17)), .arc(.init(18.5, 17), radius: 2.5, from: 0, to: 90),
             Self.line((18.5, 19.5), (5.5, 19.5)), .arc(.init(5.5, 17), radius: 2.5, from: 90, to: 180),
             Self.line((3, 17), (3, 7)), .arc(.init(5.5, 7), radius: 2.5, from: 180, to: 270),

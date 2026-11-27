@@ -2,12 +2,13 @@
 /// with round caps and joins (the ⋯ is three filled dots). Drawn by the app, so every icon a control
 /// shows is the design's, not a system symbol.
 public enum LineIcon: String, CaseIterable, Sendable {
-    case refresh, hammer, plus, more, info, warning, error, box, layers, cloudOff, close, terminal
+    case refresh, hammer, plus, more, info, warning, error, box, layers, cloudOff, close
     /// The welcome's: the control plane's chip, a passkey's Touch ID, a passkey made; New session's chosen row.
     case cloud, fingerprint, check
     /// A folder's disclosure: shut (pointing along the line, mirrored right to left) and open.
     case right, down
-    /// This Mac's: its group's head, its project's tile and a shell, and its page's "not synced".
+    /// This Mac's: its group's head, its project's tile and a shell (New session's Shell tile too),
+    /// and its page's "not synced".
     case laptop, terminal, lock
 
     public static let side = 24.0, width = 1.75
@@ -56,12 +57,6 @@ public enum LineIcon: String, CaseIterable, Sendable {
             return [
                 .arc(Point(6.7, 14.9), radius: 3.61, from: 85.2, to: 265.2), .arc(Point(12.33, 12.23), radius: 6, from: -171.1, to: -21.8),
                 .arc(Point(17, 14.2), radius: 4.3, from: -77.9, to: 87.3), line((17.2, 18.5), (7, 18.5)), line((4, 4), (20, 20)),
-            ]
-        case .terminal:
-            return [
-                line((5.5, 4.5), (18.5, 4.5)), .arc(Point(18.5, 7), radius: 2.5, from: 270, to: 360), line((21, 7), (21, 17)),
-                .arc(Point(18.5, 17), radius: 2.5, from: 0, to: 90), line((18.5, 19.5), (5.5, 19.5)), .arc(Point(5.5, 17), radius: 2.5, from: 90, to: 180),
-                line((3, 17), (3, 7)), .arc(Point(5.5, 7), radius: 2.5, from: 180, to: 270), line((7.5, 9.5), (10.5, 12), (7.5, 14.5)), line((12.5, 15), (16.5, 15)),
             ]
         case .cloud:
             return [
