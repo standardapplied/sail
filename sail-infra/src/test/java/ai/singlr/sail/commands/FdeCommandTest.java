@@ -1528,11 +1528,27 @@ class FdeCommandTest {
       Thread.interrupted();
     }
 
-    assertEquals(
-        "Interrupted while removing ada's key from this box's containers: InterruptedException",
-        refusal);
+    assertEquals("Interrupted while removing ada's key from this box's containers.", refusal);
     assertEquals(List.of(keygen.made.getFirst().blob()), pairedKeys());
     assertEquals(List.of("mast-ada"), tokens().stream().map(TokenStore.TokenInfo::name).toList());
+  }
+
+  @Test
+  void aWorkstationKeyThatIsNoFileIsRefusedWithTheLineEndingAtItsFix() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    Files.delete(workstationKey());
+    Files.createDirectory(workstationKey());
+
+    assertEquals(1, fde("unpair", "ada"));
+
+    assertEquals(
+        "Could not remove "
+            + workstationKey()
+            + ", which may hold ada's key (IOException). Its login is revoked, and its token and"
+            + " record are kept until the key is gone: check that "
+            + workstationKey()
+            + " and its directory are readable and writable by root, then run the command again.",
+        refusal);
   }
 
   @Test

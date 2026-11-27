@@ -463,6 +463,92 @@ class SyncSchedulerTest {
     assertEquals(
         List.of("WARNING Closing the sync health source failed: store already gone"),
         warnings(broken::close));
+
+    var wrapped = scheduler(new QueueExecutor(), rounds::incrementAndGet);
+    wrapped.useHealth(
+        () -> SyncStatus.unattempted("node", "main"),
+        () -> {
+          throw new IllegalStateException(
+              "Failed to close database",
+              new IllegalStateException("Session is acquired by 1 clients"));
+        });
+    assertEquals(
+        List.of(
+            "WARNING Closing the sync health source failed: Failed to close database: Session is"
+                + " acquired by 1 clients"),
+        warnings(wrapped::close),
+        "the warning says every cause, as a failure line does");
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void closeInterruptsADrainWaitingOutItsBackoffAndTheWritesRoundStillRuns() throws Exception {
+    var waiting = new CountDownLatch(1);
+    var never = new CountDownLatch(1);
+    var scheduler =
+        new SyncScheduler(
+            rounds::incrementAndGet,
+            Duration.ZERO,
+            TTL,
+            Executors.newVirtualThreadPerTaskExecutor(),
+            nanos::get,
+            wait -> {
+              waiting.countDown();
+              never.await();
+            });
+    scheduler.useHealth(
+        () ->
+            new SyncStatus(
+                "node",
+                "main",
+                null,
+                "stale",
+                Instant.EPOCH,
+                null,
+                1,
+                "unreachable",
+                Remedy.of("offline"),
+                Instant.EPOCH));
+
+    scheduler.afterWrite();
+    waiting.await();
+    scheduler.close();
+
+    assertEquals(1, rounds.get(), "the write's round ran as the close cut its wait short");
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void closeWaitsForTheTimersRoundAndReturnsOnceItEnds() throws Exception {
+    var inRound = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var ended = new AtomicBoolean();
+    var endedWhenClosed = new AtomicBoolean();
+    var scheduler =
+        new SyncScheduler(
+            () -> {
+              inRound.countDown();
+              awaitIgnoringInterrupts(release);
+              ended.set(true);
+            },
+            DEBOUNCE,
+            TTL);
+    inRound.await();
+
+    var closer =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  scheduler.close();
+                  endedWhenClosed.set(ended.get());
+                });
+    while (closer.getState() == Thread.State.RUNNABLE) {
+      Thread.onSpinWait();
+    }
+    release.countDown();
+    closer.join();
+
+    assertTrue(endedWhenClosed.get(), "the close returned under the timer's round");
   }
 
   @Test

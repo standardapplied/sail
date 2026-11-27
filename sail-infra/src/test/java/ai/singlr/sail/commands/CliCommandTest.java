@@ -476,6 +476,26 @@ class CliCommandTest {
   }
 
   @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aCauseWithNoWordsAddsOnlyATypeTheLineDoesNotAlreadySay() {
+    assertEquals(
+        "Interrupted while removing ada's key from this box's containers.",
+        CliCommand.describe(
+            new IllegalStateException(
+                "Interrupted while removing ada's key from this box's containers.",
+                new InterruptedException())));
+    assertEquals(
+        "Reading the roster failed: InterruptedException",
+        CliCommand.describe(
+            new IllegalStateException("Reading the roster failed", new InterruptedException())));
+    assertEquals(
+        "Reading the roster failed: IOException",
+        CliCommand.describe(
+            new IllegalStateException("Reading the roster failed", new IOException("  "))),
+        "blank words are no words");
+  }
+
+  @Test
   void aCauseWithNoMessageIsNamedByItsType() {
     assertThrows(
         CliCommand.Printed.class,

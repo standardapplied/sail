@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.nio.file.Files;
@@ -501,6 +502,23 @@ class SqliteTest {
   private static void awaitLeavingRunnable(Thread thread) {
     while (thread.getState() == Thread.State.RUNNABLE) {
       Thread.onSpinWait();
+    }
+  }
+
+  @Test
+  void aLibraryThatCannotLoadSaysWhyBeforeItsFix() {
+    try (var arena = Arena.ofConfined()) {
+      var refused =
+          assertThrows(
+              RuntimeException.class, () -> Sqlite.library("libsail-no-such-sqlite.so.0", arena));
+
+      var remedied = assertInstanceOf(Remedied.class, refused);
+      assertEquals(
+          "The SQLite library libsail-no-such-sqlite.so.0 could not be loaded ("
+              + refused.getCause().getMessage()
+              + ").",
+          remedied.reason());
+      assertEquals("On Ubuntu: sudo apt-get install -y libsqlite3-0", remedied.remedy().plain());
     }
   }
 
