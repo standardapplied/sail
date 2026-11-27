@@ -6,6 +6,8 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -452,6 +455,69 @@ class SyncSchedulerTest {
         });
     var failure = assertThrows(IllegalStateException.class, broken::close);
     assertEquals("store already gone", failure.getCause().getMessage());
+  }
+
+  @Test
+  void closeWaitsForTheTimersHealthReadBeforeItClosesTheSource() throws Exception {
+    var reading = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var reads = new AtomicInteger();
+    var inRead = new AtomicBoolean();
+    var closedUnderARead = new AtomicBoolean();
+    var closeFailure = new AtomicReference<Throwable>();
+    var scheduler = new SyncScheduler(rounds::incrementAndGet, DEBOUNCE, TTL);
+    scheduler.useHealth(
+        () -> {
+          if (reads.getAndIncrement() == 0) {
+            inRead.set(true);
+            reading.countDown();
+            awaitIgnoringInterrupts(release);
+            inRead.set(false);
+          }
+          return SyncStatus.unattempted("node", "main");
+        },
+        () -> {
+          if (inRead.get()) {
+            closedUnderARead.set(true);
+            release.countDown();
+            throw new IllegalStateException("Session is acquired by 1 clients");
+          }
+        });
+
+    reading.await();
+    var closer =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  try {
+                    scheduler.close();
+                  } catch (RuntimeException e) {
+                    closeFailure.set(e);
+                  }
+                });
+    while (closer.isAlive() && closer.getState() == Thread.State.RUNNABLE) {
+      Thread.onSpinWait();
+    }
+    release.countDown();
+    closer.join();
+
+    assertFalse(closedUnderARead.get(), "the source closed under the timer's read");
+    assertNull(closeFailure.get(), "close failed after the work was done");
+  }
+
+  private static void awaitIgnoringInterrupts(CountDownLatch latch) {
+    var interrupted = false;
+    while (true) {
+      try {
+        latch.await();
+        break;
+      } catch (InterruptedException e) {
+        interrupted = true;
+      }
+    }
+    if (interrupted) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   @Test
