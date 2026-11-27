@@ -2687,8 +2687,9 @@ class is `LiveMemberTest`'s):
   to (`RunStore.transitionUnstarted`), and a run with one only when its container answers that
   the process is gone. On start, `LiveMembers.reclaim` ends by that rule the live runs reserved
   before this sail started (run ids are time-ordered, so a run this sail reserved as a message
-  landed during start is its own, registered or not); a run whose process it cannot prove gone
-  stays `running` with its reservation, is named on the server's stderr, and is finished by the
+  landed during start is its own, registered or not), signalling a pid only while it names the
+  process the wrapper recorded beside it (`ProcessEnd.halted`, as a chat's); a run whose process
+  it cannot prove gone stays `running` with its reservation, is named on the server's stderr, and is finished by the
   missed-stop reconciler once its container says the process is gone. A prompt is written
   outside the member's lock, so a process that stopped reading its stdin is still read and still
   ended, its stdin closed on a thread of its own while the signals go on; the reader finishes
@@ -2705,6 +2706,7 @@ class is `LiveMemberTest`'s):
   `LiveMemberDisplacementTest.aTurnSilentForTheIdleWindowIsAStall`,
   `LiveMemberLanesTest.aRestartOfSailFinishesTheMembersItLeftAndTheyResume`,
   `LiveMemberLanesTest.aRestartKeepsTheRunOfAMemberItCannotProveGone`,
+  `LiveMemberLanesTest.aRestartNeverSignalsTheProcessTheBoxGaveItsMembersPid`,
   `LiveMemberLanesTest.aRunLeftWithNoProcessRecordedIsReclaimedWithoutAskingItsContainer`,
   `LiveMemberLanesTest.aRunThisSailReservedIsNotOneItReclaims`,
   `LiveMemberLanesTest.aReadOnlyMemberWhoseGuardCannotLookAsItExitsIsStillFinishedAndGone`,
@@ -4421,13 +4423,23 @@ just before its start until its exit is known. Only a send, or the delivery of a
 starts a process, under the chat's lock; a chat still marked `launched` that no process of this
 sail holds has its process halted first through that pid file (`ProcessEnd.halted`, which a live
 member left from before a restart is halted by too: signalled, and gone only on the container's
-answer) and nothing starts until it is proved gone (`409 agent_already_running` meanwhile). However
-a process's reading stops, an end of output or a failure, the process is ended (stdin closed, INT,
-TERM) unless its exit is known. At sail's start, before the API serves anything,
-`ChatHost.start` halts every process left over, cuts the turn each held (`told` why, rows closed
-as unread, every request `withdrawn`, `interrupted`), and delivers each chat's waiting messages
-with a process started as its opener (admitted as any start; a refusal is said in its words and
-the messages keep waiting). A process left over that its workspace does not answer for is asked
+answer) and nothing starts until it is proved gone (`409 agent_already_running` meanwhile). A pid
+is signalled only while it names the process the wrapper started: the wrapper records the
+process's start (`/proc/<pid>/stat`) beside its pid (`AgentUnit.startPath`) before it writes the
+pid, and the halt compares it with the process now at that pid before any signal
+(`AgentSession.killStarted`, by `AgentSession.startedAt`, the rule a run's stop uses too); a pid
+the box has since given another process, after a restart of the box or the workspace, or whose
+start cannot be read on either side, is never signalled, and the process the file was written for
+is gone (its pid file cleaned). However a process's reading stops, an end of output or a failure,
+it takes no message from then on (one sent waits for the next process) and is ended (stdin
+closed, INT, TERM) unless its exit is known. An end marks its chat ended under the chat's lock, so
+a process starting for it is found and ended; it waits for that end outside the lock. At sail's
+start, before the API serves anything, `ChatHost.start` halts every process left over and cuts
+the turn each held (`told` why, rows closed as unread, every request `withdrawn`, `interrupted`);
+once it serves, `ChatHost.deliverWaiting` delivers each chat's waiting messages with a process
+started as its opener, each chat on a thread of its own (admitted as any start; a refusal is said
+in its words and the messages keep waiting). Both are safe at any time, since a chat's process is
+looked for and started under its lock. A process left over that its workspace does not answer for is asked
 again each sweep and before the chat's next start. When a process ends and messages wait, the next
 is started for them if the ended one took any; one that took none says so. A turn's end and a cut
 are each one write with the turn closed, so a crash never logs either twice; a turn's end closes
