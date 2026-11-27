@@ -30,9 +30,11 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 
@@ -398,6 +400,38 @@ class CliCommandTest {
                 "Failed to prepare the agent session.",
                 ApiException.of(ErrorCode.COMMAND_FAILED, new IOException()))),
         "a wrapper with no message is named by its type");
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void anyFailureThatWrapsItsCauseSaysItsCauseHereAndAtTheTopLevelHandler() {
+    var failure =
+        new IllegalStateException(
+            "Closing the sync health source failed",
+            new IllegalStateException("Session is acquired by 1 clients"));
+    var line = new CommandLine(new TestCommand());
+    var err = new StringWriter();
+    line.setErr(new PrintWriter(err));
+
+    var printed =
+        assertThrows(
+            CliCommand.Printed.class,
+            () ->
+                CliCommand.run(
+                    () -> {
+                      throw failure;
+                    }));
+    assertEquals(1, Main.report(failure, line));
+
+    assertEquals(
+        "Closing the sync health source failed: Session is acquired by 1 clients",
+        printed.getMessage());
+    assertEquals(
+        "  ✗ Closing the sync health source failed: Session is acquired by 1 clients\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+    assertEquals(
+        "Closing the sync health source failed: Session is acquired by 1 clients%n".formatted(),
+        err.toString());
   }
 
   @Test

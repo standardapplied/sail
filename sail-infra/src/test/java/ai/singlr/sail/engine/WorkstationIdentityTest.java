@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
@@ -18,9 +19,31 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class WorkstationIdentityTest {
+
+  /**
+   * {@code /proc/self/mem} is a regular file whose read at offset 0 fails with EIO, so its failure
+   * says words the refusal does not already hold.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aKeyFileThatFailsToReadNamesItsCauseBeforeItsFixAndEndsAtIt() {
+    var unreadable = Path.of("/proc/self/mem");
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class, () -> WorkstationIdentity.registeredAt(unreadable));
+
+    var remedied = assertInstanceOf(Remedied.class, refused);
+    assertEquals(
+        "This box's workstation key (" + unreadable + ") could not be read (Input/output error).",
+        remedied.reason());
+    assertEquals("Check that the account sail runs as can read it.", remedied.remedy().plain());
+  }
 
   private static final String ED25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcK sumesh@mac";
 

@@ -6,21 +6,36 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.engine.FileMutex;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -234,7 +249,8 @@ class SyncSchedulerTest {
   }
 
   @Test
-  void anInterruptedBackoffStillFlushesThePendingWrite() {
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void anInterruptedBackoffRunsNoRoundAndKeepsTheInterrupt() {
     var executor = new QueueExecutor();
     var scheduler =
         scheduler(
@@ -244,12 +260,15 @@ class SyncSchedulerTest {
               throw new IllegalStateException("offline");
             },
             duration -> {
-              throw new InterruptedException("shutdown");
+              if (!duration.equals(DEBOUNCE)) {
+                throw new InterruptedException("shutdown");
+              }
+              advanceBy(duration);
             });
     scheduler.syncNow();
     scheduler.afterWrite();
     executor.runAll();
-    assertEquals(2, rounds.get());
+    assertEquals(1, rounds.get(), "only the failed round before the backoff ran");
     assertTrue(Thread.interrupted());
   }
 
@@ -345,7 +364,7 @@ class SyncSchedulerTest {
   }
 
   @Test
-  void anInterruptedDebounceWaitStillFlushesTheRound() {
+  void anInterruptedDebounceWaitRunsNoRoundAndKeepsTheInterrupt() {
     var executor = new QueueExecutor();
     var scheduler =
         scheduler(
@@ -358,7 +377,7 @@ class SyncSchedulerTest {
     scheduler.afterWrite();
     executor.runAll();
 
-    assertEquals(1, rounds.get());
+    assertEquals(0, rounds.get(), "a round's first step fails on an interrupted thread");
     assertTrue(Thread.interrupted());
   }
 
@@ -437,8 +456,9 @@ class SyncSchedulerTest {
   }
 
   @Test
-  void anOwnedHealthSourceClosesWithTheSchedulerAndItsFailureIsLoud() {
-    var closed = new java.util.concurrent.atomic.AtomicBoolean();
+  void anOwnedHealthSourceClosesWithTheSchedulerAndAFailedCloseIsAWarningThatNamesItsCause()
+      throws Throwable {
+    var closed = new AtomicBoolean();
     var scheduler = scheduler(new QueueExecutor(), rounds::incrementAndGet);
     scheduler.useHealth(() -> SyncStatus.unattempted("node", "main"), () -> closed.set(true));
     scheduler.close();
@@ -448,10 +468,431 @@ class SyncSchedulerTest {
     broken.useHealth(
         () -> SyncStatus.unattempted("node", "main"),
         () -> {
-          throw new java.io.IOException("store already gone");
+          throw new IOException("store already gone");
         });
-    var failure = assertThrows(IllegalStateException.class, broken::close);
-    assertEquals("store already gone", failure.getCause().getMessage());
+
+    assertEquals(
+        List.of("WARNING Closing the sync health source failed: store already gone"),
+        warnings(broken::close));
+
+    var wrapped = scheduler(new QueueExecutor(), rounds::incrementAndGet);
+    wrapped.useHealth(
+        () -> SyncStatus.unattempted("node", "main"),
+        () -> {
+          throw new IllegalStateException(
+              "Failed to close database",
+              new IllegalStateException("Session is acquired by 1 clients"));
+        });
+    assertEquals(
+        List.of(
+            "WARNING Closing the sync health source failed: Failed to close database: Session is"
+                + " acquired by 1 clients"),
+        warnings(wrapped::close),
+        "the warning says every cause, as a failure line does");
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aCloseEndsADrainsBackoffWithNoRoundAndTheNextStartsRoundOffersTheWrite(@TempDir Path dir)
+      throws Throwable {
+    var lock = dir.resolve("rounds.lock");
+    var told = new CopyOnWriteArrayList<String>();
+    var backingOff = new CountDownLatch(1);
+    var never = new CountDownLatch(1);
+    var scheduler =
+        new SyncScheduler(
+            journaledRound(lock, told),
+            Duration.ZERO,
+            TTL,
+            Executors.newVirtualThreadPerTaskExecutor(),
+            nanos::get,
+            wait -> {
+              backingOff.countDown();
+              never.await();
+            });
+    scheduler.useHealth(SyncSchedulerTest::failedOnce);
+
+    var warned =
+        warnings(
+            () -> {
+              scheduler.afterWrite();
+              backingOff.await();
+              scheduler.close();
+            });
+
+    assertEquals(List.of(), told, "a round began after the close woke the drain from its backoff");
+    assertEquals(List.of(), warned, "the stop was said as a failed sync");
+
+    var nextStart = scheduler(new QueueExecutor(), journaledRound(lock, told));
+    nextStart.useHealth(SyncSchedulerTest::failedOnce);
+    nextStart.syncNow();
+    assertEquals(List.of("began", "offered [spec ada-1]"), told);
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aCloseInADrainsDebounceSendsTheWriteBeforeItReturnsAndInterruptsNoRound(@TempDir Path dir)
+      throws Throwable {
+    var told = new CopyOnWriteArrayList<String>();
+    var inDebounce = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var scheduler =
+        new SyncScheduler(
+            journaledRound(dir.resolve("rounds.lock"), told),
+            DEBOUNCE,
+            TTL,
+            Executors.newVirtualThreadPerTaskExecutor(),
+            nanos::get,
+            wait -> {
+              inDebounce.countDown();
+              release.await();
+              advanceBy(wait);
+            });
+    scheduler.useHealth(() -> SyncStatus.unattempted("node", "main"));
+
+    var warned =
+        warnings(
+            () -> {
+              scheduler.afterWrite();
+              inDebounce.await();
+              closeWhileHeld(scheduler, release);
+            });
+
+    assertEquals(
+        List.of("began", "offered [spec ada-1]"),
+        told,
+        "the write went to main before the close returned");
+    assertEquals(List.of(), warned);
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aCloseInADrainsDebounceWhoseBackoffIsDueReturnsWithNoRound(@TempDir Path dir)
+      throws Throwable {
+    var told = new CopyOnWriteArrayList<String>();
+    var inDebounce = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var never = new CountDownLatch(1);
+    var scheduler =
+        new SyncScheduler(
+            journaledRound(dir.resolve("rounds.lock"), told),
+            DEBOUNCE,
+            TTL,
+            Executors.newVirtualThreadPerTaskExecutor(),
+            nanos::get,
+            wait -> {
+              if (!wait.equals(DEBOUNCE)) {
+                never.await();
+              }
+              inDebounce.countDown();
+              release.await();
+              advanceBy(wait);
+            });
+    scheduler.useHealth(SyncSchedulerTest::failedOnce);
+
+    var warned =
+        warnings(
+            () -> {
+              scheduler.afterWrite();
+              inDebounce.await();
+              closeWhileHeld(scheduler, release);
+            });
+
+    assertEquals(List.of(), told, "the drain began a round, or slept a backoff after the close");
+    assertEquals(List.of(), warned);
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aWriteDuringABackoffThenAStopStartsNoDrainOnTheShutExecutorAndWaitsForTheNextStart(
+      @TempDir Path dir) throws Throwable {
+    var lock = dir.resolve("rounds.lock");
+    var told = new CopyOnWriteArrayList<String>();
+    var refused = new CopyOnWriteArrayList<String>();
+    var backingOff = new CountDownLatch(1);
+    var never = new CountDownLatch(1);
+    var scheduler =
+        new SyncScheduler(
+            journaledRound(lock, told),
+            Duration.ZERO,
+            TTL,
+            refusalsSaid(Executors.newVirtualThreadPerTaskExecutor(), refused),
+            nanos::get,
+            wait -> {
+              backingOff.countDown();
+              never.await();
+            });
+    scheduler.useHealth(SyncSchedulerTest::failedOnce);
+
+    var warned =
+        warnings(
+            () -> {
+              scheduler.afterWrite();
+              backingOff.await();
+              scheduler.afterWrite();
+              scheduler.close();
+            });
+
+    assertEquals(
+        List.of(), refused, "the follow-up drain was started on the executor the close shut");
+    assertEquals(List.of(), told);
+    assertEquals(List.of(), warned);
+
+    var nextStart = scheduler(new QueueExecutor(), journaledRound(lock, told));
+    nextStart.useHealth(SyncSchedulerTest::failedOnce);
+    nextStart.syncNow();
+    assertEquals(List.of("began", "offered [spec ada-1]"), told);
+  }
+
+  /**
+   * {@code executor}, saying each task it refuses as the uncaught exception that would end the
+   * thread that asked, so a test sees what the stop would print.
+   */
+  private static ExecutorService refusalsSaid(ExecutorService executor, List<String> refused) {
+    return new AbstractExecutorService() {
+      @Override
+      public void execute(Runnable command) {
+        try {
+          executor.execute(command);
+        } catch (RejectedExecutionException e) {
+          refused.add(e.getClass().getSimpleName());
+          throw e;
+        }
+      }
+
+      @Override
+      public void shutdown() {
+        executor.shutdown();
+      }
+
+      @Override
+      public List<Runnable> shutdownNow() {
+        return executor.shutdownNow();
+      }
+
+      @Override
+      public boolean isShutdown() {
+        return executor.isShutdown();
+      }
+
+      @Override
+      public boolean isTerminated() {
+        return executor.isTerminated();
+      }
+
+      @Override
+      public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+        return executor.awaitTermination(timeout, unit);
+      }
+    };
+  }
+
+  /** A node whose last round failed just now, so its next round waits out a backoff. */
+  private static SyncStatus failedOnce() {
+    return new SyncStatus(
+        "node",
+        "main",
+        null,
+        "stale",
+        Instant.EPOCH,
+        null,
+        1,
+        "unreachable",
+        Remedy.of("offline"),
+        Instant.EPOCH);
+  }
+
+  /**
+   * A round as production runs one: it says it began, as its health row's begin does, then takes
+   * the box's round lock, which refuses a thread whose interrupt is set as {@code FileChannel.lock}
+   * does, and offers the write the journal holds; a failure is said and thrown, as the round
+   * records it.
+   */
+  private static SyncScheduler.Reconcile journaledRound(Path lock, List<String> told) {
+    return () -> {
+      told.add("began");
+      try (var held = FileMutex.acquire(lock)) {
+        told.add("offered [spec ada-1]");
+      } catch (IOException e) {
+        told.add("failed " + e.getClass().getSimpleName());
+        throw e;
+      }
+    };
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void closeWaitsForTheTimersRoundWhichEndsWholeWithNoFailureRecorded(@TempDir Path dir)
+      throws Throwable {
+    var told = new CopyOnWriteArrayList<String>();
+    var round = journaledRound(dir.resolve("rounds.lock"), told);
+    var inRound = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var toldWhenClosed = new CopyOnWriteArrayList<String>();
+    var scheduler =
+        new SyncScheduler(
+            () -> {
+              inRound.countDown();
+              awaitIgnoringInterrupts(release);
+              round.run();
+            },
+            DEBOUNCE,
+            TTL);
+
+    var warned =
+        warnings(
+            () -> {
+              inRound.await();
+              var closer =
+                  Thread.ofPlatform()
+                      .start(
+                          () -> {
+                            scheduler.close();
+                            toldWhenClosed.addAll(told);
+                          });
+              while (closer.getState() == Thread.State.RUNNABLE) {
+                Thread.onSpinWait();
+              }
+              release.countDown();
+              closer.join();
+            });
+
+    assertEquals(
+        List.of("began", "offered [spec ada-1]"),
+        toldWhenClosed,
+        "the close returned under the timer's round, or the round failed at the round lock");
+    assertEquals(List.of(), warned);
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void closeWaitsForTheTimersHealthReadBeforeItClosesTheSource() throws Exception {
+    var reading = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var reads = new AtomicInteger();
+    var inRead = new AtomicBoolean();
+    var closedUnderARead = new AtomicBoolean();
+    var scheduler = new SyncScheduler(rounds::incrementAndGet, DEBOUNCE, TTL);
+    scheduler.useHealth(
+        heldFirstRead(reads, inRead, reading, release),
+        closingFailsUnder(inRead, closedUnderARead, release));
+
+    reading.await();
+    closeWhileHeld(scheduler, release);
+
+    assertFalse(closedUnderARead.get(), "the source closed under the timer's read");
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void closeWaitsForAWritesRoundBeforeItClosesTheSourceTheRoundReads() throws Exception {
+    var reading = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var reads = new AtomicInteger();
+    var inRead = new AtomicBoolean();
+    var closedUnderARead = new AtomicBoolean();
+    var scheduler =
+        new SyncScheduler(
+            rounds::incrementAndGet,
+            DEBOUNCE,
+            TTL,
+            Executors.newVirtualThreadPerTaskExecutor(),
+            nanos::get,
+            this::advanceBy);
+    scheduler.useHealth(
+        heldFirstRead(reads, inRead, reading, release),
+        closingFailsUnder(inRead, closedUnderARead, release));
+
+    scheduler.afterWrite();
+    reading.await();
+    closeWhileHeld(scheduler, release);
+
+    assertFalse(closedUnderARead.get(), "the source closed under the round's read");
+    assertEquals(1, rounds.get(), "the round the write asked for ran whole");
+  }
+
+  /**
+   * A health read whose first call holds until {@code release}, ignoring interrupts as a thread
+   * inside a native call does.
+   */
+  private static Supplier<SyncStatus> heldFirstRead(
+      AtomicInteger reads, AtomicBoolean inRead, CountDownLatch reading, CountDownLatch release) {
+    return () -> {
+      if (reads.getAndIncrement() == 0) {
+        inRead.set(true);
+        reading.countDown();
+        awaitIgnoringInterrupts(release);
+        inRead.set(false);
+      }
+      return SyncStatus.unattempted("node", "main");
+    };
+  }
+
+  /** A source whose close fails as the arena's does while a read is in flight, freeing it. */
+  private static AutoCloseable closingFailsUnder(
+      AtomicBoolean inRead, AtomicBoolean closedUnderARead, CountDownLatch release) {
+    return () -> {
+      if (inRead.get()) {
+        closedUnderARead.set(true);
+        release.countDown();
+        throw new IllegalStateException("Session is acquired by 1 clients");
+      }
+    };
+  }
+
+  /**
+   * Closes {@code scheduler} on a thread of its own and lets the held read go only once that thread
+   * waits (or has ended), so a close that does not wait closes the source under the read.
+   */
+  private static void closeWhileHeld(SyncScheduler scheduler, CountDownLatch release)
+      throws InterruptedException {
+    var closer = Thread.ofPlatform().start(scheduler::close);
+    while (closer.getState() == Thread.State.RUNNABLE) {
+      Thread.onSpinWait();
+    }
+    release.countDown();
+    closer.join();
+  }
+
+  /** The warnings the scheduler logs while {@code work} runs, each as its level and message. */
+  private static List<String> warnings(Executable work) throws Throwable {
+    var log = Logger.getLogger(SyncScheduler.class.getName());
+    var said = new CopyOnWriteArrayList<String>();
+    var listening =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            said.add(record.getLevel() + " " + record.getMessage());
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    log.addHandler(listening);
+    try {
+      work.execute();
+    } finally {
+      log.removeHandler(listening);
+    }
+    return said;
+  }
+
+  private static void awaitIgnoringInterrupts(CountDownLatch latch) {
+    var interrupted = false;
+    while (true) {
+      try {
+        latch.await();
+        break;
+      } catch (InterruptedException e) {
+        interrupted = true;
+      }
+    }
+    if (interrupted) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   @Test

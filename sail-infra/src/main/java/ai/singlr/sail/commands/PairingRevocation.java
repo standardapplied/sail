@@ -6,6 +6,8 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.commands.FdeCommand.Box;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.OperatorAuthorizedKeys;
 import ai.singlr.sail.engine.PairingTrust;
@@ -15,7 +17,6 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.util.List;
@@ -52,20 +53,22 @@ final class PairingRevocation {
       return new OperatorAuthorizedKeys(box.home())
           .removeCommented(FdeCommand.pairingComment(handle));
     } catch (IOException failure) {
-      throw new UncheckedIOException(
+      throw Remedied.state(
           "Could not remove "
               + handle
               + "'s key line from "
               + box.operator()
               + "'s authorized_keys ("
-              + failure.getClass().getSimpleName()
+              + Remedied.fileReasonOf(failure)
               + "), so nothing of "
               + handle
-              + " was removed and its pairing still works. Check that "
-              + box.home().resolve(".ssh")
-              + " is writable by "
-              + box.operator()
-              + ", then run the command again.",
+              + " was removed and its pairing still works.",
+          Remedy.of(
+              "Check that "
+                  + box.home().resolve(".ssh")
+                  + " is writable by "
+                  + box.operator()
+                  + ", then run the command again."),
           failure);
     }
   }
@@ -147,20 +150,21 @@ final class PairingRevocation {
     } catch (NoSuchFileException missing) {
       return false;
     } catch (IOException failure) {
-      throw new UncheckedIOException(
+      throw Remedied.state(
           "Could not remove "
               + box.workstationKey()
               + ", which may hold "
               + handle
               + "'s key ("
-              + failure.getClass().getSimpleName()
+              + Remedied.fileReasonOf(failure)
               + "). "
-              + KEPT_UNTIL_THE_KEY_IS_GONE
-              + " check that "
-              + box.workstationKey()
-              + " and its directory are readable and writable by "
-              + box.operator()
-              + ", then run the command again.",
+              + KEPT_UNTIL_THE_KEY_IS_GONE,
+          Remedy.of(
+              "check that "
+                  + box.workstationKey()
+                  + " and its directory are readable and writable by "
+                  + box.operator()
+                  + ", then run the command again."),
           failure);
     }
   }

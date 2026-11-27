@@ -162,41 +162,16 @@ public final class CliCommand {
 
   /**
    * A failure as {@code reader} reads it: an API refusal's message, then its fix on a line of its
-   * own; an API failure with no fix that wraps a cause, its message and the cause's, through every
-   * wrapper that names no fix, so the line says why; a failure below the door that names a remedy,
-   * its reason and remedy on one line; anything else, its message.
+   * own; any other failure as {@link Remedied#told} says it, its causes after it and ending at a
+   * fix, so the line says why.
    */
   public static List<String> lines(Exception failure, OperatorCommand reader) {
     var e = Refusals.translated(failure);
-    var message = Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName());
-    return switch (e) {
-      case ApiException refusal when !refusal.remedy().isEmpty() ->
-          List.of(message, reader.render(refusal.remedy()));
-      case ApiException wrapped when wrapped.getCause() != null ->
-          List.of(withCause(message, wrapped.getCause(), reader));
-      case ApiException refusal -> List.of(message);
-      case Remedied remedied -> List.of(reader.render(remedied));
-      default -> List.of(message);
-    };
-  }
-
-  /**
-   * {@code message}, then what {@code cause} says as {@code reader} reads it, its fix included,
-   * through every wrapper that names no fix. A cause that only repeats the message adds nothing.
-   */
-  private static String withCause(String message, Throwable cause, OperatorCommand reader) {
-    var said =
-        cause instanceof ApiException wrapped
-                && wrapped.remedy().isEmpty()
-                && wrapped.getCause() != null
-            ? withCause(
-                Objects.requireNonNullElse(
-                    wrapped.getMessage(), wrapped.getClass().getSimpleName()),
-                wrapped.getCause(),
-                reader)
-            : reader.render(Remedied.whole(cause));
-    var head = message.endsWith(".") ? message.substring(0, message.length() - 1) : message;
-    return said.equals(message) || said.startsWith(head + ": ") ? said : head + ": " + said;
+    return e instanceof ApiException refusal && !refusal.remedy().isEmpty()
+        ? List.of(
+            Objects.requireNonNullElse(refusal.getMessage(), refusal.getClass().getSimpleName()),
+            reader.render(refusal.remedy()))
+        : List.of(Remedied.told(e, reader::render));
   }
 
   private static OperatorCommand reader() {

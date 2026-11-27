@@ -44,12 +44,13 @@ public final class WorkstationIdentity {
     try {
       line = new String(Files.readAllBytes(path), StandardCharsets.UTF_8).strip();
     } catch (IOException e) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           "This box's workstation key ("
               + path
               + ") could not be read ("
-              + e.getClass().getSimpleName()
-              + "). Check that the account sail runs as can read it.",
+              + Remedied.fileReasonOf(e)
+              + ").",
+          Remedy.of("Check that the account sail runs as can read it."),
           e);
     }
     try {

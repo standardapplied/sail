@@ -43,6 +43,17 @@ class EnrollCommandTest {
   }
 
   @Test
+  void aTicketThatIsNoDocumentEndsItsLineAtTheUpgradeToRun() {
+    var error =
+        assertThrows(IllegalStateException.class, () -> EnrollCommand.parseTicket("{unclosed"));
+
+    assertEquals(
+        "The box returned an unexpected enrollment ticket response:\n{unclosed\n  The box may be"
+            + " running an older sail — upgrade it with: sudo sail upgrade",
+        CliCommand.describe(error));
+  }
+
+  @Test
   void parseTicketFailsLoudOnUnexpectedOutput() {
     var error =
         assertThrows(
