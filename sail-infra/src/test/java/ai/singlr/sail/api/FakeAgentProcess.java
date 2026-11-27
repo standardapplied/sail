@@ -211,6 +211,14 @@ final class FakeAgentProcess implements AgentProcess {
     /** The process exits with {@code code}, having written {@code log} to its stderr. */
     void exits(int code, String log) {
       container.exited(runId, log, code);
+      clientExits(code);
+    }
+
+    /**
+     * The process's client exits with {@code code}, its stdout ended, while the process it attached
+     * to lives on in the container.
+     */
+    void clientExits(int code) {
       lock.lock();
       try {
         exitCode = code;

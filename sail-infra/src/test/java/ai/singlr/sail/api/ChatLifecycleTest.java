@@ -124,6 +124,90 @@ class ChatLifecycleTest {
         List.of("message", "session", "told", "interrupted", "message"), bench.kinds(session));
   }
 
+  /**
+   * I2: a halt the workspace does not answer proves nothing, at the restart and at a start: the
+   * chat stays held, its pid file kept and the message refused, until a halt it answers.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aHaltTheWorkspaceDoesNotAnswerKeepsTheChatHeldUntilOneItAnswers() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var old = bench.says(INIT);
+    var container = bench.processes.container();
+    container.unreachable(true);
+    var restarted = bench.restarted();
+
+    var unanswered = restarted.reclaim();
+    var refused =
+        assertThrows(ApiException.class, () -> as("sam", () -> restarted.send(session, "again")));
+    var held =
+        List.of(
+            bench.store.find(session).orElseThrow().launched(),
+            container.file(AgentUnit.chat(session).pidPath()) != null,
+            container.alive(old.runId));
+    container.unreachable(false);
+    var answered = restarted.reclaim();
+    as("sam", () -> restarted.send(session, "again"));
+
+    assertEquals(List.of(0, 1), List.of(unanswered, answered));
+    assertEquals("agent_already_running", refused.code());
+    assertEquals(List.of(true, true, true), held, "launched, its pid file kept, its process left");
+    assertFalse(container.alive(old.runId), "the answered halt ended it");
+    assertEquals(2, bench.processes.starts.size());
+    assertEquals(
+        List.of("message", "session", "told", "interrupted", "message"), bench.kinds(session));
+  }
+
+  /**
+   * I2: a client that exits while its agent lives on in the workspace is no proof the agent is
+   * gone: the next start halts it first, so two never run.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void anAgentThatOutlivesItsClientIsHaltedBeforeTheNextStarts() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var first = bench.says(INIT);
+    first.clientExits(1);
+    over(first);
+
+    bench.send(session, "again");
+
+    assertEquals(2, bench.processes.starts.size());
+    assertEquals(
+        List.of(bench.processes.latest().runId),
+        bench.processes.container().live(),
+        "the first was halted before the second started");
+  }
+
+  /**
+   * I2: a turn left open that the log cannot cut starts no process, so none runs that the host does
+   * not hold; the next message, once the log takes it, starts the one.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aCutThatFailsStartsNoProcess() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    bench.says(INIT);
+    var restarted = bench.restarted();
+    bench.db.execute(
+        "CREATE TRIGGER no_cut BEFORE INSERT ON chat_items WHEN NEW.kind = 'interrupted'"
+            + " BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+
+    var refused =
+        assertThrows(ApiException.class, () -> as("sam", () -> restarted.send(session, "again")));
+    var started = bench.processes.starts.size();
+    bench.db.execute("DROP TRIGGER no_cut");
+    as("sam", () -> restarted.send(session, "again"));
+
+    assertEquals("agent_launch_failed", refused.code());
+    assertEquals(List.of(1, 2), List.of(started, bench.processes.starts.size()));
+    assertEquals(
+        List.of("message", "session", "told", "interrupted", "message"), bench.kinds(session));
+  }
+
   /** I2: a reader that stops, for any reason, ends its process: none runs on unread. */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
