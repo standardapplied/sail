@@ -526,15 +526,15 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     private func emptyState(_ empty: WorkspacesModel.Empty) -> NSView {
-        let action: SailButton? = switch empty.action {
-        case .newWorkspace?: SailButton("New Workspace", kind: .primary, icon: .plus, look: look, target: self, action: #selector(beginCreate(_:)))
-        case .checkAgain?: SailButton("Check Again", kind: .secondary, look: look, target: self, action: #selector(askAgain(_:)))
-        case .createProject?: SailButton("Create Project", kind: .primary, icon: .plus, look: look, target: self, action: #selector(createProject(_:)))
-        case nil: nil
+        let action = switch empty.action {
+        case .newWorkspace: SailButton("New Workspace", kind: .primary, icon: .plus, look: look, target: self, action: #selector(beginCreate(_:)))
+        case .checkAgain: SailButton("Check Again", kind: .secondary, look: look, target: self, action: #selector(askAgain(_:)))
+        case .createProject: SailButton("Create Project", kind: .primary, icon: .plus, look: look, target: self, action: #selector(createProject(_:)))
         }
-        if empty.action != .createProject { action?.shortcut(empty.action == .newWorkspace ? "n" : "r", modifiers: .command, mono: mono) }
+        let createsProject = empty.action == .createProject
+        if !createsProject { action.shortcut(empty.action == .newWorkspace ? "n" : "r", modifiers: .command, mono: mono) }
         return EmptyState(
-            icon: empty.missing ? .layers : .box, title: empty.title, body: empty.body, actions: action.map { [$0] } ?? [], line: empty.line, missing: empty.missing, look: look,
+            icon: empty.missing ? .layers : .box, title: empty.title, body: empty.body, actions: [action], line: empty.line, lineFirst: !createsProject, missing: empty.missing, look: look,
             titleFont: titleFont, mono: mono
         )
     }

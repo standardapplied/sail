@@ -20,30 +20,31 @@ import Testing
         return model
     }
 
-    /// No project yet: the panel says so under the control plane's head, counting none, and the main
-    /// area says what a project is, offers Create Project to those whose `whoami` names `write` and
-    /// `admin` (who may also build its template), and names the host and who may; others are told to
-    /// ask an admin, with no action, whatever their role is called; one whose `whoami` has not come
-    /// is told only that.
+    /// No project yet, to those whose `whoami` names `write` and `admin` (who may also build its
+    /// template): the panel says there is none under the control plane's head, counting none, and the
+    /// main area says what a project is, offers Create Project and names the host. Everyone else,
+    /// whatever their role is called or while it is not confirmed, lists only what is granted to
+    /// them, so both say none is open to them yet, with Check Again.
     @Test func whoIsOfferedCreateProject() throws {
-        for (role, capabilities, line, action) in [
-            (Role.admin, [Capability.read, .write, .admin], "sail.example.com · you can create projects as an admin", WorkspacesModel.EmptyAction.createProject),
-            (.member, [.read, .write, .admin], "sail.example.com · you can create projects as an admin", .createProject),
-            (.admin, [.read, .write], "sail.example.com · Ask an admin to create one.", nil),
-            (.member, [.read, .write], "sail.example.com · Ask an admin to create one.", nil),
-            (.viewer, [.read], "sail.example.com · Ask an admin to create one.", nil),
-        ] as [(Role, [Capability], String, WorkspacesModel.EmptyAction?)] {
+        for (role, capabilities, creates) in [
+            (Role.admin, [Capability.read, .write, .admin], true), (.member, [.read, .write, .admin], true),
+            (.admin, [.read, .write], false), (.member, [.read, .write], false), (.viewer, [.read], false),
+        ] as [(Role, [Capability], Bool)] {
             let model = Self.none(try Self.person(role, capabilities))
             guard case let .shown(panel, .noProjects(empty)) = model.screen else { Issue.record("no empty state: \(model.screen)"); return }
-            #expect(panel.listed && panel.projects.isEmpty && panel.emptyLine == "No projects yet." && !panel.creates)
-            #expect(empty.title == "Create your first project")
+            #expect(panel.listed && panel.projects.isEmpty && !panel.creates)
+            #expect(panel.emptyLine == (creates ? "No projects yet." : "No project is open to you yet."), "\(role) \(capabilities)")
+            #expect(empty.title == (creates ? "Create your first project" : "No project is open to you yet"), "\(role) \(capabilities)")
+            #expect(empty.action == (creates ? .createProject : .checkAgain), "\(role) \(capabilities)")
+            guard creates else { continue }
             #expect(empty.body == "A project holds the repositories, agents and size that every workspace starts from. Create one, and Sail builds its template on the runner.")
-            #expect(empty.line == line && empty.action == action, "\(role) \(capabilities)")
+            #expect(empty.line == "sail.example.com · you can create projects as an admin")
         }
         let plane = try ControlPlane(address: "https://sail.example.com")
         let unconfirmed = WorkspacesModel.Person(SignedIn(controlPlane: plane, fde: "mara", until: .distantFuture, whoami: .failure(AccountRefusal(.unreachable, at: plane))))
-        guard case let .shown(_, .noProjects(empty)) = Self.none(unconfirmed).screen else { Issue.record("no empty state"); return }
-        #expect(empty.line == "sail.example.com · your role is not yet confirmed" && empty.action == nil)
+        guard case let .shown(panel, .noProjects(empty)) = Self.none(unconfirmed).screen else { Issue.record("no empty state"); return }
+        #expect(panel.emptyLine == "No project is open to you yet." && empty.title == "No project is open to you yet" && empty.action == .checkAgain)
+        #expect(empty.line == "signed in as mara · role not yet confirmed · https://sail.example.com")
     }
 
     /// With projects listed, Create Project is offered from the panel by the same rule; with none,
@@ -105,7 +106,7 @@ import Testing
         #expect(sheet.repos.map(\.url) == ["github.com/acme/docs/"])
         for (url, path) in [
             ("github.com/acme/app?ref=main", "app"), ("github.com/acme/app.git#readme", "app"), ("git@github.com:acme/app.git", "app"), ("git@host:app.git", "app"),
-            ("git@host:app", "app"),
+            ("git@host:app", "app"), ("github.com/acme/app  ", "app"),
         ] {
             sheet.typeURL(url, row: 0)
             #expect(sheet.repos[0].path == path, "\(url) filled \(sheet.repos[0].path)")
@@ -230,6 +231,10 @@ import Testing
         _ = model.choose("harbor")
         model.projectsListed(.success(listed))
         #expect(model.chosen == "harbor", "a later list chose the created project over the person's choice")
+        model.projectCreated("gone")
+        model.projectsListed(.success(listed))
+        model.projectsListed(.success(ProjectList(projects: listed.projects + [ProjectSummary(name: "gone", containerStatus: .known(.notCreated), template: .known(.missing))], total: 3)))
+        #expect(model.chosen == "harbor", "a project created and gone from the list was chosen once another of its name was listed")
     }
 
     /// Create's answer from the server; a name taken by a project the person wrote last with this very

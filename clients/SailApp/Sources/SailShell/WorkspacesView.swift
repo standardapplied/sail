@@ -278,20 +278,8 @@ public final class WorkspacesView: NSView {
     func shown() {
         guard client != nil else { return }
         door = .signedIn
-        let owed = owedBuild.flatMap { $0.by.handle == person.handle && $0.by.controlPlane == person.controlPlane ? $0.project : nil }
-        if let owed {
-            owedBuild = nil
-            model.projectCreated(owed)
-        }
         askProjects()
-        guard let owed else { return }
-        let era = self.era
-        byAPerson { [weak self] in await self?.build(owed, era: era) }
     }
-
-    /// A project's build a sign-out cut off after its create: asked, and the project chosen, once
-    /// the person who created it is signed in to that control plane again.
-    private var owedBuild: (by: WorkspacesModel.Person, project: String)?
 
     func refresh() async {
         await askProjects().value
@@ -466,7 +454,7 @@ public final class WorkspacesView: NSView {
     /// then has its template built.
     private func createProject() {
         guard let client, projectSheet == nil, model.person.creates else { return }
-        let era = self.era, asker = model.person
+        let era = self.era, handle = model.person.handle
         byAPerson { [weak self] in
             guard let self else { return }
             let ask: @MainActor () async -> Result<KnownAgents, SailError> = { await Self.result { () async throws(SailError) in try await client.send(.knownAgents) } }
@@ -477,9 +465,9 @@ public final class WorkspacesView: NSView {
             asked.agentsListed(agents, at: address)
             let (width, room) = Self.sheetRoom(window)
             let sheet = CreateProjectSheet(asked, width: width, room: room, direction: userInterfaceLayoutDirection, address: address, look: look, titleFont: titleFont, mono: mono)
-            sheet.send = { definition in await client.create(definition, by: asker.handle) }
+            sheet.send = { definition in await client.create(definition, by: handle) }
             sheet.askAgents = ask
-            sheet.onCreated = { [weak self] name in self?.created(name, era: era, by: asker) }
+            sheet.onCreated = { [weak self] name in self?.created(name, era: era) }
             sheet.onEnd = { [weak self] in self?.projectSheet = nil }
             projectSheet = sheet
             window.beginSheet(sheet) { _ in }
@@ -493,21 +481,14 @@ public final class WorkspacesView: NSView {
         return (min(CreateProjectSheet.width, Double(content.width) - 2 * CreateProjectSheet.inset), Double(content.height) - CreateProjectSheet.inset)
     }
 
-    /// Project `name` created by `asker`: the projects listed and it chosen, so it shows at once,
-    /// then its template's build asked; a sign-out before the build leaves it owed to them.
-    private func created(_ name: String, era: Int, by asker: WorkspacesModel.Person) {
-        guard era == self.era else {
-            owedBuild = (asker, name)
-            return
-        }
-        model.projectCreated(name)
+    /// Project `name` created: the projects listed and it chosen, so it shows at once, then its
+    /// template's build asked; nothing once the person signed out.
+    private func created(_ name: String, era: Int) {
         byAPerson { [weak self] in
-            guard let self else { return }
+            guard let self, era == self.era else { return }
+            model.projectCreated(name)
             await askProjects().value
-            guard era == self.era else {
-                owedBuild = (asker, name)
-                return
-            }
+            guard era == self.era else { return }
             if model.chosen == name, !model.thisMacChosen { keepChosen(name, person) }
             await build(name, era: era)
         }

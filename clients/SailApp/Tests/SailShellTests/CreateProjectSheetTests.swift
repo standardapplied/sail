@@ -252,9 +252,9 @@ import Testing
     }
 
     /// No project yet: Create Project is offered to a person who may create and build a project, and
-    /// opens the sheet with the server's harnesses, each checked; others are told to ask an admin,
-    /// with no button.
-    @Test func createProjectIsOfferedToThoseWhoMayWrite() async throws {
+    /// opens the sheet with the server's harnesses, each checked; others are told none is open to
+    /// them yet, with Check Again and no Create Project.
+    @Test func createProjectIsOfferedToThoseWhoMayCreateAndBuild() async throws {
         let server = RecordedServer([try Exchange("projects-none"), try Exchange("agents")])
         let (view, window) = try WorkspacesViewTests.view(server)
         defer {
@@ -263,8 +263,8 @@ import Testing
         }
         view.person = WorkspacesModel.Person(handle: "uday", admin: false, confirmed: true, controlPlane: "127.0.0.1", creates: false)
         view.shown()
-        #expect(await RunnerTabTests.until { view.text.contains("127.0.0.1 · Ask an admin to create one.") }, "\(view.text)")
-        #expect(Driverless.button("Create Project", in: view.project) == nil && view.panel.createProject.isHidden)
+        #expect(await RunnerTabTests.until { view.text.contains("No project is open to you yet") }, "\(view.text)")
+        #expect(Driverless.button("Create Project", in: view.project) == nil && Driverless.button("Check Again", in: view.project) != nil && view.panel.createProject.isHidden)
         view.person = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "127.0.0.1", creates: true)
         #expect(await RunnerTabTests.until { view.text.contains("127.0.0.1 · you can create projects as an admin") }, "\(view.text)")
         let create = try #require(Driverless.button("Create Project", in: view.project))
@@ -350,9 +350,9 @@ import Testing
         #expect(await desk.asked.filter { $0 == build }.count == 2)
     }
 
-    /// A sign-out between a project's create and its build leaves the build owed to the one who
-    /// created it: asked, and the project chosen, once they are signed in again; never for another.
-    @Test func aBuildCutOffBySignOutIsAskedAtTheNextSignIn() async throws {
+    /// A sign-out between a project's create and its build asks no build, for them or for whoever
+    /// signs in next.
+    @Test func aSignOutBeforeTheBuildAsksNone() async throws {
         let build = "POST /v1/projects/lighthouse/template%3Abuild"
         let desk = try Desk(["projects-none", "agents"])
         let (view, window) = try WorkspacesViewTests.view(desk)
@@ -379,13 +379,5 @@ import Testing
         view.shown()
         #expect(await RunnerTabTests.until { !view.busy }, "another's sign-in never ended its work")
         #expect(await desk.asked.contains(build) == false, "a build asked once its creator signed out, or for another")
-        await desk.hold(build)
-        view.person = dana
-        view.shown()
-        await desk.arrived(during: Task { _ = await RunnerTabTests.until { false } })
-        let asked = await desk.asked
-        #expect(asked.filter { $0 == build }.count == 1, "\(asked)")
-        await desk.release()
-        #expect(await RunnerTabTests.until { view.panel.list.chosen == "lighthouse" }, "\(view.text)")
     }
 }

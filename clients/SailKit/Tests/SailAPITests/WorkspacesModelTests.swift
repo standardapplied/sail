@@ -215,6 +215,17 @@ import Testing
         #expect(proxied.body.hasPrefix("The control plane at main.acme.dev answered with an error (502). Your terminals") && !proxied.body.contains("/v1/"))
     }
 
+    /// Frame "No project is open to you": the panel stays, empty, and the identity line says who asks.
+    @Test func noProjectSaysWhoIsAsking() {
+        var model = WorkspacesModel(person: Self.ana)
+        model.projectsListed(.success(ProjectList(projects: [], total: 0)))
+        guard case let .shown(panel, .noProjects(empty)) = model.screen else { Issue.record("no empty card: \(model.screen)"); return }
+        #expect(panel.projects.isEmpty && panel.who == "ana · member" && panel.emptyLine == "No project is open to you yet.")
+        #expect(empty.title == "No project is open to you yet")
+        #expect(empty.body == "An admin adds you to a project on main.acme.dev. Once they do, it appears on the left, and you can create your own workspaces in it.")
+        #expect(empty.line == "signed in as ana · member · main.acme.dev" && empty.action == .checkAgain)
+    }
+
     /// Frame "The pane: a project chosen, a row chosen": yours first, then other people's; Open on a
     /// running row, Start and Open on a stopped one; another's row says who may open it.
     @Test func theListIsYoursThenOtherPeoples() throws {
@@ -564,6 +575,15 @@ import Testing
         Self.send("new", &model)
         model.person = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: false, controlPlane: "main.acme.dev")
         #expect(model.chosen == "harbor" && Self.table(model)?.creating?.name == "new")
+    }
+
+    /// m17: an admin with no project, whose sign-in may not create one, is told so, not to wait for
+    /// an admin.
+    @Test func anAdminWithNoProjectIsToldWhatIsTrue() {
+        var model = WorkspacesModel(person: Self.uday)
+        model.projectsListed(.success(ProjectList(projects: [], total: 0)))
+        guard case let .shown(_, .noProjects(empty)) = model.screen else { Issue.record("\(model.screen)"); return }
+        #expect(empty.body == "Your sign-in may not create projects on main.acme.dev. Once one is added, it appears on the left, and you can create your own workspaces in it.")
     }
 
     /// m23: the reviewer's surviving mutants, each a behaviour.

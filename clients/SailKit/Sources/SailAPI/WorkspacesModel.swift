@@ -166,8 +166,7 @@ public struct WorkspacesModel: Sendable {
         public let title: String
         public let body: String
         public let line: String?
-        /// Its one action; none where the person can do nothing about it.
-        public let action: EmptyAction?
+        public let action: EmptyAction
         /// Something is missing rather than empty: the tile is dashed.
         public let missing: Bool
     }
@@ -326,7 +325,7 @@ public struct WorkspacesModel: Sendable {
     private var sessionsAskedCount = 0
     /// The workspace created in this project, chosen once a list shows it.
     private var choosingAfterList: [String: String] = [:]
-    /// The project the person created, chosen once the projects listed show it.
+    /// The project the person created, chosen when the projects listed next show it.
     private var created: String?
     /// What stands over a project's page about its template's build, by project: the refusal, or the
     /// build that could not be asked, with Try Again; until the build is asked, or the projects
@@ -359,10 +358,12 @@ public struct WorkspacesModel: Sendable {
             projects = list.projects
             projectsFailure = nil
             builds = builds.filter { name, _ in list.projects.contains { $0.name == name && $0.template == .known(.missing) } }
-            if let created, list.projects.contains(where: { $0.name == created }) {
+            if let created {
                 self.created = nil
-                thisMacChosen = false
-                return select(created)
+                if list.projects.contains(where: { $0.name == created }) {
+                    thisMacChosen = false
+                    return select(created)
+                }
             }
             guard let name = list.projects.first(where: { $0.name == chosen })?.name ?? list.projects.first?.name else {
                 chosen = nil
@@ -489,7 +490,7 @@ public struct WorkspacesModel: Sendable {
         }
     }
 
-    /// Project `name` was created here: it is chosen, in This Mac's place too, once the projects
+    /// Project `name` was created here: it is chosen, in This Mac's place too, when the projects
     /// listed next show it.
     public mutating func projectCreated(_ name: String) {
         created = name
@@ -691,10 +692,11 @@ public struct WorkspacesModel: Sendable {
         )
     }
 
-    /// What the panel says under the control plane's head: no project listed, or, none ever listed,
-    /// why they could not be, in words that leave its name to the head.
+    /// What the panel says under the control plane's head: no project listed, none at all to one who
+    /// reads every project, else none of them open to the person; or, none ever listed, why they
+    /// could not be, in words that leave its name to the head.
     private var emptyLine: String? {
-        guard projects == nil else { return projects?.isEmpty == true ? "No projects yet." : nil }
+        guard projects == nil else { return projects?.isEmpty == true ? person.creates ? "No projects yet." : "No project is open to you yet." : nil }
         guard let projectsFailure else { return nil }
         if case .unreachable = projectsFailure { return "Can’t reach the control plane." }
         return "Couldn’t list your projects."
@@ -704,20 +706,22 @@ public struct WorkspacesModel: Sendable {
         let panel = panel
         if thisMacChosen { return .shown(panel, .thisMac) }
         guard let projects else { return projectsFailure.map { .unreachable(unreachable($0)) } ?? .loading }
-        guard let project = projects.first(where: { $0.name == chosen }) else { return .shown(panel, .noProjects(firstProject)) }
+        guard let project = projects.first(where: { $0.name == chosen }) else {
+            if person.creates {
+                return .shown(panel, .noProjects(Empty(
+                    title: "Create your first project",
+                    body: "A project holds the repositories, agents and size that every workspace starts from. Create one, and Sail builds its template on the runner.",
+                    line: "\(person.named) · you can create projects as an admin", action: .createProject, missing: false
+                )))
+            }
+            let body = person.admin
+                ? "Your sign-in may not create projects on \(person.controlPlane). Once one is added, it appears on the left, and you can create your own workspaces in it."
+                : "An admin adds you to a project on \(person.controlPlane). Once they do, it appears on the left, and you can create your own workspaces in it."
+            return .shown(panel, .noProjects(Empty(
+                title: "No project is open to you yet", body: body, line: "signed in as \(panel.who) · \(person.controlPlane)", action: .checkAgain, missing: false
+            )))
+        }
         return .shown(panel, .project(page(project)))
-    }
-
-    /// The main area with no project: what a project is, Create Project for those who may create
-    /// and build one, and a line naming the control plane and who may create one there, once their
-    /// role is confirmed.
-    private var firstProject: Empty {
-        let who = !person.confirmed ? "your role is not yet confirmed" : person.creates ? "you can create projects as an admin" : "Ask an admin to create one."
-        return Empty(
-            title: "Create your first project",
-            body: "A project holds the repositories, agents and size that every workspace starts from. Create one, and Sail builds its template on the runner.",
-            line: "\(person.named) · \(who)", action: person.creates ? .createProject : nil, missing: false
-        )
     }
 
     /// Who is signed in and their role, as the panel's foot says it ("ana · member").
