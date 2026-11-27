@@ -824,24 +824,27 @@ class ProjectDefinitionTest {
   }
 
   @Test
-  void aRepositoryClonedInsideAnothersPathIsRefusedInEitherOrderNamingBothRows() {
+  void aRepositoryListedBeforeTheOneHoldingItIsRefusedNamingBothRowsAndANestInOrderIsKept() {
     var inner = "  - url: https://github.com/acme/web.git\n    path: app/web\n";
     var outer = "  - url: https://github.com/acme/app.git\n    path: app\n";
     var apart = "  - url: https://github.com/acme/application.git\n    path: application\n";
-    var sentence =
-        "app/web is inside app, another repository's path: clone each outside the other.";
+    var sentence = "app/web is listed before app, which holds it: list app first.";
 
-    for (var repos : List.of(inner + outer, outer + inner)) {
-      var refused =
-          assertThrows(
-              FieldsRefused.class,
-              () ->
-                  ProjectDefinitionJson.validated(
-                      TestDefinitions.yaml("name: acme\nrepos:\n" + apart + repos)));
+    var refused =
+        assertThrows(
+            FieldsRefused.class,
+            () ->
+                ProjectDefinitionJson.validated(
+                    TestDefinitions.yaml("name: acme\nrepos:\n" + apart + inner + outer)));
+    var nest =
+        ProjectDefinitionJson.validated(
+            TestDefinitions.yaml("name: acme\nrepos:\n" + apart + outer + inner));
 
-      assertEquals(sentence, refused.getMessage());
-      assertEquals(Map.of("repos[1].path", sentence, "repos[2].path", sentence), refused.fields());
-    }
+    assertEquals(sentence, refused.getMessage());
+    assertEquals(Map.of("repos[1].path", sentence, "repos[2].path", sentence), refused.fields());
+    assertEquals(
+        List.of("application", "app", "app/web"),
+        nest.repos().stream().map(ProjectDefinition.Repo::path).toList());
   }
 
   @Test

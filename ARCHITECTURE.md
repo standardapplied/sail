@@ -827,8 +827,9 @@ HTTP, `GET /v1/projects/{p}/definition` answers the document with each section's
 its `If-Match` names and answers 412 when the section changed, and `POST /v1/projects`
 creates one, 409 when the name is taken or an instance holds it and 422 `invalid_request` when
 the project-name rule refuses it, its `field_errors` naming `name` so a client says it under the
-name. A definition that clones two repositories to one path (`app` and `app/` are one), or one
-inside another's (`app/web` and `app`, in either order), is refused where it is written, as a port
+name. A definition that clones two repositories to one path (`app` and `app/` are one), or lists
+one before the repository whose path holds it (`app/web` before `app`; `app` before `app/web` is a
+nest a run branches in by its deepest repository), is refused where it is written, as a port
 claimed twice is (`ProjectDefinition.requireWritable`): at the create and at the section's write
 alike, with 422 and a `field_errors` entry for each such row's `repos[i].path`, the second clone
 never reaching the build. A definition stored or synced before the rule is still read, listed,
@@ -836,7 +837,7 @@ repaired, deleted and synced. A section's write is decided before its value is c
 may not write learns nothing of the definition from the refusal. Each is a project not found to a
 caller whose scope does not admit it
 (`ProjectDefinitionTest.twoRepositoriesClonedToOnePathAreReadButRefusedWhereTheyAreWrittenNamingEachRow`,
-`ProjectDefinitionTest.aRepositoryClonedInsideAnothersPathIsRefusedInEitherOrderNamingBothRows`,
+`ProjectDefinitionTest.aRepositoryListedBeforeTheOneHoldingItIsRefusedNamingBothRowsAndANestInOrderIsKept`,
 `ProjectStoreTest.aDefinitionStoredWithTwoRepositoriesAtOnePathStaysReadableRepairableDeletableAndSynced`,
 `ProjectDefinitionOperationsTest.aSectionWriteIsDecidedBeforeItsValueIsChecked`,
 `ProjectDefinitionOperationsTest.anInvalidNameAndTwoRepositoriesAtOnePathAreRefusedUnderTheirFields`,

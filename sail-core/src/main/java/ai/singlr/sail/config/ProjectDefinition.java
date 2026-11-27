@@ -160,8 +160,8 @@ public record ProjectDefinition(
   }
 
   /**
-   * Refuses repositories cloned to one path, or one inside another's, naming each of their rows:
-   * the clone of the second would find the first's checkout there and stop the build.
+   * Refuses repositories cloned to one path, or one listed before the repository whose path holds
+   * it, naming each of their rows: the later clone would find a folder there and stop the build.
    */
   public ProjectDefinition requireOwnPaths() {
     var paths =
@@ -186,17 +186,18 @@ public record ProjectDefinition(
     return this;
   }
 
-  private static String clash(Path one, Path other) {
-    if (one.equals(other)) {
-      return "More than one repository is cloned to " + one + ": give each its own path.";
+  /**
+   * Why {@code earlier}, a repository listed before {@code later}, cannot be cloned beside it: one
+   * path for both, or {@code earlier} inside {@code later}, whose clone would then find a folder
+   * that is no checkout. A repository inside one listed before it is cloned into that checkout, a
+   * nest a run branches in by its deepest repository, and is not refused.
+   */
+  private static String clash(Path earlier, Path later) {
+    if (earlier.equals(later)) {
+      return "More than one repository is cloned to " + earlier + ": give each its own path.";
     }
-    if (one.startsWith(other) || other.startsWith(one)) {
-      var inner = one.startsWith(other) ? one : other;
-      var outer = inner == one ? other : one;
-      return inner
-          + " is inside "
-          + outer
-          + ", another repository's path: clone each outside the other.";
+    if (earlier.startsWith(later)) {
+      return earlier + " is listed before " + later + ", which holds it: list " + later + " first.";
     }
     return null;
   }
