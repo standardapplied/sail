@@ -10,19 +10,28 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ClosesWhatItOpens;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 class EventStreamClientTest {
@@ -303,6 +312,123 @@ class EventStreamClientTest {
           assertEquals("light-grid", received.project());
         }
       }
+    }
+  }
+
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aStreamTheApiDropsIsReadAndStoppedOnItsClientsWorkAndStopsOnlyOnceThatHasEnded()
+      throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    var readBy = new LinkedBlockingQueue<Thread>();
+    var queue =
+        new LinkedBlockingQueue<Event>() {
+          @Override
+          public void put(Event event) throws InterruptedException {
+            readBy.add(Thread.currentThread());
+            super.put(event);
+          }
+        };
+    var event = Event.of("any", null, Event.WellKnownTypes.AGENT_SESSION_STOPPED, "a", "h");
+    try (var said = new StandardErrorLines();
+        var work = new HeldUntilShutdown();
+        var server = StreamServer.dropping(": subscribed\n\ndata: " + event.toJsonLine() + "\n\n");
+        var stream =
+            EventStreamClient.subscribed(
+                FollowingClient.on(work, HttpClient.newBuilder()), streamOf(server), queue)) {
+      var reader = readBy.poll(10, TimeUnit.SECONDS);
+      assertNotNull(reader, "the stream delivered its event");
+      assertTrue(work.owns(reader), "the stream is read on its work");
+      assertEquals("  [event-stream] Stream ended: java.io.IOException: closed", said.next());
+      stream.close();
+
+      assertEquals(event.toJsonLine(), queue.poll().toJsonLine());
+      assertTrue(work.isTerminated(), "the stream stopped while a task of its client ran");
+    }
+    ClosesWhatItOpens.assertClosed("a subscriber whose stream the API dropped", before);
+  }
+
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void closingAStreamWhoseReaderWaitsOnAFullQueueEndsTheReader() throws Exception {
+    var first = Event.of("any", null, Event.WellKnownTypes.AGENT_SESSION_STOPPED, "a", "h");
+    var second = Event.of("any", "next", Event.WellKnownTypes.AGENT_SESSION_STOPPED, "a", "h");
+    var offered = new LinkedBlockingQueue<Event>();
+    var queue =
+        new ArrayBlockingQueue<Event>(1) {
+          @Override
+          public void put(Event event) throws InterruptedException {
+            offered.add(event);
+            super.put(event);
+          }
+        };
+    var frames =
+        ": subscribed\n\ndata: " + first.toJsonLine() + "\n\ndata: " + second.toJsonLine() + "\n\n";
+    try (var work = new HeldUntilShutdown();
+        var server = StreamServer.ending(frames);
+        var stream =
+            EventStreamClient.subscribed(
+                FollowingClient.on(work, HttpClient.newBuilder()), streamOf(server), queue)) {
+      assertNotNull(offered.poll(10, TimeUnit.SECONDS), "the first event reached the queue");
+      assertNotNull(offered.poll(10, TimeUnit.SECONDS), "the reader waits to put the second");
+
+      assertTimeoutPreemptively(Duration.ofSeconds(10), stream::close);
+
+      assertEquals(List.of(first.toJsonLine()), queue.stream().map(Event::toJsonLine).toList());
+      assertTrue(work.isTerminated(), "the stream stopped while its reader waited");
+    }
+  }
+
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void anErrorInTheReaderIsPrintedNotLostInItsFuture() throws Exception {
+    var event = Event.of("any", null, Event.WellKnownTypes.AGENT_SESSION_STOPPED, "a", "h");
+    var queue =
+        new LinkedBlockingQueue<Event>() {
+          @Override
+          public void put(Event event) {
+            throw new AssertionError("the queue broke");
+          }
+        };
+    try (var said = new StandardErrorLines();
+        var server = StreamServer.ending(": subscribed\n\ndata: " + event.toJsonLine() + "\n\n");
+        var stream =
+            EventStreamClient.subscribed(
+                FollowingClient.of(HttpClient.newBuilder()), streamOf(server), queue)) {
+      assertEquals(
+          "  [event-stream] Reader failed: java.lang.AssertionError: the queue broke", said.next());
+    }
+  }
+
+  private static HttpRequest streamOf(StreamServer server) {
+    return HttpRequest.newBuilder(
+            URI.create("http://127.0.0.1:" + server.port() + "/v1/events/stream"))
+        .build();
+  }
+
+  /** The lines printed to standard error while it is open, each waited for at most 10 s. */
+  private static final class StandardErrorLines implements AutoCloseable {
+
+    private final PrintStream original = System.err;
+    private final LinkedBlockingQueue<String> lines = new LinkedBlockingQueue<>();
+
+    StandardErrorLines() {
+      System.setErr(
+          new PrintStream(OutputStream.nullOutputStream()) {
+            @Override
+            public void println(String line) {
+              lines.add(line);
+            }
+          });
+    }
+
+    String next() throws InterruptedException {
+      return lines.poll(10, TimeUnit.SECONDS);
+    }
+
+    @Override
+    public void close() {
+      System.setErr(original);
     }
   }
 

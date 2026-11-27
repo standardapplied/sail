@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
@@ -27,9 +28,9 @@ import java.util.stream.Stream;
 
 /**
  * Streaming consumer of the sail-api {@code /v1/events/stream} SSE endpoint. The factory opens the
- * HTTP connection synchronously (so caller errors surface immediately), then spawns one virtual
- * thread that reads SSE lines, parses each {@code data:} payload into an {@link Event}, and pushes
- * it onto the caller-supplied {@link BlockingQueue}.
+ * HTTP connection synchronously (so caller errors surface immediately), then reads SSE lines on its
+ * client's work ({@link FollowingClient#follow}), parses each {@code data:} payload into an {@link
+ * Event}, and pushes it onto the caller-supplied {@link BlockingQueue}.
  *
  * <p>Designed for callers that need to merge live events with their own deadlines or timers: {@code
  * queue.poll(timeout)} on a single queue is much simpler than juggling SSE callbacks plus scheduled
@@ -46,23 +47,17 @@ public final class EventStreamClient implements AutoCloseable {
   private static final String SUBSCRIBED_LINE = ": subscribed";
   private static final Duration SUBSCRIBED_TIMEOUT = Duration.ofSeconds(5);
 
-  private final HttpClient client;
+  private final FollowingClient client;
   private final Stream<String> lineStream;
-  private final Thread reader;
+  private final Future<?> reader;
   private final CountDownLatch subscribedLatch = new CountDownLatch(1);
   private volatile boolean stopped;
 
   private EventStreamClient(
-      HttpClient client,
-      HttpResponse<Stream<String>> response,
-      BlockingQueue<Event> queue,
-      String project) {
+      FollowingClient client, HttpResponse<Stream<String>> response, BlockingQueue<Event> queue) {
     this.client = client;
     this.lineStream = response.body();
-    this.reader =
-        Thread.ofVirtual()
-            .name("sail-event-stream-" + Objects.requireNonNullElse(project, "all"))
-            .start(() -> readLoop(queue));
+    this.reader = client.follow(() -> readLoop(queue));
   }
 
   /**
@@ -84,27 +79,30 @@ public final class EventStreamClient implements AutoCloseable {
             .timeout(Duration.ofHours(24))
             .GET()
             .build();
-    var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    var client = FollowingClient.of(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)));
     try {
-      return subscribed(client, request, queue, projectFilter);
+      return subscribed(client, request, queue);
     } catch (IOException | InterruptedException | RuntimeException failed) {
-      release(client);
+      client.close();
       throw failed;
     }
   }
 
-  /** The stream {@code client} opens with {@code request}, once the server has said it is on. */
-  private static EventStreamClient subscribed(
-      HttpClient client, HttpRequest request, BlockingQueue<Event> queue, String projectFilter)
+  /**
+   * The stream {@code client} opens with {@code request}, once the server has said it is on.
+   * Visible for tests, which hand it a client whose work they watch.
+   */
+  static EventStreamClient subscribed(
+      FollowingClient client, HttpRequest request, BlockingQueue<Event> queue)
       throws IOException, InterruptedException {
-    var response = answer(client, request);
+    var response = answer(client.http(), request);
     if (response.statusCode() != 200) {
       try (var body = response.body()) {
         throw SailApiClient.Refused.fromBody(
             response.statusCode(), body.collect(Collectors.joining("\n")));
       }
     }
-    var stream = new EventStreamClient(client, response, queue, projectFilter);
+    var stream = new EventStreamClient(client, response, queue);
     if (!stream.subscribedLatch.await(SUBSCRIBED_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
       stream.close();
       throw new IOException(
@@ -149,6 +147,9 @@ public final class EventStreamClient implements AutoCloseable {
       if (!stopped) {
         System.err.println("  [event-stream] Stream ended: " + e.getMessage());
       }
+    } catch (Error fatal) {
+      System.err.println("  [event-stream] Reader failed: " + fatal);
+      throw fatal;
     }
   }
 
@@ -197,7 +198,7 @@ public final class EventStreamClient implements AutoCloseable {
 
   /** Whether the stream is over: the server closed it, the connection broke, or it was closed. */
   public boolean ended() {
-    return stopped || !reader.isAlive();
+    return stopped || reader.isDone();
   }
 
   @Override
@@ -207,16 +208,6 @@ public final class EventStreamClient implements AutoCloseable {
       lineStream.close();
     } catch (Exception ignored) {
     }
-    reader.interrupt();
-    release(client);
-  }
-
-  /**
-   * Aborts what {@code client} still has in flight, a stream above all, and waits until it has let
-   * go of its connections and its selector.
-   */
-  private static void release(HttpClient client) {
-    client.shutdownNow();
     client.close();
   }
 
