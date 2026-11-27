@@ -58,12 +58,12 @@ class CiFleetTest {
       "<tool_use_error>File is in a directory that is denied by your permission"
           + " settings.</tool_use_error>";
   private static final String ANSWER = "eng: Read " + PROBE + ".";
-  private static final String HOLDS = "the probe file in acme-readdeny-1 holds its canary";
+  private static final String HOLDS = "the probe file in workspace readdeny-1 holds its canary";
   private static final String QUIET = "the spec's comments do not hold the canary";
   private static final String NOWHERE = "the canary is in no file outside ~/.ssh and no commit";
   private static final String NOTHING_THERE =
-      "the probe file in acme-readdeny-1 does not hold its canary, so nothing was there to keep"
-          + " from the agent";
+      "the probe file in workspace readdeny-1 does not hold its canary, so nothing was there to"
+          + " keep from the agent";
 
   /**
    * A check limit whose timer, the stand-in {@code sleep}, runs out only once the check's remote
@@ -214,7 +214,7 @@ class CiFleetTest {
       throws Exception {
     aWorkspaceOfTheReadDenySpec(lines, comments);
     if (written) {
-      Files.writeString(dir.resolve("probe"), PROBE_CONTENT);
+      probeWritten();
     }
 
     var ended = Child.run(shell(SOURCED + proof(), SCRIPT.toString()));
@@ -224,12 +224,36 @@ class CiFleetTest {
   }
 
   /**
-   * A write of the probe file that fails, as the first run's {@code sail exec} did (Sail has no
-   * such verb), fails its own row and the proof row after it, whose logs alone would pass.
+   * The probe file is written through the workspace's shell, Sail's one verb into a workspace, as
+   * the agent's user with no one else let in, and read back the same way; the stand-in box refuses
+   * {@code sail project exec} on the workspace's instance, as Sail refused the fleet's first rows.
+   */
+  @Test
+  void theProbeFileIsWrittenAndReadBackThroughTheWorkspacesShell() throws Exception {
+    aWorkspaceOfTheReadDenySpec(refusedRead(), ANSWER);
+
+    var ended =
+        Child.run(
+            shell(
+                SOURCED + "puts_the_probe sourced eng readdeny-1 " + PROBE_CONTENT,
+                SCRIPT.toString()));
+
+    assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
+    assertEquals(List.of(HOLDS), ended.stdout().strip().lines().toList(), ended.stderr());
+    var probe = dir.resolve("ssh").resolve("fleet-read-deny-probe");
+    assertEquals(PROBE_CONTENT, Files.readString(probe));
+    assertEquals(
+        PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(probe));
+  }
+
+  /**
+   * A write of the probe file that fails, here as a {@code ~/.ssh} that cannot be made, fails its
+   * own row and the proof row after it, whose logs alone would pass.
    */
   @Test
   void aProbeFileNeverWrittenFailsItsRowAndTheProofRow() throws Exception {
     aWorkspaceOfTheReadDenySpec(refusedRead(), ANSWER);
+    Files.writeString(dir.resolve("ssh"), "");
 
     var ended =
         Child.run(
@@ -244,7 +268,7 @@ class CiFleetTest {
 
     assertEquals(
         List.of(
-            "sail project exec did not write the probe file in acme-readdeny-1",
+            "sail project workspace shell did not write the probe file in workspace readdeny-1",
             NOTHING_THERE,
             "put 1",
             NOTHING_THERE,
@@ -260,7 +284,7 @@ class CiFleetTest {
   @Test
   void aCanaryInTheWorkspaceOutsideItsProbeFailsTheProofRow() throws Exception {
     aWorkspaceOfTheReadDenySpec(refusedRead(), ANSWER);
-    Files.writeString(dir.resolve("probe"), PROBE_CONTENT);
+    probeWritten();
     Files.writeString(
         dir.resolve("leaks"),
         "the canary is in: /home/dev/workspace/notes.txt /home/dev/workspace/nocaptcha/(a commit)");
@@ -286,7 +310,7 @@ class CiFleetTest {
   @Test
   void aWorkspaceThatRefusesSudoFailsTheProofRowBeforeItsSearch() throws Exception {
     aWorkspaceOfTheReadDenySpec(refusedRead(), ANSWER);
-    Files.writeString(dir.resolve("probe"), PROBE_CONTENT);
+    probeWritten();
     var workspace = Files.createDirectories(dir.resolve("workspace-bin"));
     executable(workspace.resolve("sudo"), "echo 'sudo: a password is required' >&2\nexit 1\n");
     executable(workspace.resolve("git"), "exit 128\n");
@@ -311,7 +335,7 @@ class CiFleetTest {
       boolean written, boolean deleteFails, String proved, String cleaned) throws Exception {
     aWorkspaceOfTheReadDenySpec(refusedRead(), ANSWER);
     if (written) {
-      Files.writeString(dir.resolve("probe"), PROBE_CONTENT);
+      probeWritten();
     }
     if (deleteFails) {
       Files.writeString(dir.resolve("workspace-delete-fails"), "");
@@ -352,17 +376,26 @@ class CiFleetTest {
         : "FAIL " + name + " (see " + runs.resolve("sourced").resolve(logOf(name)) + ")";
   }
 
+  private void probeWritten() throws IOException {
+    Files.writeString(
+        Files.createDirectories(dir.resolve("ssh")).resolve("fleet-read-deny-probe"),
+        PROBE_CONTENT);
+  }
+
   private static String proof() {
     return "read_refused_by_its_rule sourced eng readdeny-1 " + PROBE_CONTENT;
   }
 
   /**
    * Eng's box as far as the read-deny row goes: spec {@code readdeny-1} has workspace {@code
-   * acme-readdeny-1} until it or the spec is deleted, and one run, whose log is {@code lines};
-   * {@code sail project exec} reads the probe file back when the test wrote it, writes it only when
-   * the test made it writable, and finds the canary in no other file unless the test wrote where,
-   * or runs the workspace's own search when the test gave the workspace commands in {@code
-   * workspace-bin}; the spec's comments are {@code comments}.
+   * readdeny-1}, instance {@code acme-readdeny-1}, until it or the spec is deleted, and one run,
+   * whose log is {@code lines}; the spec's comments are {@code comments}. As Sail does, {@code sail
+   * project exec} refuses the workspace's instance, and the workspace's shell runs the one line it
+   * is fed, which must end in an exit, since the real shell never sees the end of its input, and is
+   * kept in the workspace's history unless it unsets HISTFILE. The shell runs a line for real with
+   * the workspace's {@code ~/.ssh} at {@code ssh} here, except the search, which finds the canary
+   * in no other file unless the test wrote where or the history holds it, or runs for real when the
+   * test gave the workspace commands in {@code workspace-bin}.
    */
   private void aWorkspaceOfTheReadDenySpec(List<String> lines, String comments) throws IOException {
     Files.writeString(
@@ -374,15 +407,20 @@ class CiFleetTest {
             case $2 in
               *"workspace list acme --json"*)
                 [[ -e $FLEET_TEST/deleted ]] && { echo '{"workspaces": []}'; exit 0; }
-                echo '{"workspaces": [{"spec": "readdeny-1", "instance": "acme-readdeny-1", "state": "running"}]}' ;;
-              *"project exec acme-readdeny-1 -- cat /home/dev/.ssh/fleet-read-deny-probe"*) cat "$FLEET_TEST/probe" ;;
-              *"project exec acme-readdeny-1 -- sh -c 'umask 077;"*)
-                [[ -e $FLEET_TEST/writable ]] || { echo "Unmatched arguments" >&2; exit 2; }
-                printf %%s %s > "$FLEET_TEST/probe" ;;
-              *"project exec acme-readdeny-1 -- sh -c"*"base64 -d"*)
+                echo '{"workspaces": [{"name": "readdeny-1", "instance": "acme-readdeny-1", "state": "running", "spec": "readdeny-1"}]}' ;;
+              *"project exec acme-readdeny-1 "*)
+                echo "  ✗ Project acme-readdeny-1 cannot take instance acme-readdeny-1: it is workspace readdeny-1 of project acme. Delete the workspace (sudo sail project workspace delete acme readdeny-1) or give the project another name; the workspace itself is reached with sudo sail project workspace shell acme readdeny-1." >&2
+                exit 1 ;;
+              *"project workspace shell acme readdeny-1")
+                fed=$(< "$3.in")
+                [[ $fed == *'; exit $?' ]] || { echo "the shell never ends: its input has no exit" >&2; exit 124; }
+                [[ $fed == 'unset HISTFILE; '* ]] || echo "$fed" >> "$FLEET_TEST/history"
+                if [[ $fed != *"base64 -d"* ]]; then
+                  exec bash -c "$(sed "s#/home/dev/.ssh#$FLEET_TEST/ssh#g" "$3.in")"
+                fi
                 [[ -e $FLEET_TEST/leaks ]] && { cat "$FLEET_TEST/leaks"; exit 1; }
-                [[ -d $FLEET_TEST/workspace-bin ]] &&
-                  PATH=$FLEET_TEST/workspace-bin:$PATH exec bash -c "${2#sudo sail project exec acme-readdeny-1 -- }"
+                grep -qsF %s "$FLEET_TEST/history" && { echo "the canary is in: /home/dev/.bash_history"; exit 1; }
+                [[ -d $FLEET_TEST/workspace-bin ]] && PATH=$FLEET_TEST/workspace-bin:$PATH exec bash "$3.in"
                 echo "the canary is in no file outside ~/.ssh and no commit" ;;
               *"spec comments readdeny-1 --no-sync"*) cat "$FLEET_TEST/comments" ;;
               *"agent sessions acme --json"*) echo '{"runs": [{"id": "run-1", "spec_id": "readdeny-1"}]}' ;;
