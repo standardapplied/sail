@@ -151,6 +151,8 @@ import Testing
             } else {
                 #expect(abs(path.minY - url.minY) < 0.5 && (direction == .rightToLeft ? path.maxX <= url.minX : url.maxX <= path.minX), "\(width) \(direction.rawValue): \(url) \(path)")
             }
+            let folder = sheet.paths[0]
+            #expect(folder.userInterfaceLayoutDirection == .leftToRight && folder.field.frame.minX > folder.box.minX + 40, "\(direction.rawValue): the path's text at \(folder.field.frame), its box at \(folder.box)")
             let remove = sheet.removes[0].frame
             #expect(direction == .rightToLeft ? remove.minX < url.minX : remove.maxX > url.maxX, "\(direction.rawValue): × at \(remove), the URL at \(url)")
         }

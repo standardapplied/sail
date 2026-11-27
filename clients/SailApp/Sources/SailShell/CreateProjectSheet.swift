@@ -5,8 +5,8 @@ import SailLook
 
 /// New project (`createSheet` of `first-impressions-mockup.html`, section 6): a sheet on the
 /// window, 600 pt or, on a narrow window, the window less 12 pt each side. NAME; REPOSITORIES, a row
-/// each of the URL and the folder it is cloned to under `~/workspace/`, in mono, with × to remove
-/// it, and Add Repository; AGENTS, a check for each harness the server knows; SIZE, Small to
+/// each of the URL and the folder it is cloned to under `~/workspace/`, in mono and left to right
+/// as paths read in any language, with × to remove it, and Add Repository; AGENTS, a check for each harness the server knows; SIZE, Small to
 /// Custom, Custom's three fields under it; then the foot with what comes next, Cancel and Create
 /// Project ⏎, the one primary. Where the window is too short, everything over the foot scrolls.
 /// It draws ``NewProject`` and sends the person's edits there; Create sends the definition once
@@ -196,7 +196,7 @@ package final class CreateProjectSheet: NSPanel, NSTextFieldDelegate {
             let size = removes[at].intrinsicContentSize
             let box = NSRect(x: x + width - Double(size.width), y: top + (FieldSize.regular.height - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))
             removes[at].frame = mirrored(box).insetBy(dx: -Look.haloRoom, dy: -Look.haloRoom)
-            y += Self.rowGap
+            y += wide ? Self.rowGap : Self.gap
         }
         let link = addRepo.intrinsicContentSize
         addRepo.frame = mirrored(NSRect(x: x, y: y, width: Double(link.width), height: Double(link.height)))
@@ -211,11 +211,12 @@ package final class CreateProjectSheet: NSPanel, NSTextFieldDelegate {
             path.prefix = NewProject.folder
             let remove = SailButton(icon: .close, label: "Remove Repository", kind: .quiet, size: .small, look: look, target: self, action: #selector(removeRepository(_:)))
             for field in [url, path] {
+                field.userInterfaceLayoutDirection = .leftToRight
                 field.field.font = mono.font(Look.Step.callout.points) as NSFont
                 field.field.delegate = self
             }
+            remove.userInterfaceLayoutDirection = direction
             for view in [url, path, remove] as [NSView] {
-                view.userInterfaceLayoutDirection = direction
                 body.addSubview(view)
             }
             urls.append(url)
