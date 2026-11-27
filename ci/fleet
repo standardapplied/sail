@@ -860,11 +860,15 @@ print(seqs[-1] if seqs else last, \"yes\" if any(i[\"type\"] == \"turn_ended\" f
 done
 [ "$turn" = yes ] || fail "the turn did not end within twelve reads"
 python3 -I -c "
-import json
+import json, sys
 items = json.load(open(\"/tmp/chat-items.json\"))
+said = \"\".join(i[\"text\"] for i in items if i[\"type\"] == \"text\")
 print(\"items: \" + \" \".join(i[\"type\"] for i in items))
-print(\"said: \" + \"\".join(i[\"text\"] for i in items if i[\"type\"] == \"text\").strip()[:80])
-"
+print(\"said: \" + said.strip()[:80])
+failed = [i for i in items if i[\"type\"] == \"failed\"]
+modes = [i.get(\"mode\") for i in items if i[\"type\"] == \"session\"]
+sys.exit(0 if not failed and \"pong\" in said.casefold() and modes and modes[0] == \"default\" else 1)
+" || fail "the agent did not answer pong in Asks first, or its turn failed"
 status=$(read_from "$token" 0)
 [ "$status" = 200 ] || fail "a read from 0 again was refused: HTTP $status"
 python3 -I -c "import json, sys; sys.exit(0 if json.load(open(\"/tmp/chat.json\"))[\"items\"] == json.load(open(\"/tmp/chat-items.json\")) else 1)" ||
