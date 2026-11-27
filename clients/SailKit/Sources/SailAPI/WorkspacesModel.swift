@@ -393,7 +393,8 @@ public struct WorkspacesModel: Sendable {
     /// The project the person created, chosen when the projects listed next show it.
     private var created: String?
     /// Each project's template as last read, which its build card is drawn from, and the projects
-    /// asked last when it was read: a list asked no later is older than the read.
+    /// asked last when it was read: a list asked no later is older than the read. A project listed
+    /// away forgets them, and how its last read went.
     private var templates: [String: TemplateStatus] = [:]
     private var readAt: [String: Int] = [:]
     /// The projects whose last read got no answer, with what is said of it.
@@ -444,7 +445,12 @@ public struct WorkspacesModel: Sendable {
             projectsFailure = nil
             expanded.formIntersection(list.projects.map(\.name))
             buildSaid = buildSaid.filter { name, _ in list.projects.contains { $0.name == name && [.known(.missing), .known(.failed)].contains($0.template) } }
-            buildUnanswered.formIntersection(list.projects.map(\.name))
+            let listed = Set(list.projects.map(\.name))
+            buildUnanswered.formIntersection(listed)
+            templates = templates.filter { listed.contains($0.key) }
+            readAt = readAt.filter { listed.contains($0.key) }
+            templateMissed = templateMissed.filter { listed.contains($0.key) }
+            templateRefused = templateRefused.filter { listed.contains($0.key) }
             if let created {
                 self.created = nil
                 if list.projects.contains(where: { $0.name == created }) {
@@ -614,22 +620,29 @@ public struct WorkspacesModel: Sendable {
 
     /// The build of project `name`'s template answered: started or joined, its card drawn from the
     /// answer; refused, said on its card in the server's words and what to do; not answered, its
-    /// template read to learn whether it started, said on its card only if none did.
-    public mutating func built(_ name: String, _ answer: Result<TemplateStatus, SailError>) {
+    /// template read to learn whether it started, said on its card only if none did. A session found
+    /// ended is said on none: it is handed to the check that says it, as a read's is.
+    @discardableResult
+    public mutating func built(_ name: String, _ answer: Result<TemplateStatus, SailError>) -> AfterRead? {
         buildsAsked.remove(name)
         switch answer {
         case .success:
             buildSaid[name] = nil
             buildUnanswered.remove(name)
             templateRead(name, answer)
+        case let .failure(error) where AccountRefusal.ends(error):
+            buildSaid[name] = nil
+            buildUnanswered.remove(name)
+            return .sessionEnded
         case let .failure(error):
             buildSaid[name] = lines(error)
             if case .refused = error { buildUnanswered.remove(name) } else { buildUnanswered.insert(name) }
         }
+        return nil
     }
 
-    /// What a template read asks of the page beyond its card: the projects listed again, since the
-    /// project is gone; or the session's end handed to the check that says it.
+    /// What a template read or a build asks of the page beyond its card: the projects listed again,
+    /// since the project is gone; or the session's end handed to the check that says it.
     public enum AfterRead: Equatable, Sendable {
         case listProjects, sessionEnded
     }
@@ -651,14 +664,17 @@ public struct WorkspacesModel: Sendable {
             if [.known(.building), .known(.ready)].contains(status.state) { buildSaid[name] = nil }
             projects?[index] = ProjectSummary(name: name, containerStatus: project.containerStatus, template: status.state)
             return nil
+        case let .failure(error) where AccountRefusal.ends(error):
+            templateMissed[name] = nil
+            templateRefused[name] = []
+            return .sessionEnded
         case let .failure(.refused(refusal)):
             templateMissed[name] = nil
-            let ended = AccountRefusal.ends(.refused(refusal))
-            templateRefused[name] = ended ? [] : lines(.refused(refusal))
-            if ended { return .sessionEnded }
-            return [.known(.projectNotInCatalog), .known(.notFound)].contains(refusal.code) ? .listProjects : nil
+            templateRefused[name] = lines(.refused(refusal))
+            return refusal.code == .known(.projectNotInCatalog) ? .listProjects : nil
         case let .failure(error):
             templateMissed[name] = error.said(at: person.controlPlane)
+            templateRefused[name] = nil
             return nil
         }
     }

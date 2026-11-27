@@ -309,6 +309,57 @@ import Testing
         #expect(Self.card(failed)?.missed == "No answer just now; asking again" && failed.readsAgain("lighthouse"), "a failed card said it asks again and did not")
     }
 
+    /// A project listed away forgets its template as read: listed again (its grant back, or one of
+    /// that name made again), its page waits for its first read with nothing of the old build on it,
+    /// and a read with no answer there is asked again.
+    @Test func aProjectListedAwayForgetsItsTemplate() throws {
+        var model = try Self.read(try Self.status("template-2e-building", step: 9))
+        #expect(model.templateRead("lighthouse", WorkspacesModelTests.answer(.template(project: "lighthouse"), "refusal-project-not-in-catalog-sessions")) == .listProjects)
+        let harbor = ProjectSummary(name: "harbor", containerStatus: .known(.notCreated), template: .known(.ready))
+        _ = model.projectsListed(.success(ProjectList(projects: [harbor], total: 1)), request: model.askingProjects())
+        let back = ProjectList(projects: [harbor, ProjectSummary(name: "lighthouse", containerStatus: .known(.notCreated), template: .known(.building))], total: 2)
+        _ = model.projectsListed(.success(back), request: model.askingProjects())
+        model.listed(.success(WorkspaceList(project: "lighthouse", workspaces: [])), request: model.choose("lighthouse"), at: WorkspacesModelTests.at)
+        #expect(WorkspacesModelTests.page(model)?.body == .loading && model.readsAgain("lighthouse"), "the old build drawn before its first read")
+        model.templateRead("lighthouse", .failure(.unreachable("lost")))
+        #expect(model.readsAgain("lighthouse"), "a read with no answer said it asks again and did not")
+    }
+
+    /// A read with no answer after a refused one is asked again, as the card says: the card says the
+    /// last read, not the refusal before it.
+    @Test func aMissedReadAfterARefusalIsAskedAgain() throws {
+        var model = try Self.read(try Self.status("template-2e-building"))
+        model.templateRead("lighthouse", WorkspacesModelTests.answer(.template(project: "lighthouse"), "refusal-forbidden"))
+        _ = model.choose("harbor")
+        _ = model.choose("lighthouse")
+        model.templateRead("lighthouse", .failure(.unreachable("lost")))
+        let card = try #require(Self.card(model))
+        #expect(card.missed == "No answer just now; asking again" && card.refusal.isEmpty && model.readsAgain("lighthouse"), "\(card.refusal)")
+    }
+
+    /// A build asked with a session that has ended, by Build Again or the first one after Create, says
+    /// nothing on the card: the ended session is handed to the check that says it, as a read's is,
+    /// and what an earlier build was told goes with the build asked again.
+    @Test(arguments: [TemplateState.failed, .missing])
+    func aBuildAskedWithAnEndedSessionIsHandedOver(_ state: TemplateState) throws {
+        var model = try Self.model(Self.dana, state)
+        if state == .failed {
+            model.templateRead("lighthouse", .success(try Self.status("template-2h-failed")))
+            _ = model.asksBuild("lighthouse")
+            model.built("lighthouse", WorkspacesModelTests.answer(.buildTemplate(project: "lighthouse"), "refusal-template-read-only"))
+        }
+        _ = model.asksBuild("lighthouse")
+        let after = model.built("lighthouse", WorkspacesModelTests.answer(.buildTemplate(project: "lighthouse"), "refusal-missing-bearer-token"))
+        let page = try #require(WorkspacesModelTests.page(model))
+        #expect(after == .sessionEnded && page.banner == nil && model.templateShown == (state == .failed ? "lighthouse" : nil))
+        if state == .failed {
+            let card = try #require(Self.card(model))
+            #expect(card.stage == .failed && card.refusal.isEmpty && !card.asking, "\(card.refusal)")
+        } else {
+            #expect(Self.card(model) == nil, "\(page.body)")
+        }
+    }
+
     /// A build that got no answer may have started: the template is read once, and the card shows
     /// what the server holds, building or failed; only when none started does it say so, with Build
     /// Again. While the build is asked, or its read under way, the page waits on the loading frame.
