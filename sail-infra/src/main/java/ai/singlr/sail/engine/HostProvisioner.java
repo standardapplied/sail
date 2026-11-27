@@ -416,32 +416,23 @@ public final class HostProvisioner {
     step(6, "Creating base profile...");
 
     var profile = HostYaml.DEFAULT_PROFILE;
-    var existed = read(List.of("incus", "profile", "show", profile)).ok();
+    var shown = read(List.of("incus", "profile", "show", profile));
+    var existed = shown.ok();
     if (!existed) {
       var create = shell.exec(List.of("incus", "profile", "create", profile));
       if (!create.ok()) {
         throw new IOException("Failed to create Incus profile: " + create.stderr());
       }
     }
-    var held =
-        read(List.of("incus", "profile", "device", "list", profile))
-            .stdout()
-            .lines()
-            .map(String::strip)
-            .toList();
-    if (!held.contains("root")) {
+    var held = existed ? devices(shown.stdout()) : Map.of();
+    if (!held.containsKey("root")) {
       addDevice(profile, List.of("root", "disk", "path=/", "pool=" + pool), "root disk");
     }
-    if (!held.contains("eth0")) {
+    if (!held.containsKey("eth0")) {
       addDevice(
           profile, List.of("eth0", "nic", "name=eth0", "network=" + bridge, "type=nic"), "NIC");
     }
-    var named =
-        held.contains("root")
-            ? read(List.of("incus", "profile", "device", "get", profile, "root", "pool"))
-                .stdout()
-                .strip()
-            : pool;
+    var named = held.containsKey("root") ? poolOf(held.get("root")) : pool;
     var found =
         shell.isDryRun() && named.equals(pool)
             ? Optional.of(planned(pool, source))
@@ -466,6 +457,21 @@ public final class HostProvisioner {
             + root.driver()
             + ")");
     return root;
+  }
+
+  /**
+   * The devices a profile holds, read from {@code incus profile show}, whose form holds across
+   * Incus releases: {@code incus profile device list} printed one name a line until 7.7, a table
+   * since.
+   */
+  private static Map<?, ?> devices(String shown) {
+    return YamlUtil.parseMap(shown).get("devices") instanceof Map<?, ?> devices
+        ? devices
+        : Map.of();
+  }
+
+  private static String poolOf(Object device) {
+    return device instanceof Map<?, ?> disk ? Objects.toString(disk.get("pool"), "") : "";
   }
 
   /** How a dry run's step says what a real run would make: before the name of what is made. */

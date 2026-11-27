@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 class HostProvisionerTest {
@@ -989,7 +990,7 @@ class HostProvisionerTest {
 
   @Test
   void aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt() throws Exception {
-    var shell = fresh(succeeding().onOk("incus profile device list", ""), "zfs");
+    var shell = fresh(succeeding().onOk("incus profile show", BARE_PROFILE), "zfs");
     var steps = new ArrayList<String>();
 
     var hostYaml = provision(shell, SDB, new RecordingListener(steps));
@@ -1055,8 +1056,7 @@ class HostProvisionerTest {
                     + " \"devpool\", \"volatile.initial_source\": \""
                     + partition
                     + "\"}}]")
-            .onOk("incus profile device list", "root\neth0\n")
-            .onOk("incus profile device get singlr-base root pool", "devpool\n")
+            .onOk("incus profile show singlr-base", PROFILE_ON_DEVPOOL)
             .onOk("realpath -e -- " + partition, partition + "\n")
             .onOk(DeviceFixtures.LSBLK, DeviceFixtures.read("gcp2/b-layout-initial.lsblk.json"));
 
@@ -1081,8 +1081,7 @@ class HostProvisionerTest {
         succeeding()
             .onceOnOk("incus storage list --format json", "[]")
             .onOk("incus storage list", pools("devpool", "zfs", "/var/lib/incus/disks/devpool.img"))
-            .onOk("incus profile device list", "root\neth0\n")
-            .onOk("incus profile device get singlr-base root pool", "devpool\n");
+            .onOk("incus profile show singlr-base", PROFILE_ON_DEVPOOL);
     var steps = new ArrayList<String>();
 
     var hostYaml = provision(shell, new PoolSource.File(51200), new RecordingListener(steps));
@@ -1203,8 +1202,7 @@ class HostProvisionerTest {
         succeeding()
             .onceOnOk("incus storage list --format json", "[" + dirPool + "]")
             .onOk("incus storage list", "[" + dirPool + ", " + tank + "]")
-            .onOk("incus profile device list", "root\neth0\n")
-            .onOk("incus profile device get singlr-base root pool", "devpool\n")
+            .onOk("incus profile show singlr-base", PROFILE_ON_DEVPOOL)
             .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\"}]");
     var steps = new ArrayList<String>();
 
@@ -1248,9 +1246,7 @@ class HostProvisionerTest {
             .onOk(
                 "incus storage list",
                 pools("devpool", "dir", "/var/lib/incus/storage-pools/devpool"))
-            .onOk("incus profile show singlr-base")
-            .onOk("incus profile device list singlr-base", "root\neth0\n")
-            .onOk("incus profile device get singlr-base root pool", "devpool\n");
+            .onOk("incus profile show singlr-base", PROFILE_ON_DEVPOOL);
     var steps = new ArrayList<String>();
 
     var hostYaml =
@@ -1272,6 +1268,83 @@ class HostProvisionerTest {
         List.of("dir", "devpool", "/var/lib/incus/storage-pools/devpool"),
         List.of(hostYaml.storageBackend(), hostYaml.pool(), hostYaml.poolSource()));
   }
+
+  @Test
+  @Timeout(10)
+  void aProfileHoldingItsDevicesKeepsThemWhateverFormIncusListsThemIn() throws Exception {
+    var dirPool =
+        "{\"name\": \"devpool\", \"driver\": \"dir\", \"config\": {\"source\":"
+            + " \"/var/lib/incus/storage-pools/devpool\"}}";
+    var tank =
+        "{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\":"
+            + " \"/var/lib/incus/disks/tank.img\"}}";
+    var shell =
+        succeeding()
+            .onceOnOk("incus storage list --format json", "[" + dirPool + "]")
+            .onOk("incus storage list", "[" + dirPool + ", " + tank + "]")
+            .onOk("incus profile show singlr-base", PROFILE_ON_DEVPOOL)
+            .onOk("incus profile device list singlr-base", INCUS_7_7_DEVICE_TABLE)
+            .onOk("incus profile device get singlr-base root pool", "devpool\n")
+            .onFail("incus profile device add", "Error: The device already exists");
+    var steps = new ArrayList<String>();
+
+    var hostYaml =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO)
+            .provision(
+                new PoolSource.File(20480),
+                "tank",
+                "incusbr0",
+                null,
+                MEMORY_MB,
+                tempDir.resolve("host.yaml"),
+                tempDir.resolve("sail.db"));
+
+    assertTrue(
+        steps.contains("done:6/8:singlr-base (already exists): containers on devpool (dir)"),
+        steps.toString());
+    assertFalse(
+        shell.invocations().stream().anyMatch(c -> c.startsWith("incus profile device add")),
+        shell.invocations().toString());
+    assertEquals("devpool", hostYaml.pool());
+  }
+
+  /** A profile with no device, as {@code incus profile show} prints it. */
+  private static final String BARE_PROFILE = "name: singlr-base\ndevices: {}\n";
+
+  /**
+   * {@code incus profile show singlr-base} on the fleet's eng box, Incus 7.7, 2026-11-27: its root
+   * disk on devpool, its NIC on incusbr0.
+   */
+  private static final String PROFILE_ON_DEVPOOL =
+      """
+      config: {}
+      description: ""
+      devices:
+        eth0:
+          name: eth0
+          network: incusbr0
+          type: nic
+        root:
+          path: /
+          pool: devpool
+          type: disk
+      name: singlr-base
+      used_by:
+        - /1.0/instances/acme
+      project: default
+      """;
+
+  /** {@code incus profile device list singlr-base} on the same box: a table since Incus 7.7. */
+  private static final String INCUS_7_7_DEVICE_TABLE =
+      """
+      ┌──────┬──────┐
+      │ NAME │ TYPE │
+      ├──────┼──────┤
+      │ eth0 │ nic  │
+      ├──────┼──────┤
+      │ root │ disk │
+      └──────┴──────┘
+      """;
 
   @Test
   void aDryRunOnABoxWithoutIncusOrZfsSaysTheyWouldBeInstalledAndMakesTheProfileOnTheNewPool()
@@ -1448,7 +1521,7 @@ class HostProvisionerTest {
 
   @Test
   void aProfileLeftWithoutDevicesGetsItsRootDiskAndNic() throws Exception {
-    var shell = box(succeeding().onOk("incus profile device list", ""), "dir");
+    var shell = box(succeeding().onOk("incus profile show", BARE_PROFILE), "dir");
 
     provision(shell, DIR, null);
 
@@ -1490,7 +1563,12 @@ class HostProvisionerTest {
 
   @Test
   void aProfileThatNamesAPoolIncusLacksIsRefused() {
-    var shell = box(succeeding().onOk("incus profile device get", "oldpool\n"), "dir");
+    var shell =
+        box(
+            succeeding()
+                .onOk(
+                    "incus profile show", "devices:\n  root:\n    pool: oldpool\n    type: disk\n"),
+            "dir");
 
     var refused = assertThrows(IllegalStateException.class, () -> provision(shell, DIR, null));
 
@@ -1511,7 +1589,8 @@ class HostProvisionerTest {
     var unadded =
         box(
             succeeding()
-                .onOk("incus profile device list", "root\n")
+                .onOk(
+                    "incus profile show", "devices:\n  root:\n    pool: devpool\n    type: disk\n")
                 .onFail("incus profile device add", "network not found"),
             "dir");
 
@@ -1585,8 +1664,7 @@ class HostProvisionerTest {
                 "devpool",
                 driver,
                 "zfs".equals(driver) ? "/dev/sdb" : "/var/lib/incus/storage-pools/devpool"))
-        .onOk("incus profile device list singlr-base", "root\neth0\n")
-        .onOk("incus profile device get singlr-base root pool", "devpool\n")
+        .onOk("incus profile show singlr-base", PROFILE_ON_DEVPOOL)
         .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
         .onOk(DeviceFixtures.LSBLK, DeviceFixtures.read(DeviceFixtures.SPARES))
         .onOk("wipefs --all --no-act")
@@ -1657,7 +1735,7 @@ class HostProvisionerTest {
         mirrorBox(
             succeeding()
                 .onceOnOk("incus storage list --format json", "[]")
-                .onOk("incus profile device list", ""),
+                .onOk("incus profile show", BARE_PROFILE),
             VDEVS);
     var steps = new ArrayList<String>();
 
@@ -1817,8 +1895,7 @@ class HostProvisionerTest {
                 + " \""
                 + source
                 + "\", \"zfs.pool_name\": \"devpool\"}}]")
-        .onOk("incus profile device list", "root\neth0\n")
-        .onOk("incus profile device get singlr-base root pool", "devpool\n");
+        .onOk("incus profile show singlr-base", PROFILE_ON_DEVPOOL);
   }
 
   @Test
