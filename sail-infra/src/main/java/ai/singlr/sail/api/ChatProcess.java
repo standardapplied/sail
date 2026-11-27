@@ -415,7 +415,6 @@ final class ChatProcess {
   private void finished() {
     synchronized (this) {
       reading = false;
-      asked.clear();
     }
     var exit = end.seenOut();
     try {
