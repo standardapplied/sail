@@ -262,19 +262,19 @@ public final class SyncScheduler implements AutoCloseable {
   /**
    * Stops the timer and waits for its tick, then waits for the round executor, and only then closes
    * the health source their reads go through: interrupting a thread inside a native call does not
-   * stop it. A stop never waits out a backoff: a drain sleeping one is woken and runs no round, and
-   * its write, journaled with it, goes to main with the next start's first round. A drain in its
-   * debounce is not interrupted, since a round's first step (the round lock) fails on an
-   * interrupted thread: it sends its write before the close returns, unless it would first have to
-   * wait out a backoff. So the close waits at most the rest of a debounce and one round, which on a
-   * dead link the round's ssh ends ({@code SshSyncChannel}: a 10 s connect timeout, then two
-   * unanswered 10 s keepalives). The source only ever reads, so a failure to close it is a warning
-   * naming its causes, never a failure of the command whose work is done.
+   * stop it. Neither the tick nor a round is interrupted, since a round's first step (the round
+   * lock) fails on an interrupted thread. A stop never waits out a backoff: a drain sleeping one is
+   * woken and runs no round, and its write, and any made meanwhile, journaled with it, goes to main
+   * with the next start's first round. A drain in its debounce sends its write before the close
+   * returns, unless it would first have to wait out a backoff. So the close waits at most the
+   * timer's round, then the rest of a debounce and one round, each of which on a dead link the
+   * round's ssh ends ({@code SshSyncChannel}: a 10 s connect timeout, then two unanswered 10 s
+   * keepalives). The source only ever reads, so a failure to close it is a warning naming its
+   * causes, never a failure of the command whose work is done.
    */
   @Override
   public void close() {
     if (timer != null) {
-      timer.shutdownNow();
       timer.close();
     }
     if (executor != null) {
@@ -319,17 +319,13 @@ public final class SyncScheduler implements AutoCloseable {
     try {
       runWhenReady();
     } finally {
-      boolean rerun;
       synchronized (state) {
         running = false;
-        rerun = followUp;
-        followUp = false;
-        if (rerun) {
+        if (followUp && !closing) {
           scheduled = true;
+          executor.execute(this::drain);
         }
-      }
-      if (rerun) {
-        executor.execute(this::drain);
+        followUp = false;
       }
     }
   }
