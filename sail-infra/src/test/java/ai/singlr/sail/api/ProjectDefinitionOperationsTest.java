@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.TestDefinitions;
@@ -31,6 +32,7 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 @ActingAs(value = Actor.Lane.API, handle = "ada")
 class ProjectDefinitionOperationsTest {
@@ -121,6 +123,44 @@ class ProjectDefinitionOperationsTest {
         taken.failure().fieldErrors());
   }
 
+  /**
+   * An invalid name is refused under the name, as a taken one is; two repositories cloned to one
+   * path are refused under each row, at the create and at the section's write alike.
+   */
+  @Test
+  void anInvalidNameAndTwoRepositoriesAtOnePathAreRefusedUnderTheirFields() {
+    var repos =
+        List.of(
+            Map.of("url", "https://github.com/acme/app.git", "path", "app"),
+            Map.of("url", "https://github.com/acme/web.git", "path", "app"));
+
+    var name = refused(() -> operations.create(Map.of("name", "Bad_Name")));
+    var created = refused(() -> operations.create(Map.of("name", "beta", "repos", repos)));
+    var written = refused(() -> operations.writeSection("acme", "repos", repos, null));
+
+    assertEquals(ErrorCode.INVALID_REQUEST, name.errorCode());
+    assertEquals(
+        List.of(
+            FieldError.of(
+                "name",
+                "Invalid project name: 'Bad_Name'. Must match [a-z0-9][a-z0-9-]*, max 63"
+                    + " characters.")),
+        name.fieldErrors());
+    var sentence = "More than one repository is cloned to app: give each its own path.";
+    var rows =
+        List.of(FieldError.of("repos[0].path", sentence), FieldError.of("repos[1].path", sentence));
+    assertEquals(sentence, created.errorMessage());
+    assertEquals(rows, created.fieldErrors());
+    assertEquals(rows, written.fieldErrors());
+    assertTrue(projects.findByName("beta").isEmpty());
+    assertNull(projects.findByName("acme").orElseThrow().definition().repos());
+  }
+
+  private static Result.Failure<?> refused(Executable call) {
+    return ApiException.of(ErrorCode.INVALID_REQUEST, assertThrows(FieldsRefused.class, call))
+        .failure();
+  }
+
   @Test
   void aProjectIsNotCreatedUnderTheNameOfAWorkspaceOrTemplateThisBoxHoldsAndIsWhereNoneIsHeld() {
     var held =
@@ -192,6 +232,26 @@ class ProjectDefinitionOperationsTest {
     assertEquals(Refusal.Kind.OUT_OF_SCOPE, refused.refusal().kind());
     assertEquals("Project 'gamma' was not found.", refused.refusal().message());
     assertTrue(projects.findByName("gamma").isEmpty());
+  }
+
+  /**
+   * Who may write a section is decided before its value is read, so a person who may not write is
+   * told only that, never what the definition holds or why the value would not fit it.
+   */
+  @Test
+  void aSectionWriteIsDecidedBeforeItsValueIsChecked() {
+    var viewer = new Actor("vic", Role.VIEWER, Actor.Lane.API);
+    var repos =
+        List.of(
+            Map.of("url", "https://github.com/acme/app.git", "path", "app"),
+            Map.of("url", "https://github.com/acme/web.git", "path", "app"));
+
+    var refused =
+        assertThrows(
+            WriteRefused.class,
+            () -> Acting.by(viewer, () -> operations.writeSection("acme", "repos", repos, null)));
+
+    assertEquals(Refusal.Kind.READ_ONLY, refused.refusal().kind());
   }
 
   @Test

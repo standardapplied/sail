@@ -78,7 +78,7 @@ class WhoamiTest {
     assertEquals("Alex Morgan", body.get("display_name"));
     assertEquals("alex@example.com", body.get("email"));
     assertEquals("admin", body.get("role"));
-    assertEquals(List.of("read", "write", "admin"), body.get("capabilities"));
+    assertEquals(List.of("read", "write", "admin", "build"), body.get("capabilities"));
   }
 
   @Test

@@ -446,6 +446,27 @@ class ClientGoldensTest {
           "/v1/projects",
           dana,
           Map.of("name", PROJECT));
+      box.record(
+          http,
+          "refusal-project-name-invalid",
+          "POST",
+          "/v1/projects",
+          dana,
+          Map.of("name", "Harbor Docks"));
+      box.record(
+          http,
+          "refusal-project-repos-same-path",
+          "POST",
+          "/v1/projects",
+          dana,
+          Map.of("name", "jetty", "repos", reposAtOnePath()));
+      box.record(
+          http,
+          "refusal-project-section-repos-same-path",
+          "PUT",
+          "/v1/projects/marina/definition/repos",
+          dana,
+          Map.of("value", reposAtOnePath()));
 
       assertAll(
           () -> GoldenFiles.check(GOLDENS.resolve("http"), http),
@@ -570,6 +591,13 @@ class ClientGoldensTest {
         Map.of("install", List.of("claude-code", "codex")),
         "resources",
         Map.of("cpu", 4, "memory", "8GB", "disk", "50GB"));
+  }
+
+  /** Two repositories the app sends with one path: the second would clone over the first. */
+  private static List<Map<String, Object>> reposAtOnePath() {
+    return List.of(
+        Map.of("url", "https://github.com/harbor/app.git", "path", "app"),
+        Map.of("url", "https://github.com/harbor/site.git", "path", "app"));
   }
 
   private static String messages() {

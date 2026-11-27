@@ -11,6 +11,7 @@ import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
@@ -114,9 +115,9 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
    * that name is already catalogued.
    */
   public ProjectRow create(ProjectDefinition definition) {
-    NameValidator.requireNewProjectName(definition.name());
+    var name =
+        FieldsRefused.naming("name", () -> NameValidator.requireNewProjectName(definition.name()));
     var document = ProjectDefinitionJson.write(ProjectDefinitionJson.validated(definition));
-    var name = definition.name();
     return db.transaction(
         () -> {
           journal.admit(name, Map.of());
@@ -149,12 +150,14 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   /**
    * Writes each section {@code values} names, as {@link #writeSection} writes one, all in one
    * revision or none: a section whose tag {@code expected} names and the project no longer holds
-   * refuses the whole write, and one that leaves every section as it was records nothing.
+   * refuses the whole write, and one that leaves every section as it was records nothing. Who may
+   * write is decided first, so one who may not learns nothing of what the values would make.
    */
   public ProjectRow writeSections(
       String name, Map<Section, String> values, Map<Section, String> expected) {
     return db.transaction(
         () -> {
+          journal.admit(name, Map.of());
           var held =
               findByName(name)
                   .orElseThrow(

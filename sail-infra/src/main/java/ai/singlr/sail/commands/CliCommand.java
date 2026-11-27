@@ -89,8 +89,9 @@ public final class CliCommand {
 
   /**
    * {@code failure} as the API states a refusal: an API refusal as it is; one sail made on purpose
-   * ({@link #decided}) an invalid request, anything else an internal failure, each with the remedy
-   * it names.
+   * ({@link #decided}) an invalid request, anything else an internal failure, each as {@link
+   * ApiException#of} states it, with the remedy and the fields it names; one with no words named by
+   * its type.
    */
   static ApiError refusalOf(Exception failure) {
     if (Refusals.translated(failure) instanceof ApiException refusal) {
@@ -100,13 +101,9 @@ public final class CliCommand {
       return new ApiError(refused.code(), refused.reason(), refused.remedy(), List.of());
     }
     var code = decided(failure) ? ErrorCode.INVALID_REQUEST : ErrorCode.INTERNAL;
-    return failure instanceof Remedied remedied
-        ? new ApiError(code.code(), remedied.reason(), remedied.remedy(), List.of())
-        : new ApiError(
-            code.code(),
-            Objects.requireNonNullElse(failure.getMessage(), failure.getClass().getSimpleName()),
-            Remedy.NONE,
-            List.of());
+    return failure.getMessage() == null
+        ? new ApiError(code.code(), failure.getClass().getSimpleName(), Remedy.NONE, List.of())
+        : ApiException.of(code, failure).error();
   }
 
   private static void run(PrintStream err, String failureHint, CheckedRunnable runnable) {

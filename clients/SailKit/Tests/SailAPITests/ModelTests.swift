@@ -90,7 +90,7 @@ import Testing
     @Test func whoamiAndAProjectAreBuiltFromTheirFieldsAsTheServersAnswersRead() throws {
         #expect(try Endpoint.whoami.decode(response(try Exchange("whoami"))) == Whoami(
             fde: "uday", name: "uday", displayName: "Uday", email: "uday@example.com", role: .known(.admin),
-            capabilities: [.known(.read), .known(.write), .known(.admin)]
+            capabilities: [.known(.read), .known(.write), .known(.admin), .unknown("build")]
         ))
         #expect(try Endpoint.projects.decode(response(try Exchange("projects"))) == ProjectList(
             projects: [ProjectSummary(name: "harbor", containerStatus: .known(.notCreated), template: .known(.ready))], total: 1
@@ -130,7 +130,7 @@ import Testing
 
     @Test func everyRefusalWrittenAsJSONReadsBackAsItself() throws {
         let refusals = try Goldens.names(in: "http").filter { $0.hasPrefix("refusal-") }
-        #expect(refusals.count == 41)
+        #expect(refusals.count == 44)
         for name in refusals {
             guard case let .refused(refusal) = SailJSON.refusal(response(try Exchange(name)), route: name) else {
                 Issue.record("\(name) holds no refusal")

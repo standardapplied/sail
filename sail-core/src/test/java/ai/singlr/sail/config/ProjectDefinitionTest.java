@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.engine.KnownHosts;
 import java.time.Duration;
 import java.util.List;
@@ -767,6 +768,83 @@ class ProjectDefinitionTest {
             IllegalArgumentException.class,
             () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)))
         .getMessage();
+  }
+
+  @Test
+  void aNameRefusedIsSaidUnderTheName() {
+    var invalid =
+        assertThrows(
+            FieldsRefused.class,
+            () -> ProjectDefinition.fromMap(YamlUtil.parseMap("name: Bad_Name\n")));
+    var missing =
+        assertThrows(
+            FieldsRefused.class,
+            () -> ProjectDefinition.fromMap(YamlUtil.parseMap("description: Shop\n")));
+
+    assertEquals(
+        "Invalid project name: 'Bad_Name'. Must match [a-z0-9][a-z0-9-]*, max 63 characters.",
+        invalid.getMessage());
+    assertEquals(Map.of("name", invalid.getMessage()), invalid.fields());
+    assertEquals(Map.of("name", "name is required: the project's name."), missing.fields());
+  }
+
+  @Test
+  void twoRepositoriesClonedToOnePathAreReadButRefusedWhereTheyAreWrittenNamingEachRow() {
+    var yaml =
+        "name: acme\nrepos:\n"
+            + "  - url: https://github.com/acme/app.git\n    path: app\n"
+            + "  - url: https://github.com/acme/docs.git\n    path: docs\n"
+            + "  - url: https://github.com/acme/web.git\n    path: app/\n"
+            + "  - url: https://github.com/acme/notes.git\n    path: docs\n";
+    var read = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
+
+    var refused = assertThrows(FieldsRefused.class, () -> ProjectDefinitionJson.validated(read));
+    var section =
+        assertThrows(
+            FieldsRefused.class,
+            () ->
+                ProjectDefinitionJson.withSection(
+                    TestDefinitions.yaml("name: acme\n"),
+                    ProjectDefinition.Section.REPOS,
+                    ProjectDefinitionJson.section(read, ProjectDefinition.Section.REPOS)));
+
+    assertEquals(4, read.repos().size());
+    assertEquals(refused.fields(), section.fields());
+
+    var app = "More than one repository is cloned to app: give each its own path.";
+    var docs = "More than one repository is cloned to docs: give each its own path.";
+    assertEquals(app + " " + docs, refused.getMessage());
+    assertEquals(
+        List.of(
+            Map.entry("repos[0].path", app),
+            Map.entry("repos[2].path", app),
+            Map.entry("repos[1].path", docs),
+            Map.entry("repos[3].path", docs)),
+        List.copyOf(refused.fields().entrySet()));
+  }
+
+  @Test
+  void aRepositoryListedBeforeTheOneHoldingItIsRefusedNamingBothRowsAndANestInOrderIsKept() {
+    var inner = "  - url: https://github.com/acme/web.git\n    path: app/web\n";
+    var outer = "  - url: https://github.com/acme/app.git\n    path: app\n";
+    var apart = "  - url: https://github.com/acme/application.git\n    path: application\n";
+    var sentence = "app/web is listed before app, which holds it: list app first.";
+
+    var refused =
+        assertThrows(
+            FieldsRefused.class,
+            () ->
+                ProjectDefinitionJson.validated(
+                    TestDefinitions.yaml("name: acme\nrepos:\n" + apart + inner + outer)));
+    var nest =
+        ProjectDefinitionJson.validated(
+            TestDefinitions.yaml("name: acme\nrepos:\n" + apart + outer + inner));
+
+    assertEquals(sentence, refused.getMessage());
+    assertEquals(Map.of("repos[1].path", sentence, "repos[2].path", sentence), refused.fields());
+    assertEquals(
+        List.of("application", "app", "app/web"),
+        nest.repos().stream().map(ProjectDefinition.Repo::path).toList());
   }
 
   @Test
