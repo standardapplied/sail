@@ -1293,6 +1293,7 @@
   {"name": "se-harbor-chosen", "chooseProject": "harbor"},
   {"name": "se-dock-listed", "workspaces": "dock · running"},
   {"name": "se-open-dock", "open": "dock"},
+  {"name": "se-docks-tab-in-front", "arrangement": {"titles": ["This Mac", "This Mac 3", "harbor · dock", "harbor · dock 2"], "selected": 3}, "seconds": 15},
   {"name": "se-the-files-beside-the-terminal", "press": "s", "modifiers": ["control", "command"]},
   {"name": "se-the-files-live", "filesRowShown": "berth.md", "seconds": 15},
   {"name": "se-attached", "attached": true},
