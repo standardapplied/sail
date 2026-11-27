@@ -6,11 +6,12 @@ import SailWorkbench
 
 /// A project's Workspaces view, as the approved design draws it: its name and the line under it,
 /// List Again and New Workspace at the top right, a banner when something went wrong, then the list
-/// (yours, then other people's, the create row first among yours), an empty state, or skeleton rows;
-/// a foot with the count and the keys. It draws what ``WorkspacesModel`` says and sends the person's
-/// actions back; it keeps nothing of its own. Narrower than its wide rows' columns leave a name room
-/// for, as at the minimum window, it is drawn as the design's narrow frame: the line under the name
-/// goes, New Workspace is an icon, and rows drop the owner's column.
+/// (yours, then other people's, the create row first among yours), an empty state, a new project's
+/// build card (with neither button), or skeleton rows; a foot with the count and the keys. It draws
+/// what ``WorkspacesModel`` says and sends the person's actions back; it keeps nothing of its own.
+/// Narrower than its wide rows' columns leave a name room for, as at the minimum window, it is drawn
+/// as the design's narrow frame: the line under the name goes, New Workspace is an icon, and rows
+/// drop the owner's column.
 @MainActor
 package final class ProjectView: NSView, NSTextFieldDelegate {
     enum Act: Equatable {
@@ -82,8 +83,24 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     package var listScroll: NSScrollView? {
         frameView.scroll
     }
-    /// The head, the list, the foot and the loading bars span the column, whatever their content's width.
-    private lazy var spans = [head, foot, frameView, loadingWords, loadingList].map { $0.widthAnchor.constraint(equalTo: column.widthAnchor) }
+    /// The head, the list, the foot, the loading bars and the build card span the column, whatever
+    /// their content's width.
+    private lazy var spans = [head, foot, frameView, loadingWords, loadingList, buildFrame].map { $0.widthAnchor.constraint(equalTo: column.widthAnchor) }
+    /// The build card, made once: the mark drawing in it keeps drawing across the reads that redraw it.
+    private(set) lazy var buildCard: BuildCard = {
+        let card = BuildCard(look: look, titleFont: titleFont, mono: mono)
+        card.onBuildAgain = { [weak self] in self?.on(.buildAgain) }
+        return card
+    }()
+
+    /// The build card's frame, which scrolls it where the window is too short for it.
+    private lazy var buildFrame = ListFrame(scrolling: buildCard, look: look)
+
+    /// The build card's frame as tall as the card at the column's width.
+    private func fitBuild() {
+        guard case .build? = page?.body, bounds.width > 0 else { return }
+        buildFrame.height = buildCard.height(width: Double(bounds.width) - 2 * Self.padding.sides - 2)
+    }
     private var page: WorkspacesModel.Page?
     /// The empty state drawn alone, centred, when no project is open.
     private var centred: NSView?
@@ -121,6 +138,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             label.lineBreakMode = .byTruncatingTail
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
+        title.lineBreakMode = .byTruncatingMiddle
         buildHead()
         buildFoot()
         foot.heightAnchor.constraint(equalToConstant: Keycap.height).isActive = true
@@ -148,10 +166,13 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         true
     }
 
-    /// Drawn narrow or wide by its own width, redrawn only when that changes.
+    /// Drawn narrow or wide by its own width, redrawn only when that changes; the build card's frame
+    /// follows the new width.
     override public func setFrameSize(_ newSize: NSSize) {
+        let widened = newSize.width != frame.width
         super.setFrameSize(newSize)
         if newSize.width > 0 { narrow = Double(newSize.width) < Self.wide }
+        if widened { fitBuild() }
     }
 
     /// Draws `page`.
@@ -162,12 +183,15 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         title.attributedStringValue = NSAttributedString(string: page.name, attributes: [
             .font: titleFont.font(.title1) as NSFont, .foregroundColor: NSColor(look.text), .kern: -0.012 * Look.Step.title1.points,
         ])
+        title.toolTip = page.name
+        let building = if case .build = page.body { true } else { false }
         lede.attributedStringValue = NSAttributedString(string: page.lede, attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(look.textSecondary),
         ])
         lede.isHidden = narrow
-        newWorkspace.isHidden = narrow
-        newWorkspaceIcon.isHidden = !narrow
+        listAgain.isHidden = building
+        newWorkspace.isHidden = narrow || building
+        newWorkspaceIcon.isHidden = !narrow || building
         for button in [newWorkspace, newWorkspaceIcon] {
             button.isEnabled = page.canCreate
             button.why = page.createWhy
@@ -179,6 +203,10 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         case .loading: views.append(loadingList)
         case .unlisted: break
         case let .empty(empty): views.append(Self.framed(emptyState(empty), look: look))
+        case let .build(build):
+            buildCard.show(build)
+            fitBuild()
+            views.append(buildFrame)
         case let .list(table):
             if let scroll = frameView.scroll, filled == page.name {
                 scroll.keepingScroll { fill(table) }
@@ -211,6 +239,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         }
         loadingRows.look = look
         loadingList.look = look
+        buildCard.look = look
+        buildFrame.look = look
         buildFoot()
         switch drawn {
         case let .page(page)?: render(page)
@@ -521,7 +551,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     private func banner(_ notice: WorkspacesModel.Notice) -> Banner {
-        let again = notice.tryAgain.map { SailButton("Try Again", kind: .secondary, size: .small, look: look, target: self, action: $0 == .build ? #selector(buildAgain(_:)) : #selector(askAgain(_:))) }
+        let again = notice.tryAgain ? SailButton("Try Again", kind: .secondary, size: .small, look: look, target: self, action: #selector(askAgain(_:))) : nil
         return Banner(notice.tone == .error ? .error : .warning, title: notice.title, line: notice.line.isEmpty ? nil : notice.line, action: again, look: look)
     }
 
@@ -542,11 +572,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// Create Project, in the empty state of a control plane with no project.
     @objc private func createProject(_: Any?) {
         on(.createProject)
-    }
-
-    /// Try Again over a project whose template's build could not be asked: asks it again.
-    @objc private func buildAgain(_: Any?) {
-        on(.buildAgain)
     }
 
     /// Words in mono 11, tertiary: the foot's.

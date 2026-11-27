@@ -31,6 +31,8 @@ public final class WorkspacesView: NSView {
                 render()
             } else {
                 projectSheet?.withdraw()
+                lastReads?.cancel()
+                reading = (nil, true)
                 model = WorkspacesModel(person: person, chosen: lastChosen(person))
                 memory = remembered(person)
                 model.lastStarted = memory.last?.display
@@ -121,6 +123,15 @@ public final class WorkspacesView: NSView {
         underWay > 0
     }
 
+    /// How the reads of a template being built wait between them: a test's own.
+    var pause: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    /// The project whose template its page reads (nil: none), whether those reads ended, and the
+    /// last reads started, cancelled before others start.
+    private var reading: (project: String?, ended: Bool) = (nil, true)
+    private var lastReads: Task<Void, Never>?
+    /// The reads started: an answer to reads since replaced is dropped.
+    private var reads = 0
+
     private var underWay = 0
 
     private enum Door: Equatable {
@@ -199,11 +210,13 @@ public final class WorkspacesView: NSView {
         super.viewDidUnhide()
         painter.shown()
         showQuestion()
+        readTemplate()
     }
 
     override public func viewDidHide() {
         super.viewDidHide()
         newSession.close()
+        readTemplate()
     }
 
     /// The section's ground, the card's canvas, as the approved frames draw it around the list.
@@ -238,6 +251,7 @@ public final class WorkspacesView: NSView {
             switch page.body {
             case .loading, .unlisted: break
             case let .empty(empty): lines += [empty.title, empty.body]
+            case let .build(build): lines += build.lines
             case let .list(table):
                 lines += table.create?.refusal ?? []
                 lines += table.creating.map { [said($0)] } ?? []
@@ -494,16 +508,40 @@ public final class WorkspacesView: NSView {
         }
     }
 
-    /// Project `name`'s template's build asked, which the server joins when one is under way; once
-    /// asked, the projects listed again to show it building. A refusal, or no answer with Try
-    /// Again, is said over its page.
+    /// Project `name`'s template's build asked once while it is unanswered, which the server joins
+    /// when one is under way: its answer draws the build card, which then reads the template; a
+    /// refusal, or no answer, is said on the card.
     private func build(_ name: String, era: Int) async {
-        guard let client else { return }
+        guard let client, model.asksBuild(name) else { return }
+        render()
         let built = await Self.result { () async throws(SailError) in try await client.send(.buildTemplate(project: name)) }
         guard era == self.era else { return }
         model.built(name, built)
         render()
-        if case .success = built { await askProjects().value }
+    }
+
+    /// Reads the template of the project whose page shows its build: once each time that page is
+    /// shown, then every 2 s while the build runs, one read at a time. Leaving the page (another
+    /// project, This Mac, another section), signing out or the build ending stops the reads.
+    private func readTemplate() {
+        let wanted = door == .signedIn && !isHiddenOrHasHiddenAncestor ? model.templateShown : nil
+        if wanted == reading.project, !reading.ended || wanted.map(model.readsAgain) != true { return }
+        lastReads?.cancel()
+        reading = (wanted, true)
+        guard let client, let project = wanted else { return }
+        let era = self.era, pause = self.pause
+        reads += 1
+        let read = reads
+        reading.ended = false
+        lastReads = Task { [weak self] in
+            await client.readTemplate(project, sleep: pause) { answer in
+                guard let self, era == self.era, self.reads == read else { return false }
+                self.model.templateRead(project, answer)
+                self.render()
+                return self.model.readsAgain(project)
+            }
+            if let self, reads == read { reading.ended = true }
+        }
     }
 
     // MARK: New Session
@@ -790,6 +828,7 @@ public final class WorkspacesView: NSView {
     }
 
     private func draw() {
+        defer { readTemplate() }
         let screen: WorkspacesModel.Screen? = door == .signedIn ? model.screen : nil
         switch (door, screen) {
         case let (_, .shown(panelModel, content)?):

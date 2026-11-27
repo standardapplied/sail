@@ -362,7 +362,8 @@ import Testing
     }
 
     /// A project created is listed and chosen before its build is asked, once; a build that got no
-    /// answer leaves Try Again over its page, which asks it again, and then the page says it builds.
+    /// answer is said on its card with Build Again, which asks it again, and then the card shows it
+    /// building.
     @Test func aCreatedProjectIsChosenThenBuilt() async throws {
         let build = "POST /v1/projects/lighthouse/template%3Abuild"
         let desk = try Desk(["projects-none", "agents"])
@@ -371,7 +372,9 @@ import Testing
             window.attachedSheet.map { window.endSheet($0) }
             window.orderOut(nil)
         }
-        view.person = WorkspacesModel.Person(handle: "dana", admin: true, confirmed: true, controlPlane: "127.0.0.1", creates: true)
+        let pauses = Pauses()
+        view.pause = { try await pauses.pause($0) }
+        view.person = BuildCardViewTests.dana
         view.shown()
         #expect(await RunnerTabTests.until { Driverless.button("Create Project", in: view.project) != nil }, "\(view.text)")
         await desk.answer(try Exchange("project-created").altered(at: ["name"], to: "lighthouse"))
@@ -390,11 +393,11 @@ import Testing
         #expect(asked.firstIndex(of: "POST /v1/projects").map { asked[$0...].contains("GET /v1/projects") } == true, "not listed before the build: \(asked)")
         #expect(view.panel.list.chosen == "lighthouse" && view.text.hasPrefix("Workspaces\nlighthouse\n"), "not chosen before the build: \(view.text)")
         await desk.release()
-        #expect(await RunnerTabTests.until { view.text.contains("Couldn’t start building lighthouse’s template") }, "\(view.text)")
+        #expect(await RunnerTabTests.until { view.text.contains("lighthouse’s template did not start\nSail cannot reach the control plane at 127.0.0.1.") }, "\(view.text)")
         await desk.answer(try Exchange("template-2f-joined"))
-        await desk.answer(try Exchange("projects").altered(at: ["projects"], to: [["name": "lighthouse", "container_status": "not_created", "template": "building"]]))
-        Self.press(try #require(Driverless.button("Try Again", in: view.project)))
-        #expect(await RunnerTabTests.until { view.text.contains("lighthouse’s template is being built") && !view.text.contains("Couldn’t start") }, "\(view.text)")
+        await desk.answer(try BuildCardViewTests.template("template-2e-building"))
+        Self.press(try #require(Driverless.button("Build Again", in: view.project)))
+        #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && !view.text.contains("did not start") && pauses.count == 1 }, "\(view.text)")
         #expect(await desk.asked.filter { $0 == build }.count == 2)
     }
 

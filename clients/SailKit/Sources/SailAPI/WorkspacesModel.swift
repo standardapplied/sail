@@ -29,13 +29,16 @@ public struct WorkspacesModel: Sendable {
         /// decides it), and the build one, which its template's build needs: a project no one here
         /// could build would go nowhere.
         public let creates: Bool
+        /// Their `whoami` names the build capability: a template's build is theirs to ask again.
+        public let builds: Bool
 
-        public init(handle: String, admin: Bool, confirmed: Bool, controlPlane: String, creates: Bool = false) {
+        public init(handle: String, admin: Bool, confirmed: Bool, controlPlane: String, creates: Bool = false, builds: Bool = false) {
             self.handle = handle
             self.admin = admin
             self.confirmed = confirmed
             self.controlPlane = controlPlane
             self.creates = creates
+            self.builds = builds
         }
 
         /// The control plane as a person reads it: its host, and its port when it has one.
@@ -49,7 +52,8 @@ public struct WorkspacesModel: Sendable {
             let whoami = signedIn.flatMap { try? $0.whoami.get() }
             self.init(
                 handle: whoami?.fde ?? signedIn?.fde ?? "", admin: whoami?.role == .known(.admin), confirmed: whoami != nil,
-                controlPlane: signedIn?.controlPlane.description ?? "", creates: whoami.map { [Open<Capability>.known(.write), .known(.build)].allSatisfy($0.capabilities.contains) } ?? false
+                controlPlane: signedIn?.controlPlane.description ?? "", creates: whoami.map { [Open<Capability>.known(.write), .known(.build)].allSatisfy($0.capabilities.contains) } ?? false,
+                builds: whoami?.capabilities.contains(.known(.build)) ?? false
             )
         }
     }
@@ -160,6 +164,8 @@ public struct WorkspacesModel: Sendable {
         case unlisted
         case empty(Empty)
         case list(Table)
+        /// No workspace yet, and the template's build under way, ended short, or asked and not started.
+        case build(Build)
     }
 
     public struct Empty: Equatable, Sendable {
@@ -180,17 +186,13 @@ public struct WorkspacesModel: Sendable {
             case warning, error
         }
 
-        /// What its Try Again asks again: the list it could not get, or the build it could not ask.
-        public enum Again: Equatable, Sendable {
-            case list, build
-        }
-
         public let tone: Tone
         public let title: String
         public let line: String
-        public let tryAgain: Again?
+        /// Its Try Again asks again for the list it could not get.
+        public let tryAgain: Bool
 
-        public init(tone: Tone, title: String, line: String, tryAgain: Again?) {
+        public init(tone: Tone, title: String, line: String, tryAgain: Bool) {
             self.tone = tone
             self.title = title
             self.line = line
@@ -327,10 +329,17 @@ public struct WorkspacesModel: Sendable {
     private var choosingAfterList: [String: String] = [:]
     /// The project the person created, chosen when the projects listed next show it.
     private var created: String?
-    /// What stands over a project's page about its template's build, by project: the refusal, or the
-    /// build that could not be asked, with Try Again; until the build is asked, or the projects
-    /// listed show its template no longer missing.
-    private var builds: [String: Notice] = [:]
+    /// Each project's template as last read, which its build card is drawn from; and those whose last
+    /// read got no answer.
+    private var templates: [String: TemplateStatus] = [:]
+    private var templateMissed: Set<String> = []
+    /// The projects whose build was asked and not yet answered.
+    private var buildsAsked: Set<String> = []
+    /// What a project's build card says of the build asked that did not start (its refusal, or that
+    /// it got no answer), until a build is asked again, or the template reads as building or ready.
+    private var buildSaid: [String: [String]] = [:]
+    /// Where the person reads a clock: a build's start is said in it.
+    public var timeZone = TimeZone.current
 
     /// The chosen project's create row.
     private var create: CreateLine? {
@@ -357,7 +366,7 @@ public struct WorkspacesModel: Sendable {
         case let .success(list):
             projects = list.projects
             projectsFailure = nil
-            builds = builds.filter { name, _ in list.projects.contains { $0.name == name && $0.template == .known(.missing) } }
+            buildSaid = buildSaid.filter { name, _ in list.projects.contains { $0.name == name && [.known(.missing), .known(.failed)].contains($0.template) } }
             if let created {
                 self.created = nil
                 if list.projects.contains(where: { $0.name == created }) {
@@ -496,20 +505,50 @@ public struct WorkspacesModel: Sendable {
         created = name
     }
 
-    /// The build of project `name`'s template asked: refused, said over its page in the server's
-    /// words and what to do; not answered, said with Try Again, which asks it again.
+    /// Asks project `name`'s build: false while one asked is not yet answered, so Build Again pressed
+    /// again asks nothing.
+    public mutating func asksBuild(_ name: String) -> Bool {
+        buildsAsked.insert(name).inserted
+    }
+
+    /// The build of project `name`'s template answered: started or joined, its card drawn from the
+    /// answer; refused or not answered, said on its card in the server's words and what to do.
     public mutating func built(_ name: String, _ answer: Result<TemplateStatus, SailError>) {
+        buildsAsked.remove(name)
         switch answer {
         case .success:
-            builds[name] = nil
+            buildSaid[name] = nil
+            templateRead(name, answer)
         case let .failure(error):
-            let said = lines(error)
-            builds[name] = if case .refused = error {
-                Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: nil)
-            } else {
-                Notice(tone: .error, title: "Couldn’t start building \(name)’s template", line: said.joined(separator: " "), tryAgain: .build)
-            }
+            buildSaid[name] = lines(error)
         }
+    }
+
+    /// Takes project `name`'s template as read: its card is drawn from it, and its pill and New
+    /// Workspace follow its state at once; a read that got no answer keeps the card as read before,
+    /// saying so.
+    public mutating func templateRead(_ name: String, _ answer: Result<TemplateStatus, SailError>) {
+        guard let index = projects?.firstIndex(where: { $0.name == name }), let project = projects?[index] else { return }
+        guard case let .success(status) = answer else {
+            templateMissed.insert(name)
+            return
+        }
+        templates[name] = status
+        templateMissed.remove(name)
+        if [.known(.building), .known(.ready)].contains(status.state) { buildSaid[name] = nil }
+        projects?[index] = ProjectSummary(name: name, containerStatus: project.containerStatus, template: status.state)
+    }
+
+    /// The project whose template its page reads: the one shown, while its template is being built
+    /// or its last build failed.
+    public var templateShown: String? {
+        guard !thisMacChosen, let project = projects?.first(where: { $0.name == chosen }) else { return nil }
+        return [.building, .buildFailed].contains(Self.mark(project.template)) ? project.name : nil
+    }
+
+    /// Whether `name`'s template is read again: its page is still shown and its build still runs.
+    public func readsAgain(_ name: String) -> Bool {
+        templateShown == name && projects?.first { $0.name == name }?.template == .known(.building)
     }
 
     // MARK: Stop and delete
@@ -576,7 +615,7 @@ public struct WorkspacesModel: Sendable {
     private mutating func notAsked(_ action: Action, _ name: String, project: String) {
         guard refused[project] == nil else { return }
         let verb = action == .stop ? "Stop" : "Delete"
-        refused[project] = (Notice(tone: .warning, title: "\(name) is not asked about yet: answer the question open, then choose \(verb) again.", line: "", tryAgain: nil), listing.latest)
+        refused[project] = (Notice(tone: .warning, title: "\(name) is not asked about yet: answer the question open, then choose \(verb) again.", line: "", tryAgain: false), listing.latest)
     }
 
     private mutating func open(_ question: Question) -> Question {
@@ -619,7 +658,7 @@ public struct WorkspacesModel: Sendable {
         waiting.removeAll { $0.project == project && !names.contains($0.name) }
         guard let open = asking, open.project == project, !names.contains(open.name) else { return }
         asking = nil
-        refused[project] = (Notice(tone: .warning, title: "\(open.name) is no longer in \(project), so Sail stopped asking about it.", line: "", tryAgain: nil), request)
+        refused[project] = (Notice(tone: .warning, title: "\(open.name) is no longer in \(project), so Sail stopped asking about it.", line: "", tryAgain: false), request)
         askNextWaiting()
     }
 
@@ -660,10 +699,10 @@ public struct WorkspacesModel: Sendable {
             )
             if asking == nil { asking = anyway } else { waiting.append(anyway) }
         case let .failure(.refused(refusal)) where refusal.code == .known(.workspaceHoldsWork):
-            refused[project] = (Notice(tone: .error, title: Self.holdsWork(refusal.message, name).said, line: "", tryAgain: nil), request)
+            refused[project] = (Notice(tone: .error, title: Self.holdsWork(refusal.message, name).said, line: "", tryAgain: false), request)
         case let .failure(error):
             let said = lines(error)
-            refused[project] = (Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: nil), request)
+            refused[project] = (Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: false), request)
         }
         return request
     }
@@ -731,7 +770,7 @@ public struct WorkspacesModel: Sendable {
 
     /// The projects' refresh that failed while projects are shown, said over the page.
     private var projectsBanner: Notice? {
-        projectsFailure.map { Notice(tone: .error, title: "Couldn’t list your projects", line: $0.said(at: person.controlPlane), tryAgain: .list) }
+        projectsFailure.map { Notice(tone: .error, title: "Couldn’t list your projects", line: $0.said(at: person.controlPlane), tryAgain: true) }
     }
 
     /// The card when no project could be listed: what is true, in Sail's words with the address and
@@ -768,30 +807,50 @@ public struct WorkspacesModel: Sendable {
         case nil: return nil
         case .building?:
             return Unready(
-                lede: "\(name)’s template is being built; workspaces come after it.", why: "\(name)’s template is being built",
-                title: "\(name)’s template is being built", body: "You can create workspaces in \(name) once it is built.",
-                withRows: "\(name)’s template is being rebuilt; new workspaces wait for it."
+                lede: building, why: "\(name)’s template is being built", withRows: "\(name)’s template is being rebuilt; new workspaces wait for it.", missing: nil
             )
         case .buildFailed?:
             return Unready(
-                lede: "\(name) has no template yet, so no workspace can be created in it.", why: "\(name)’s template could not be built",
-                title: "\(name)’s template could not be built",
-                body: "Its last build failed, so no version of it is current. An admin builds it again on the runner; then you can create workspaces here.",
-                withRows: "\(name)’s template could not be built, so no new workspace can be created in it."
+                lede: building, why: "\(name)’s template could not be built", withRows: "\(name)’s template could not be built, so no new workspace can be created in it.",
+                missing: nil
             )
         case .noTemplate?:
             return Unready(
-                lede: "\(name) has no template yet, so no workspace can be created in it.", why: "\(name) has no template yet", title: "\(name) isn’t ready yet",
-                body: "\(name) has no template yet. An admin builds \(name)’s template on the runner first; then you can create workspaces here.",
-                withRows: "\(name) has no template now, so no new workspace can be created in it."
+                lede: "\(name) has no template yet, so no workspace can be created in it.", why: "\(name) has no template yet",
+                withRows: "\(name) has no template now, so no new workspace can be created in it.",
+                missing: Empty(
+                    title: "\(name) isn’t ready yet", body: "\(name) has no template yet. An admin builds \(name)’s template on the runner first; then you can create workspaces here.",
+                    line: nil, action: .checkAgain, missing: true
+                )
             )
         }
     }
 
-    /// What a project whose template is not current says: its line and New Workspace's reason, the
-    /// empty state with no workspace listed, and its line over the workspaces it has.
+    /// The line under a project's name while its build card shows.
+    static let building = "Workspaces open once the template is ready."
+
+    /// What a project whose template is not current says: its line and New Workspace's reason, its
+    /// line over the workspaces it has, and, with none listed and no build card, what is missing.
     private struct Unready {
-        let lede: String, why: String, title: String, body: String, withRows: String
+        let lede: String, why: String, withRows: String, missing: Empty?
+    }
+
+    /// What a project whose template is not current shows with no workspace listed: its build's card;
+    /// else what is missing; else, its build not read yet, the loading frame.
+    private func notCurrent(_ project: ProjectSummary, _ unready: Unready) -> Body {
+        build(project).map(Body.build) ?? unready.missing.map(Body.empty) ?? .loading
+    }
+
+    /// `project`'s build card: from its template as last read while that read agrees with the state
+    /// listed; or, with no template and a build asked that did not start, what was said instead.
+    private func build(_ project: ProjectSummary) -> Build? {
+        let name = project.name, refusal = buildSaid[name] ?? [], asking = buildsAsked.contains(name)
+        if let status = templates[name], status.state == project.template,
+           let card = Build(status, project: name, person: person, missed: templateMissed.contains(name), asking: asking, refusal: refusal, timeZone: timeZone) {
+            return card
+        }
+        guard !refusal.isEmpty, Self.mark(project.template) == .noTemplate else { return nil }
+        return Build(unstarted: name, person: person, asking: asking, refusal: refusal)
     }
 
     /// A project's page. A template not current offers no create, but never hides the workspaces
@@ -799,12 +858,12 @@ public struct WorkspacesModel: Sendable {
     /// says why it waits; only a project with none listed says what is missing in its place.
     private func page(_ project: ProjectSummary) -> Page {
         let name = project.name, listed = listing.listed == name, unready = Self.unready(project)
-        let banner = refused[name]?.notice ?? builds[name] ?? listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: .list) } ?? projectsBanner
+        let banner = refused[name]?.notice ?? listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? projectsBanner
         let rows = listed ? WorkspaceList(project: name, workspaces: listing.rows).rows(for: person.handle) : []
         if let unready, rows.isEmpty, listed, listFailure == nil {
             return Page(
                 name: name, lede: unready.lede, canCreate: false, createWhy: unready.why, banner: banner,
-                body: .empty(Empty(title: unready.title, body: unready.body, line: nil, action: .checkAgain, missing: true)), stale: false, listedAt: nil
+                body: notCurrent(project, unready), stale: false, listedAt: nil
             )
         }
         let body: Body
@@ -813,7 +872,7 @@ public struct WorkspacesModel: Sendable {
             body = listFailure == nil ? .loading : .unlisted
         } else {
             if rows.isEmpty, create == nil, let unready {
-                body = .empty(Empty(title: unready.title, body: unready.body, line: nil, action: .checkAgain, missing: true))
+                body = notCurrent(project, unready)
             } else if rows.isEmpty, create == nil {
                 body = .empty(Empty(
                     title: "No workspaces in \(name) yet",

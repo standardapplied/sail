@@ -1,0 +1,235 @@
+import AppKit
+import SailAPI
+import SailControls
+import SailKitTestSupport
+import SailLook
+@testable import SailShell
+import Synchronization
+import Testing
+
+/// A new project's page shows its build (`buildCard` of the first-impressions page, section 6): the
+/// card is laid out whole at the least window and wide, mirrored right to left; the page reads its
+/// template every 2 s while it builds, through the section's pause, until it is built or the page
+/// is left, signed out of or hidden, and once again each time it is shown; Build Again asks the build
+/// once however often it is pressed.
+@MainActor @Suite(.serialized, .timeLimit(.minutes(1))) struct BuildCardViewTests {
+    init() {
+        ExitWatch.install()
+    }
+
+    static let dana = WorkspacesModel.Person(handle: "dana", admin: true, confirmed: true, controlPlane: "127.0.0.1", creates: true, builds: true)
+    static let long = "acme-payments-reconciliation-service"
+    static let read = "GET /v1/projects/lighthouse/template"
+    static let build = "POST /v1/projects/lighthouse/template%3Abuild"
+    /// The least window's card: the narrowest card less the page's sides and the frame's edge.
+    static let least = WorkspacesViewTests.narrowestCard - 2 * ProjectView.padding.sides - 2
+
+    /// The golden `name`'s template answer for project `project`, its build at `step`.
+    static func template(_ name: String, project: String = "lighthouse", step: Int? = nil) throws -> Exchange {
+        var exchange = try Exchange(name)
+        if let step { exchange = try exchange.altered(at: ["build", "step"], to: step) }
+        let said = String(decoding: exchange.body, as: UTF8.self).replacingOccurrences(of: "lighthouse", with: project).replacingOccurrences(of: "\"harbor\"", with: "\"\(project)\"")
+        return Exchange(method: "GET", path: "/v1/projects/\(project)/template", status: exchange.status, body: Data(said.utf8))
+    }
+
+    /// The card project `project`'s page draws for `person` once `golden` is read, and `refused` when
+    /// a build asked was refused.
+    static func card(_ golden: String, project: String = Self.long, step: Int? = nil, person: WorkspacesModel.Person = Self.dana, refused: String? = nil) throws -> WorkspacesModel.Build {
+        let exchange = try template(golden, project: project, step: step)
+        let status = try Endpoint.template(project: project).decode(HTTPResponse(status: exchange.status, body: exchange.body))
+        var model = WorkspacesModel(person: person)
+        model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: project, containerStatus: .known(.notCreated), template: status.state)], total: 1)))
+        model.listed(.success(WorkspaceList(project: project, workspaces: [])), request: model.choose(project), at: Date(timeIntervalSince1970: 0))
+        model.templateRead(project, .success(status))
+        if let refused {
+            let refusal = try Exchange(refused), answer: Result<TemplateStatus, SailError>
+            do throws(SailError) {
+                answer = .success(try Endpoint.buildTemplate(project: project).decode(HTTPResponse(status: refusal.status, body: refusal.body)))
+            } catch {
+                answer = .failure(error)
+            }
+            _ = model.asksBuild(project)
+            model.built(project, answer)
+        }
+        guard case let .shown(_, .project(page)) = model.screen, case let .build(card) = page.body else { throw GoldenError(reason: "no card: \(model.screen)") }
+        return card
+    }
+
+    static func shown(_ build: WorkspacesModel.Build, width: Double, direction: NSUserInterfaceLayoutDirection = .leftToRight) throws -> BuildCard {
+        let card = BuildCard(look: .light, titleFont: try TitleFont(directory: LookTests.fonts), mono: try LabelFont(directory: LookTests.fonts))
+        card.userInterfaceLayoutDirection = direction
+        card.show(build)
+        card.frame = NSRect(x: 0, y: 0, width: width, height: card.height(width: width))
+        card.layout()
+        return card
+    }
+
+    /// Every line of the card is whole at the least window and wide, a long project's name and the
+    /// server's long sentences included: each wraps within its own place, none runs past the card's
+    /// sides or into another, and the card is as tall as all of them.
+    @Test(arguments: [false, true])
+    func theCardIsLaidOutWhole(_ wide: Bool) throws {
+        let width = wide ? 600 : Self.least
+        let builds = [
+            try Self.card("template-2e-building", step: 10), try Self.card("template-2h-failed", refused: "refusal-template-read-only"),
+            try Self.card("template-2h-failed", person: WorkspacesViewTests.ana),
+        ]
+        for build in builds {
+            for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
+                let card = try Self.shown(build, width: width, direction: direction)
+                let laid = card.laid(width: width, now: Date(timeIntervalSince1970: 0))
+                let boxes = laid.texts.map { $0.rect } + [laid.again].compactMap { $0 }
+                for (text, rect) in laid.texts {
+                    #expect(rect.minX >= BuildCard.padding.sides - 0.5 && rect.maxX <= width - BuildCard.padding.sides + 0.5, "'\(text.string)' at \(rect) in \(width)")
+                    #expect(BuildCard.height(text, Double(rect.width)) <= Double(rect.height) + 0.5, "'\(text.string)' cut in \(rect)")
+                    #expect(Double(rect.maxY) + BuildCard.padding.bottom <= laid.height + 0.5, "'\(text.string)' below the card")
+                }
+                for (index, one) in boxes.enumerated() {
+                    for other in boxes[(index + 1)...] {
+                        #expect(!one.insetBy(dx: 0.5, dy: 0.5).intersects(other.insetBy(dx: 0.5, dy: 0.5)), "\(one) over \(other) at \(width): \(build.title)")
+                    }
+                }
+                if build.buildsAgain {
+                    #expect(!card.again.isHidden && card.bounds.contains(card.again.frame), "Build Again at \(card.again.frame) outside \(card.bounds)")
+                }
+            }
+        }
+    }
+
+    /// Right to left, the card is mirrored: the mark, the running group's spinner and Build Again
+    /// stand at the trailing side, each where the left-to-right card has it, measured from the other
+    /// edge.
+    @Test func theCardIsMirroredRightToLeft() throws {
+        for build in [try Self.card("template-2e-building", step: 10), try Self.card("template-2h-failed")] {
+            let ltr = try Self.shown(build, width: 600), rtl = try Self.shown(build, width: 600, direction: .rightToLeft)
+            for (one, other) in [(ltr.mark, rtl.mark), (ltr.spinner, rtl.spinner), (ltr.again, rtl.again)] where !one.isHidden {
+                #expect(abs(Double(other.frame.minX) - (600 - Double(one.frame.maxX))) < 0.5 && other.frame.minY == one.frame.minY, "\(one.frame) mirrored to \(other.frame)")
+                #expect(Double(other.frame.minX) > 300, "\(other.frame) stays at the leading side")
+            }
+        }
+    }
+
+    /// Build Again only for those who may build; while it is asked it says so.
+    @Test func buildAgainIsOfferedOnlyToThoseWhoBuild() throws {
+        #expect(try !Self.shown(try Self.card("template-2h-failed"), width: 600).again.isHidden)
+        #expect(try Self.shown(try Self.card("template-2h-failed", person: WorkspacesViewTests.ana), width: 600).again.isHidden)
+        #expect(try Self.shown(try Self.card("template-2e-building"), width: 600).again.isHidden)
+    }
+
+    /// The section with lighthouse listed as `state` (and harbor, ready), its template read as `golden`,
+    /// each pause between reads held by `pauses`.
+    static func section(_ state: String, _ golden: String, _ pauses: Pauses) async throws -> (WorkspacesView, KeyWindow, Desk) {
+        let desk = try Desk([])
+        await desk.answer(try Exchange("projects").altered(at: ["projects"], to: [["name": "harbor", "container_status": "running", "template": "ready"], ["name": "lighthouse", "container_status": "not_created", "template": state]]))
+        let none = try Exchange("workspaces-none")
+        for project in ["harbor", "lighthouse"] {
+            await desk.answer(Exchange(method: "GET", path: "/v1/projects/\(project)/workspaces", status: none.status, body: none.body))
+        }
+        await desk.answer(try Self.template(golden))
+        let (view, window) = try WorkspacesViewTests.view(desk, chosenLast: "lighthouse")
+        view.pause = { try await pauses.pause($0) }
+        view.person = Self.dana
+        view.shown()
+        return (view, window, desk)
+    }
+
+    static func reads(_ desk: Desk) async -> Int {
+        await desk.asked.filter { $0 == Self.read }.count
+    }
+
+    /// A building project's page reads its template, then again 2 s after each answer, the card
+    /// following; built, the card gives way to the page of a project with a template, New Workspace
+    /// offered with no refresh, and nothing more is read.
+    @Test func aBuildingPageReadsItsTemplateUntilItIsBuilt() async throws {
+        let pauses = Pauses()
+        let (view, window, desk) = try await Self.section("building", "template-2e-building", pauses)
+        defer { window.orderOut(nil) }
+        #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && pauses.count == 1 }, "\(view.text)")
+        #expect(view.project.newWorkspace.isHidden && view.project.newWorkspaceIcon.isHidden && view.project.listAgain.isHidden, "the page's buttons beside the card")
+        await desk.answer(try Self.template("template-2e-building", step: 12))
+        pauses.letGo()
+        #expect(await RunnerTabTests.until { view.text.contains("step 12 of 20") && pauses.count == 2 }, "\(view.text)")
+        await desk.answer(try Self.template("template-2g-built"))
+        pauses.letGo()
+        #expect(await RunnerTabTests.until { view.text.contains("No workspaces in lighthouse yet") }, "\(view.text)")
+        #expect(!view.project.newWorkspace.isHidden && view.project.newWorkspace.isEnabled, "New Workspace not offered once built")
+        let reads = await Self.reads(desk)
+        #expect(reads == 3 && pauses.asked == [.seconds(2), .seconds(2)])
+    }
+
+    /// The reads stop when the page is left for another project, signed out of or hidden; shown
+    /// again, it is read once more, never two reads at once.
+    @Test func leavingThePageStopsItsReads() async throws {
+        let pauses = Pauses()
+        let (view, window, desk) = try await Self.section("building", "template-2e-building", pauses)
+        defer { window.orderOut(nil) }
+        #expect(await RunnerTabTests.until { pauses.count == 1 }, "\(view.text)")
+        view.panel.onChoose("harbor")
+        view.panel.onChoose("lighthouse")
+        #expect(await RunnerTabTests.until { pauses.count == 2 }, "not read again once shown again: \(view.text)")
+        #expect(await Self.reads(desk) == 2, "read after the page was left")
+        view.isHidden = true
+        view.isHidden = false
+        #expect(await RunnerTabTests.until { pauses.count == 3 }, "not read again once the section was shown again")
+        #expect(await Self.reads(desk) == 3)
+        view.signedOut()
+        #expect(await RunnerTabTests.until { pauses.cancelled == 3 }, "a pause outlived its page")
+        #expect(await Self.reads(desk) == 3, "read after signing out")
+    }
+
+    /// Build Again on a failed build asks the build once however often it is pressed while asked;
+    /// its answer draws the build running.
+    @Test func buildAgainAsksTheBuildOnce() async throws {
+        let pauses = Pauses()
+        let (view, window, desk) = try await Self.section("failed", "template-2h-failed", pauses)
+        defer { window.orderOut(nil) }
+        #expect(await RunnerTabTests.until { view.text.contains("lighthouse’s template did not finish") }, "\(view.text)")
+        let again = view.project.buildCard.again
+        #expect(!again.isHidden && pauses.count == 0, "a failed build read again")
+        await desk.answer(try Exchange("template-2f-joined"))
+        await desk.answer(try Self.template("template-2e-building", step: 13))
+        await desk.hold(Self.build)
+        for _ in 0 ..< 3 {
+            _ = again.sendAction(again.action, to: again.target)
+        }
+        await desk.arrived(during: Task { _ = await RunnerTabTests.until { false } })
+        _ = again.sendAction(again.action, to: again.target)
+        await desk.release()
+        #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && pauses.count == 1 }, "\(view.text)")
+        #expect(await desk.asked.filter { $0 == Self.build }.count == 1)
+    }
+}
+
+/// The pauses between a template's reads, each held until let go, or until its task is cancelled.
+final class Pauses: Sendable {
+    private let held = Mutex<(asked: [Duration], gates: [Gate], cancelled: Int)>(([], [], 0))
+
+    var count: Int {
+        held.withLock { $0.asked.count }
+    }
+
+    var asked: [Duration] {
+        held.withLock { $0.asked }
+    }
+
+    /// How many pauses ended by their task's cancellation.
+    var cancelled: Int {
+        held.withLock { $0.cancelled }
+    }
+
+    func pause(_ duration: Duration) async throws {
+        let gate = Gate()
+        held.withLock {
+            $0.asked.append(duration)
+            $0.gates.append(gate)
+        }
+        await gate.wait()
+        if Task.isCancelled { held.withLock { $0.cancelled += 1 } }
+        try Task.checkCancellation()
+    }
+
+    /// Lets the last pause go.
+    func letGo() {
+        held.withLock { $0.gates.last }?.open()
+    }
+}
