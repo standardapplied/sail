@@ -14,10 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.api.FollowingClient;
+import ai.singlr.sail.api.HeldUntilShutdown;
 import ai.singlr.sail.api.SailApiClient;
+import ai.singlr.sail.api.StreamServer;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.engine.OperatorCommand;
 import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayOutputStream;
@@ -27,7 +31,9 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import picocli.CommandLine;
@@ -153,6 +159,31 @@ class AgentStreamCommandTest {
               + "\n",
           followed.err());
     }
+  }
+
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void theApiDroppingAStreamEndsTheCommandOnlyOnceEveryTaskOfItsClientHasEnded() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    try (var work = new HeldUntilShutdown();
+        var server = StreamServer.dropping("id: 1\ndata: first line\n\n")) {
+      var followed =
+          SailCli.run(
+              new AgentStreamCommand(builder -> FollowingClient.on(work, builder)),
+              "acme",
+              "--run",
+              "r1",
+              "--server",
+              "http://127.0.0.1:" + server.port(),
+              "--token",
+              "tok");
+
+      assertEquals(1, followed.exit());
+      assertEquals("  Streaming agent output for acme...\nfirst line\n", followed.out());
+      assertTrue(work.ran() > 0, "the client ran its work on the executor the command gave it");
+      assertTrue(work.isTerminated(), "sail agent stream returned while a task of its client ran");
+    }
+    ClosesWhatItOpens.assertClosed("sail agent stream", before);
   }
 
   @Test

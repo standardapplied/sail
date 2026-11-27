@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.FollowingClient;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.common.Remedy;
@@ -23,6 +24,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
@@ -53,6 +55,16 @@ public final class AgentStreamCommand implements Runnable {
   private int since;
 
   @Mixin private ConnectionOptions connection;
+
+  private final Function<HttpClient.Builder, FollowingClient> clients;
+
+  public AgentStreamCommand() {
+    this(FollowingClient::of);
+  }
+
+  AgentStreamCommand(Function<HttpClient.Builder, FollowingClient> clients) {
+    this.clients = clients;
+  }
 
   @Override
   public void run() {
@@ -87,8 +99,8 @@ public final class AgentStreamCommand implements Runnable {
     System.out.println(
         Ansi.AUTO.string("  @|faint Streaming agent output for " + project + "...|@"));
 
-    try (var client = HttpClient.newHttpClient()) {
-      var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+    try (var client = clients.apply(HttpClient.newBuilder())) {
+      var response = client.http().send(request, HttpResponse.BodyHandlers.ofInputStream());
       if (response.statusCode() != 200) {
         try (var body = response.body()) {
           throw new IllegalStateException(

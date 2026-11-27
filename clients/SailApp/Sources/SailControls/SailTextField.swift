@@ -44,6 +44,16 @@ public final class SailTextField: NSView {
         didSet { needsLayout = true }
     }
 
+    /// Words drawn inside the box at its left before the text, in the tertiary ink, that the text
+    /// follows (`~/workspace/` before a folder's name, in a field left to right as paths read);
+    /// never part of the value.
+    public var prefix: String? {
+        didSet {
+            needsLayout = true
+            needsDisplay = true
+        }
+    }
+
     public var isEnabled: Bool {
         get { field.isEnabled }
         set {
@@ -184,10 +194,14 @@ public final class SailTextField: NSView {
     override public func layout() {
         super.layout()
         let box = self.box, height = Double(ceil(field.intrinsicContentSize.height)), padding = Self.textPadding
+        let lead = prefixText.map { ceil(Double($0.size().width)) } ?? 0, width = Double(box.width) - 2 * size.textInset + 2 * padding - lead
         field.frame = NSRect(
-            x: Double(box.minX) + size.textInset - padding, y: (Double(box.midY) - height / 2).rounded(), width: Double(box.width) - 2 * size.textInset + 2 * padding,
-            height: height
+            x: Double(box.minX) + size.textInset - padding + lead, y: (Double(box.midY) - height / 2).rounded(), width: max(width, 0), height: height
         )
+    }
+
+    private var prefixText: NSAttributedString? {
+        prefix.map { NSAttributedString(string: $0, attributes: [.font: field.font ?? NSFont.systemFont(ofSize: size.text), .foregroundColor: NSColor(look.textTertiary)]) }
     }
 
     override public func draw(_: NSRect) {
@@ -201,6 +215,10 @@ public final class SailTextField: NSView {
             context.saveGState()
             context.setAlpha(paint.boxOpacity)
             Draw.box(box, radius: Look.contentRadius, fill: paint.fill, edge: paint.edge)
+            if let prefixText {
+                let height = Double(prefixText.size().height)
+                prefixText.draw(at: NSPoint(x: Double(box.minX) + size.textInset, y: Double(field.frame.midY) - height / 2))
+            }
             context.restoreGState()
         }
         guard let lineText, let line = lineRect(width: Double(bounds.width)) else { return }

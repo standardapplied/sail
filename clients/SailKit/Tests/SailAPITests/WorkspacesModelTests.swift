@@ -354,7 +354,7 @@ import Testing
         let again = model.listAgain()
         model.listed(.failure(.unreachable("The network connection was lost.")), request: again, at: Self.at.addingTimeInterval(240))
         let page = try #require(Self.page(model))
-        #expect(page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list harbor’s workspaces", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: true))
+        #expect(page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list harbor’s workspaces", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: .list))
         #expect(page.stale && page.listedAt == Self.at && Self.table(model)?.yours.isEmpty == false, "the old list stays, dimmed")
         let recovered = model.listAgain()
         model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: recovered, at: Self.at.addingTimeInterval(300))
@@ -523,7 +523,7 @@ import Testing
         let older = model.askingProjects(), newer = model.askingProjects()
         model.projectsListed(.failure(.unreachable("lost")), request: newer)
         guard case let .shown(panel, .project(page)) = model.screen else { Issue.record("\(model.screen)"); return }
-        #expect(panel.stale && page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list your projects", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: true))
+        #expect(panel.stale && page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list your projects", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: .list))
         model.projectsListed(.success(ProjectList(projects: [], total: 0)), request: older)
         guard case .shown(_, .project) = model.screen else { Issue.record("an older answer was taken: \(model.screen)"); return }
         let again = model.askingProjects()
@@ -577,12 +577,13 @@ import Testing
         #expect(model.chosen == "harbor" && Self.table(model)?.creating?.name == "new")
     }
 
-    /// m17: an admin with no project is told what they can do, not to wait for an admin.
-    @Test func anAdminWithNoProjectIsToldToAddOne() {
+    /// m17: an admin with no project, whose sign-in may not create one, is told so, not to wait for
+    /// an admin.
+    @Test func anAdminWithNoProjectIsToldWhatIsTrue() {
         var model = WorkspacesModel(person: Self.uday)
         model.projectsListed(.success(ProjectList(projects: [], total: 0)))
         guard case let .shown(_, .noProjects(empty)) = model.screen else { Issue.record("\(model.screen)"); return }
-        #expect(empty.body.hasPrefix("Add a project on main.acme.dev") && !empty.body.contains("An admin adds you"))
+        #expect(empty.body == "Your sign-in may not create projects on main.acme.dev. Once one is added, it appears on the left, and you can create your own workspaces in it.")
     }
 
     /// m23: the reviewer's surviving mutants, each a behaviour.

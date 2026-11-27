@@ -54,7 +54,7 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
     package let done: SailButton
     /// Change, beside the name's words: names it.
     package let change: LinkButton?
-    private let content: LoginSheetContent
+    private let content: SheetGround
     private let heading = NSTextField(wrappingLabelWithString: "")
     private let label = NSTextField(labelWithString: "")
     private let nameLabel = NSTextField(labelWithString: "")
@@ -87,7 +87,7 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
         done = SailButton(StoreLogin.done, kind: .primary, look: look, target: nil, action: nil)
         change = model.asksName ? LinkButton(StoreLogin.change, look: look, target: nil, action: nil) : nil
         spinner = Spinner(look: look)
-        content = LoginSheetContent(look: look)
+        content = SheetGround(look: look)
         super.init(contentRect: NSRect(x: 0, y: 0, width: width, height: 300), styleMask: [.titled], backing: .buffered, defer: true)
         title = model.title
         contentView = content
@@ -128,27 +128,27 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
         let width = sheetWidth, inner = width - 2 * Self.padding.sides, x = Self.padding.sides
         let naming: String?? = if case let .naming(refused) = model.stage { .some(refused) } else { .none }
         var y = Self.padding.top
-        heading.attributedStringValue = titled(model.title)
-        y = place(heading, x: x, y: y, width: inner) + Self.gap
+        heading.attributedStringValue = layout.titled(model.title)
+        y = layout.place(heading, x: x, y: y, width: inner) + Self.gap
         if let refused = naming, let name {
             hold([name], dropping: [field, label])
             y = nameLine(words: false, x: x, y: y, width: inner)
             name.error = refused
-            y = place(name, x: x, y: y, width: inner) + Self.gap
+            y = layout.place(name, x: x, y: y, width: inner) + Self.gap
         } else {
             hold([field, label], dropping: [name].compactMap(\.self))
-            label.attributedStringValue = text(model.label, Look.Step.footnote, look.textSecondary)
-            y = place(label, x: x, y: y, width: inner) + Self.gap
+            label.attributedStringValue = layout.text(model.label, Look.Step.footnote, look.textSecondary)
+            y = layout.place(label, x: x, y: y, width: inner) + Self.gap
             field.error = if case let .refused(said) = model.stage { said } else { nil }
             field.help = model.help
             field.isEnabled = model.stage != .storing
-            y = place(field, x: x, y: y, width: inner) + Self.gap
+            y = layout.place(field, x: x, y: y, width: inner) + Self.gap
             if name != nil { y = nameLine(words: true, x: x, y: y, width: inner) - FieldSize.gap + Self.gap }
         }
-        kept.attributedStringValue = text(model.kept, Look.Step.footnote, look.textTertiary, wraps: true)
+        kept.attributedStringValue = layout.text(model.kept, Look.Step.footnote, look.textTertiary, wraps: true)
         kept.maximumNumberOfLines = 0
         kept.preferredMaxLayoutWidth = inner
-        y = place(kept, x: x, y: y, width: inner) + Self.padding.bottom
+        y = layout.place(kept, x: x, y: y, width: inner) + Self.padding.bottom
         content.footerTop = y
         let busy = model.stage == .storing, primary = naming == nil ? store : done
         store.isHidden = naming != nil
@@ -164,13 +164,13 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
         for button in [primary, cancel] {
             let size = button.intrinsicContentSize
             buttonBox = NSRect(x: trailing - Double(size.width), y: y + Self.footer.vertical, width: Double(size.width), height: Double(size.height))
-            button.frame = mirrored(buttonBox).insetBy(dx: -Look.haloRoom, dy: -Look.haloRoom)
+            button.frame = layout.mirrored(buttonBox).insetBy(dx: -Look.haloRoom, dy: -Look.haloRoom)
             trailing = Double(buttonBox.minX) - Self.buttonGap
         }
-        storing.attributedStringValue = text(StoreLogin.storing, Look.Step.footnote, look.textSecondary)
+        storing.attributedStringValue = layout.text(StoreLogin.storing, Look.Step.footnote, look.textSecondary)
         let storingSize = storing.fittingSize, middle = Double(buttonBox.midY), side = Double(spinner.intrinsicContentSize.width)
-        spinner.frame = mirrored(NSRect(x: Self.footer.sides, y: middle - side / 2, width: side, height: side))
-        storing.frame = mirrored(NSRect(x: Self.footer.sides + side + Self.buttonGap, y: middle - Double(storingSize.height) / 2, width: Double(storingSize.width), height: Double(storingSize.height)))
+        spinner.frame = layout.mirrored(NSRect(x: Self.footer.sides, y: middle - side / 2, width: side, height: side))
+        storing.frame = layout.mirrored(NSRect(x: Self.footer.sides + side + Self.buttonGap, y: middle - Double(storingSize.height) / 2, width: Double(storingSize.width), height: Double(storingSize.height)))
         spinner.isHidden = !busy
         storing.isHidden = !busy
         chainKeys(naming: naming != nil)
@@ -183,26 +183,26 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
     /// "Name" at the leading edge and the names the person has at the trailing; with `words`, the
     /// name itself after "Name" and Change after it. Where the line ends, less the gap to a field.
     private func nameLine(words: Bool, x: Double, y: Double, width: Double) -> Double {
-        nameLabel.attributedStringValue = text(StoreLogin.nameLabel, Look.Step.footnote, look.textSecondary)
-        already.attributedStringValue = text(model.already, Look.Step.footnote, look.textTertiary, trailing: true)
+        nameLabel.attributedStringValue = layout.text(StoreLogin.nameLabel, Look.Step.footnote, look.textSecondary)
+        already.attributedStringValue = layout.text(model.already, Look.Step.footnote, look.textTertiary, trailing: true)
         nameWords.attributedStringValue = NSAttributedString(string: model.name, attributes: [
-            .font: mono.font(Look.Step.callout.points) as NSFont, .foregroundColor: NSColor(look.text), .paragraphStyle: paragraph(wraps: false),
+            .font: mono.font(Look.Step.callout.points) as NSFont, .foregroundColor: NSColor(look.text), .paragraphStyle: layout.paragraph(wraps: false),
         ])
         let line = Double(ceil(nameLabel.fittingSize.height)), labelWidth = Double(nameLabel.fittingSize.width)
-        nameLabel.frame = mirrored(NSRect(x: x, y: y, width: labelWidth, height: line))
+        nameLabel.frame = layout.mirrored(NSRect(x: x, y: y, width: labelWidth, height: line))
         var lead = x + labelWidth + Self.gap
         nameWords.isHidden = !words
         change?.isHidden = !words
         if words, let change {
             let wordsSize = nameWords.fittingSize, linkSize = change.fittingSize
             let wordsWidth = min(Double(wordsSize.width), max(x + width - lead - Double(linkSize.width) - Self.gap, 0))
-            nameWords.frame = mirrored(NSRect(x: lead, y: y + (line - Double(wordsSize.height)) / 2, width: wordsWidth, height: Double(wordsSize.height)))
+            nameWords.frame = layout.mirrored(NSRect(x: lead, y: y + (line - Double(wordsSize.height)) / 2, width: wordsWidth, height: Double(wordsSize.height)))
             lead += wordsWidth + Self.gap
-            change.frame = mirrored(NSRect(x: lead, y: y + (line - Double(linkSize.height)) / 2, width: Double(linkSize.width), height: Double(linkSize.height)))
+            change.frame = layout.mirrored(NSRect(x: lead, y: y + (line - Double(linkSize.height)) / 2, width: Double(linkSize.width), height: Double(linkSize.height)))
             lead += Double(linkSize.width) + Self.gap
         }
         let alreadyWidth = min(Double(already.fittingSize.width), max(x + width - lead, 0))
-        already.frame = mirrored(NSRect(x: x + width - alreadyWidth, y: y, width: alreadyWidth, height: line))
+        already.frame = layout.mirrored(NSRect(x: x + width - alreadyWidth, y: y, width: alreadyWidth, height: line))
         return y + line + FieldSize.gap
     }
 
@@ -311,81 +311,7 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
         onEnd()
     }
 
-    // MARK: Words and frames
-
-    private func titled(_ words: String) -> NSAttributedString {
-        let style = paragraph()
-        style.minimumLineHeight = (Look.Step.title3.points * 1.2).rounded()
-        style.maximumLineHeight = style.minimumLineHeight
-        return NSAttributedString(string: words, attributes: [
-            .font: titleFont.font(.title3) as NSFont, .foregroundColor: NSColor(look.text), .paragraphStyle: style, .kern: -0.012 * Look.Step.title3.points,
-        ])
-    }
-
-    private func text(_ words: String, _ step: Look.Step, _ ink: Tint, trailing: Bool = false, wraps: Bool = false) -> NSAttributedString {
-        NSAttributedString(string: words, attributes: [
-            .font: NSFont.systemFont(ofSize: step.points), .foregroundColor: NSColor(ink), .paragraphStyle: paragraph(trailing: trailing, wraps: wraps),
-        ])
-    }
-
-    /// Set to the leading edge, or the trailing; words keep their own direction right to left. A
-    /// line that does not wrap is cut with an ellipsis.
-    private func paragraph(trailing: Bool = false, wraps: Bool = true) -> NSMutableParagraphStyle {
-        let style = NSMutableParagraphStyle()
-        style.alignment = (direction == .rightToLeft) != trailing ? .right : .left
-        style.baseWritingDirection = .natural
-        style.lineBreakMode = wraps ? .byWordWrapping : .byTruncatingTail
-        return style
-    }
-
-    /// `view` at `x`, `y`, `width` wide, at its own height for that width; where it ends. A field's
-    /// frame holds the halo's room around its box.
-    private func place(_ view: NSView, x: Double, y: Double, width: Double) -> Double {
-        let room = view is SailTextField ? Look.haloRoom : 0
-        view.frame = mirrored(NSRect(x: x - room, y: y - room, width: width + 2 * room, height: 10))
-        let height: Double = if let label = view as? NSTextField, let cell = label.cell {
-            Double(ceil(cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 10000)).height))
-        } else {
-            Double(ceil(view.intrinsicContentSize.height))
-        }
-        view.frame = mirrored(NSRect(x: x - room, y: y - room, width: width + 2 * room, height: height + 2 * room))
-        return y + height
-    }
-
-    /// `rect`, laid out left to right, turned about the sheet's middle right to left.
-    private func mirrored(_ rect: NSRect) -> NSRect {
-        guard direction == .rightToLeft else { return rect }
-        return NSRect(x: sheetWidth - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height))
-    }
-}
-
-/// The sheet's ground and the hairline over its footer.
-@MainActor
-final class LoginSheetContent: NSView {
-    var look: Look {
-        didSet { needsDisplay = true }
-    }
-
-    var footerTop = 0.0
-
-    init(look: Look) {
-        self.look = look
-        super.init(frame: .zero)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    override var isFlipped: Bool {
-        true
-    }
-
-    override func draw(_: NSRect) {
-        NSColor(Tint(look.surfacePop)).setFill()
-        bounds.fill()
-        NSColor(look.separator).setFill()
-        NSRect(x: 0, y: footerTop, width: Double(bounds.width), height: Look.hairline).fill()
+    private var layout: SheetLayout {
+        SheetLayout(width: sheetWidth, direction: direction, look: look, titleFont: titleFont)
     }
 }

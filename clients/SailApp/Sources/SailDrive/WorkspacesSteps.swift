@@ -58,6 +58,15 @@ actor GoldenDesk: Transport {
         held[route] = after
     }
 
+    /// From now on `route` is answered as the golden `name` was, every `from` in its answer `to`:
+    /// another project's recorded answer given to this one.
+    func answer(_ route: String, as name: String, renaming from: String, to: String) throws {
+        let exchange = try Exchange(name)
+        let said = String(decoding: exchange.body, as: UTF8.self).replacingOccurrences(of: from, with: to)
+        answers[route] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: Data(said.utf8))
+        held[route] = .zero
+    }
+
     /// From now on a sign-in ends `days` from now: the recorded sign-in's answer, its `expires_at`
     /// moved.
     func signInEnds(in days: Double) throws {
@@ -228,6 +237,7 @@ extension Driver {
     }
 
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
+        if let created = await performCreateProject(step) { return created }
         if let files = await performFiles(step) { return files }
         if let started = await performNewSession(step) { return started }
         if let stored = await performLoginSheet(step) { return stored }
@@ -533,7 +543,7 @@ extension Driver {
         if let wanted = step.panelHeads {
             let heads = {
                 pane.panel.list.entries.compactMap { entry -> String? in
-                    guard case let .head(title, count, _) = entry else { return nil }
+                    guard case let .head(title, count, _, _) = entry else { return nil }
                     return count.map { "\(title) \($0)" } ?? title
                 }
             }
@@ -542,7 +552,7 @@ extension Driver {
         }
         if let host = step.panelHost {
             let signedIn = WorkspacesModel.Person(shell.flow.standing)
-            pane.person = host.isEmpty ? signedIn : WorkspacesModel.Person(handle: signedIn.handle, admin: signedIn.admin, confirmed: signedIn.confirmed, controlPlane: host)
+            pane.person = host.isEmpty ? signedIn : WorkspacesModel.Person(handle: signedIn.handle, admin: signedIn.admin, confirmed: signedIn.confirmed, controlPlane: host, creates: signedIn.creates)
             return (!signedIn.handle.isEmpty, "Workspaces is \(signedIn.handle)'s at \(pane.person.controlPlane)")
         }
         if let title = step.chooseSession {
@@ -1224,7 +1234,7 @@ extension Driver {
         return true
     }
 
-    private func waitUntilAsync(_ seconds: Double, _ condition: () async -> Bool) async -> Bool {
+    func waitUntilAsync(_ seconds: Double, _ condition: () async -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(failedSoFar ? min(seconds, Self.afterAFailure) : seconds)
         while !(await condition()) {
             guard ContinuousClock.now < deadline else { return false }
