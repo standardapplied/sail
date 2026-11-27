@@ -167,6 +167,23 @@ public final class ChatStore {
         params.toArray());
   }
 
+  /**
+   * The chat's items of {@code kinds} that name {@code id}, as their own ({@code id}) or as the
+   * request they answer ({@code request}), oldest first.
+   */
+  public List<Item> naming(String session, String id, List<String> kinds) {
+    var params = new ArrayList<Object>(List.of(session, id, id));
+    params.addAll(kinds);
+    return db.query(
+        "SELECT seq, kind, payload, at FROM chat_items WHERE session = ? AND"
+            + " (json_extract(payload, '$.id') = ? OR json_extract(payload, '$.request') = ?)"
+            + " AND kind IN ("
+            + String.join(", ", Collections.nCopies(kinds.size(), "?"))
+            + ") ORDER BY seq",
+        ChatStore::item,
+        params.toArray());
+  }
+
   /** The chat's items of {@code kind} after the last message it handed, oldest first. */
   public List<Item> unhanded(String session, String kind) {
     return db.query(

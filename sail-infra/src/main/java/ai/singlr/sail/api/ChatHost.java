@@ -31,9 +31,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * lock, and whatever process the chat's pid file names is halted first and must be proved gone. It
  * ends after the project's {@code max_idle} with no turn open, and the next message resumes the
  * conversation by id, in the mode in force; a message left waiting when a process ends, or when
- * sail restarts, is delivered by the next. A request the agent makes is logged and held; nothing
- * here answers one, so after {@link ChatTiming#requestBound} its turn is stopped, said in plain
- * words.
+ * sail restarts, is delivered by the next. A request the agent makes is logged and held until its
+ * person answers it ({@link #answers}) or the harness withdraws it, however long that takes: no
+ * time, restart or failure ever answers one.
  */
 public final class ChatHost implements AutoCloseable {
 
@@ -108,12 +108,27 @@ public final class ChatHost implements AutoCloseable {
   private volatile boolean closing;
 
   /**
+   * What a chat's person answers its agent with, and their stop and mode: reached through this
+   * host's held processes alone, under the chat's lock, so none of them ever starts a process.
+   */
+  final ChatAnswers answers;
+
+  /**
    * The chats {@code store} holds, admitted and started through {@code launch}, on {@code timing}.
    */
   ChatHost(ChatStore store, ChatLaunch launch, ChatTiming timing) {
     this.store = Objects.requireNonNull(store, "store");
     this.launch = Objects.requireNonNull(launch, "launch");
     this.timing = Objects.requireNonNull(timing, "timing");
+    this.answers =
+        new ChatAnswers(
+            (session, work) -> {
+              yours(session);
+              synchronized (lock(session)) {
+                return work.apply(
+                    store.find(session).orElseThrow(), log(session), live.get(session));
+              }
+            });
   }
 
   /**
@@ -323,9 +338,9 @@ public final class ChatHost implements AutoCloseable {
   /**
    * One pass: erases the chats that ended more than {@link #RETENTION} ago, settles each process
    * left over, and holds each live one to its bounds, each on a thread of its own: one whose chat
-   * was erased is ended, one whose turn holds a request unanswered past {@link
-   * ChatTiming#requestBound} has its turn stopped, and ended if it does not stop, and one idle past
-   * its project's {@code max_idle} is ended.
+   * was erased is ended, one whose turn Sail asked to stop and that has not stopped {@link
+   * ChatTiming#stopBound} after is ended, and one idle past its project's {@code max_idle} is
+   * ended.
    */
   void sweep() {
     var now = timing.clock().get();
@@ -341,7 +356,7 @@ public final class ChatHost implements AutoCloseable {
   private void holdToBounds(ChatProcess process, Instant now) {
     if (store.find(process.session()).isEmpty()) {
       process.end().end(timing.grace().afterInt(), null);
-    } else if (process.overBound(now, timing.requestBound())) {
+    } else if (process.overBound(now, timing.stopBound())) {
       process
           .end()
           .end(

@@ -46,6 +46,29 @@ public final class ChatWire {
   /** What Sail tells the person of the chat, in its own {@code words}. */
   public record Told(String words) implements Own {}
 
+  /**
+   * The person {@code by} answered the agent's request {@code request} with {@code decision}: a
+   * denial's own words ({@code message}, null for none), or a question's {@code answers} (null for
+   * none). Logged before the agent is told, and never with the request's input or suggestions.
+   */
+  public record Answered(
+      String request,
+      LiveChat.Decision decision,
+      String message,
+      List<LiveChat.Answer> answers,
+      String by)
+      implements Own {
+    public Answered {
+      answers = answers == null || answers.isEmpty() ? null : List.copyOf(answers);
+    }
+  }
+
+  /**
+   * The person {@code by} put the chat in {@code mode}, asked of its process as {@code request},
+   * or, with no process to ask (null), kept as the mode the next one starts in.
+   */
+  public record ModeSet(String mode, String request, String by) implements Own {}
+
   private ChatWire() {}
 
   /** The kind an entry of {@code type}, a {@link ChatItem} or one of Sail's {@link Own}, is. */

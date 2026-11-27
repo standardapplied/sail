@@ -218,7 +218,7 @@ class ChatEdgesTest {
 
     assertEquals(
         List.of(Duration.ofSeconds(25), Duration.ofMinutes(5), ProcessEnd.Grace.DEFAULT),
-        List.of(timing.poll(), timing.requestBound(), timing.grace()));
+        List.of(timing.poll(), timing.stopBound(), timing.grace()));
   }
 
   @Test

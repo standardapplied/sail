@@ -242,6 +242,9 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(GET, SESSION + "/chat", enterWorkspace, this::readChat),
         route(POST, SESSION + "/chat/messages", enterWorkspace, this::sendChat),
         route(POST, SESSION + ":end", enterWorkspace, this::endChat),
+        route(POST, SESSION + "/chat/requests/{request}", enterWorkspace, this::answerChat),
+        route(POST, SESSION + "/chat:interrupt", enterWorkspace, this::interruptChat),
+        route(PUT, SESSION + "/chat/mode", enterWorkspace, this::setChatMode),
         route(Route.ANY, "/v1/sessions/{rest...}", unserved, ApiRouter::absent),
         route(GET, "/v1/runs", reads, this::runs),
         route(
@@ -837,6 +840,28 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private ApiResponse endChat(Call call) {
     operations.chats().end(call.param("session"));
     return ApiResponse.noContent();
+  }
+
+  /**
+   * {@code POST /v1/sessions/{id}/chat/requests/{request}} with {@code {"decision", "message",
+   * "answers"}}: the person's answer to their agent's request.
+   */
+  private ApiResponse answerChat(Call call) throws IOException {
+    return ApiResponse.ok(
+        operations
+            .chats()
+            .answers
+            .answer(call.param("session"), call.param("request"), call.body()));
+  }
+
+  /** {@code POST /v1/sessions/{id}/chat:interrupt}: the open turn stopped. */
+  private ApiResponse interruptChat(Call call) {
+    return ApiResponse.ok(operations.chats().answers.interrupt(call.param("session")));
+  }
+
+  /** {@code PUT /v1/sessions/{id}/chat/mode} with {@code {"mode"}}, between turns. */
+  private ApiResponse setChatMode(Call call) throws IOException {
+    return ApiResponse.ok(operations.chats().answers.mode(call.param("session"), call.body()));
   }
 
   /** This runner's terminal door, refused on a runner that offers none over the network. */

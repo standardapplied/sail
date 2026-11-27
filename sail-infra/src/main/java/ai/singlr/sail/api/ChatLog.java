@@ -35,24 +35,28 @@ final class ChatLog {
   private static final String WITHDRAWN = ChatWire.kind(ChatItem.Withdrawn.class);
   private static final String TURN_ENDED = ChatWire.kind(ChatItem.TurnEnded.class);
   private static final String MESSAGE = ChatWire.kind(ChatWire.Message.class);
+  private static final String ANSWERED = ChatWire.kind(ChatWire.Answered.class);
 
-  /**
-   * The kinds that open or close a row or a request: these three and every {@link
-   * ChatItem.Request}.
-   */
-  private static final List<String> OPENING =
+  /** The kinds a request is asked as: every {@link ChatItem.Request}. */
+  private static final List<String> ASKED =
       List.of(
-          TOOL,
-          DONE,
-          WITHDRAWN,
           ChatWire.kind(ChatItem.Permission.class),
           ChatWire.kind(ChatItem.Question.class),
           ChatWire.kind(ChatItem.Plan.class));
 
+  /** The kinds that ask or close a request: these and the person's answer and its withdrawal. */
+  private static final List<String> REQUEST =
+      List.of(ASKED.get(0), ASKED.get(1), ASKED.get(2), ANSWERED, WITHDRAWN);
+
+  /** The kinds that open or close a row or a request. */
+  private static final List<String> OPENING =
+      List.of(TOOL, DONE, ASKED.get(0), ASKED.get(1), ASKED.get(2), ANSWERED, WITHDRAWN);
+
   /**
    * What a chat's open turn left open, as its log says since the turn before it ended: the tool
    * rows with no result ({@code rows}, a row's id to the subagent it is under) and the requests
-   * nobody answered or withdrew ({@code requests}, each to when it was logged).
+   * neither the person answered nor the harness withdrew ({@code requests}, each to when it was
+   * logged): a request answered is never also withdrawn.
    */
   record Open(Map<String, String> rows, Map<String, Instant> requests) {}
 
@@ -184,11 +188,31 @@ final class ChatLog {
         rows.remove(id);
       } else if (item.kind().equals(WITHDRAWN)) {
         requests.remove(id);
+      } else if (item.kind().equals(ANSWERED)) {
+        requests.remove((String) fields.get("request"));
       } else {
         requests.put(id, item.at());
       }
     }
     return new Open(rows, requests);
+  }
+
+  /**
+   * What the log says of the request {@code id}: its asking, the person's answer and its
+   * withdrawal, as logged, oldest first; none when the agent never asked it here.
+   */
+  List<ChatStore.Item> about(String id) {
+    return store.naming(session, id, REQUEST);
+  }
+
+  /** Whether {@code item}, of {@link #about}, is the asking of its request. */
+  static boolean asks(ChatStore.Item item) {
+    return ASKED.contains(item.kind());
+  }
+
+  /** Whether {@code item}, of {@link #about}, is the person's answer to its request. */
+  static boolean answers(ChatStore.Item item) {
+    return item.kind().equals(ANSWERED);
   }
 
   /**
