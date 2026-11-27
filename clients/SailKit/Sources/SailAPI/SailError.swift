@@ -162,6 +162,12 @@ extension SailError: CustomStringConvertible {
         }
     }
 
+    /// Whether asking again may mend it, so Try Again is offered wherever it is said: every failure
+    /// but an ended sign-in, which only signing in again mends (the welcome comes by itself).
+    public var mayTryAgain: Bool {
+        self != .signIn(.ended)
+    }
+
     /// What went wrong as a person reads it where the control plane's address is known: the address
     /// said in place of the transport's own text ("Sail cannot reach the control plane at
     /// main.acme.dev."); a refusal is the server's sentence, as ``description`` says it.

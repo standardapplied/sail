@@ -260,7 +260,7 @@ package final class CreateProjectSheet: NSPanel, NSTextFieldDelegate {
         let unlisted = model.agentsUnlisted
         agentsHelp.attributedStringValue = layout.text(unlisted ?? NewProject.agentsHelp, Look.Step.footnote, unlisted == nil ? look.textTertiary : Tint(look.error), wraps: true)
         y = layout.place(agentsHelp, x: x, y: y, width: width)
-        guard unlisted != nil else {
+        guard unlisted != nil, model.agentsTryAgain else {
             agentsAgain.removeFromSuperview()
             return y
         }

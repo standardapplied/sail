@@ -265,7 +265,7 @@ public struct WorkspacesModel: Sendable {
         /// A list titled `title` that could not be had, said as `error` is at `place`, with Try
         /// Again when asking again can mend it.
         static func failed(_ title: String, _ error: SailError, at place: String) -> Notice {
-            Notice(tone: .error, title: title, line: error.said(at: place), tryAgain: WorkspacesModel.asksAgain(after: error))
+            Notice(tone: .error, title: title, line: error.said(at: place), tryAgain: error.mayTryAgain)
         }
     }
 
@@ -870,7 +870,7 @@ public struct WorkspacesModel: Sendable {
         return Panel(
             projects: (projects ?? []).map { Project(name: $0.name, mark: Self.mark($0.template), expanded: expanded.contains($0.name), holds: expanded.contains($0.name) ? nest($0.name) : nil) },
             chosen: thisMacChosen ? Self.thisMac : chosen, chosenRow: panelRow, controlPlane: person.named, who: who, listed: projects != nil, emptyLine: emptyLine,
-            tryAgain: projects == nil && projectsFailure.map(Self.asksAgain) == true,
+            tryAgain: projects == nil && projectsFailure?.mayTryAgain == true,
             stale: projects != nil && (projectsFailure != nil || shownFailed),
             creates: person.creates && projects != nil && (projects?.isEmpty == false || thisMacChosen)
         )
@@ -942,14 +942,8 @@ public struct WorkspacesModel: Sendable {
             title: unreached ? "Sail can’t reach the control plane" : "Sail can’t list your projects",
             body: (unreached && !person.controlPlane.isEmpty ? "\(person.controlPlane) did not answer." : error.said(at: person.controlPlane)) + network
                 + " Your terminals on this Mac keep working; your workspaces come back when the control plane answers.",
-            line: nil, action: Self.asksAgain(after: error) ? .checkAgain : nil, missing: false
+            line: nil, action: error.mayTryAgain ? .checkAgain : nil, missing: false
         )
-    }
-
-    /// Whether asking again can mend `error`, so Try Again is offered: every failure but an ended
-    /// sign-in, which only signing in again mends (the welcome comes by itself).
-    static func asksAgain(after error: SailError) -> Bool {
-        error != .signIn(.ended)
     }
 
     /// Why New Workspace is not offered in `project`; nil when it is.

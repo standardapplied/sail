@@ -117,7 +117,7 @@ actor AnsweringAll: Transport {
 
     /// A list that could not be had for an ended sign-in offers no Try Again anywhere, which cannot
     /// mend it (the welcome comes by itself): not the first listing's card nor the panel under it,
-    /// nor a listing's banner; for any other failure each does.
+    /// nor a listing's banner, nor Create Project's agents; for any other failure each does.
     @Test func anEndedSignInOffersNoTryAgain() throws {
         for (error, again) in [(SailError.signIn(.ended), false), (.unreachable("lost"), true)] {
             var first = WorkspacesModel(person: WorkspacesModelTests.ana)
@@ -127,6 +127,9 @@ actor AnsweringAll: Transport {
                 continue
             }
             #expect(card.action == (again ? .checkAgain : nil) && first.panel.tryAgain == again, "\(error): \(card), the panel's \(first.panel.tryAgain)")
+            var project = NewProject(agents: [])
+            project.agentsListed(.failure(error), at: "main.acme.dev")
+            #expect(project.agentsTryAgain == again, "\(error): Create Project's agents")
             var model = WorkspacesModelTests.listed(WorkspacesModelTests.ana)
             model.projectsListed(.failure(error), request: model.askingProjects())
             let projects = try #require(WorkspacesModelTests.page(model)?.banner)
