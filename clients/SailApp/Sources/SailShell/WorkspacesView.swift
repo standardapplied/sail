@@ -80,6 +80,8 @@ public final class WorkspacesView: NSView {
     var onThisMacShown: @MainActor () -> Void = {}
     /// Open Account, from the card that says the control plane is out of reach.
     var onSignIn: @MainActor () -> Void = {}
+    /// The control plane found the session ended: the check that says so is asked.
+    var onSessionEnded: @MainActor () -> Void = {}
     /// The clipboard a login's sheet reads and clears: the person's; a test's own.
     var pasteboard = NSPasteboard.general
     /// Its look, taken at once while shown and on being shown while hidden: a look switched under
@@ -138,6 +140,13 @@ public final class WorkspacesView: NSView {
     private var lastReads: Task<Void, Never>?
     /// The reads started: an answer to reads since replaced is dropped.
     private var reads = 0
+    /// The window is off screen (closed, in the Dock, the app hidden): nothing is read, nothing ticks.
+    var away = false {
+        didSet {
+            project.buildCard.away = away
+            readTemplate()
+        }
+    }
 
     private var underWay = 0
 
@@ -560,10 +569,12 @@ public final class WorkspacesView: NSView {
     }
 
     /// Reads the template of the project whose page shows its build: once each time that page is
-    /// shown, then every 2 s while the build runs, one read at a time. Leaving the page (another
-    /// project, This Mac, another section), signing out or the build ending stops the reads.
+    /// shown, then every 2 s while the build runs or a read got no answer, one read at a time.
+    /// Leaving the page (another project, This Mac, another section, the window off screen), signing
+    /// out, the build ending or a refusal stops the reads; a project gone lists the projects again,
+    /// and an ended session is handed to the check that says it.
     private func readTemplate() {
-        let wanted = door == .signedIn && !isHiddenOrHasHiddenAncestor ? model.templateShown : nil
+        let wanted = door == .signedIn && !isHiddenOrHasHiddenAncestor && !away ? model.templateShown : nil
         if wanted == reading.project, !reading.ended || wanted.map(model.readsAgain) != true { return }
         lastReads?.cancel()
         reading = (wanted, true)
@@ -575,8 +586,13 @@ public final class WorkspacesView: NSView {
         lastReads = Task { [weak self] in
             await client.readTemplate(project, sleep: pause) { answer in
                 guard let self, era == self.era, self.reads == read else { return false }
-                self.model.templateRead(project, answer)
+                let after = self.model.templateRead(project, answer)
                 self.render()
+                switch after {
+                case .listProjects?: self.askProjects()
+                case .sessionEnded?: self.onSessionEnded()
+                case nil: break
+                }
                 return self.model.readsAgain(project)
             }
             if let self, reads == read { reading.ended = true }

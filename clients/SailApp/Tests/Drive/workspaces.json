@@ -306,7 +306,7 @@
   {"name": "b2-failed-least", "shot": "b2-failed-least"},
   {"name": "b2-back-to-the-pages-size", "window": [1024, 740]},
   {"name": "b2-a-member", "signedInAs": "member"},
-  {"name": "b2-told-who-can", "workspaces": "Ask a member or an admin to build it again."},
+  {"name": "b2-told-who-can", "workspaces": "Ask an admin to build it again."},
   {"name": "b2-no-build-again", "notSaid": "Build Again picks up"},
   {"name": "b2-failed-for-a-member", "shot": "b2-failed-member"},
   {"name": "b2-an-admin-again", "signedInAs": "admin"},

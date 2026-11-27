@@ -382,8 +382,8 @@ import Testing
     }
 
     /// A project created is listed and chosen before its build is asked, once; a build that got no
-    /// answer is said on its card with Build Again, which asks it again, and then the card shows it
-    /// building.
+    /// answer reads the template, and as none started says so on its card with Build Again, which
+    /// asks it again, and then the card shows it building.
     @Test func aCreatedProjectIsChosenThenBuilt() async throws {
         let build = "POST /v1/projects/lighthouse/template%3Abuild"
         let desk = try Desk(["projects-none", "agents"])
@@ -412,8 +412,10 @@ import Testing
         #expect(asked.filter { $0 == build }.count == 1 && asked.last == build, "\(asked)")
         #expect(asked.firstIndex(of: "POST /v1/projects").map { asked[$0...].contains("GET /v1/projects") } == true, "not listed before the build: \(asked)")
         #expect(view.panel.list.chosen == "lighthouse" && view.text.hasPrefix("Workspaces\nlighthouse\n"), "not chosen before the build: \(view.text)")
+        await desk.answer(try BuildCardViewTests.template("template-2c-missing"))
         await desk.release()
         #expect(await RunnerTabTests.until { view.text.contains("lighthouse’s template did not start\nSail cannot reach the control plane at 127.0.0.1.") }, "\(view.text)")
+        #expect(await desk.asked.filter { $0 == BuildCardViewTests.read }.count == 1 && pauses.count == 0, "the template not read once after the build got no answer")
         await desk.answer(try Exchange("template-2f-joined"))
         await desk.answer(try BuildCardViewTests.template("template-2e-building"))
         Self.press(try #require(Driverless.button("Build Again", in: view.project)))

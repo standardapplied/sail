@@ -6,10 +6,10 @@ extension WorkspacesModel {
     /// server's step of its steps, "Project saved" and the groups of steps found by name, and, ended
     /// short, why in the server's words with Build Again; or, when the build asked did not start,
     /// what was said instead.
-    public struct Build: Equatable, Sendable {
+    public struct BuildCard: Equatable, Sendable {
         public enum Stage: Equatable, Sendable {
             case building, failed
-            /// The build asked was refused or not answered, and none has run.
+            /// The build asked was refused, or got no answer and the template read shows none.
             case unstarted
         }
 
@@ -83,7 +83,7 @@ extension WorkspacesModel {
             self.refusal = refusal
             foot = switch (failed, person.builds) {
             case (false, _): "You can close this; the build keeps going on the runner."
-            case (true, true): Self.picksUp(at: step)
+            case (true, true): Self.picksUp(at: step, of: status.steps)
             case (true, false): Self.askABuilder
             }
         }
@@ -107,12 +107,14 @@ extension WorkspacesModel {
         }
 
         /// Who may build a template, as a person without `build` is told.
-        static let askABuilder = "Ask a member or an admin to build it again."
+        static let askABuilder = "Ask an admin to build it again."
 
-        /// What Build Again keeps of a build stopped at `step`.
-        static func picksUp(at step: Int) -> String {
+        /// What Build Again keeps of a build stopped at `step` of `steps`: the server resumes at the
+        /// step that did not finish, unless every step before the last had (a failure at the last
+        /// step), when it runs them all again (`TemplateBuild.tracker`).
+        static func picksUp(at step: Int, of steps: Int) -> String {
             switch step {
-            case 1: "Build Again starts at step 1."
+            case 1, steps: "Build Again runs every step again."
             case 2: "Build Again picks up at step 2; the step before it is kept."
             default: "Build Again picks up at step \(step); the \(step - 1) before it are kept."
             }
@@ -139,11 +141,10 @@ extension WorkspacesModel {
 
         /// The time `date` was at, as a person reads a clock where they are ("14:02").
         static func clock(_ date: Date, _ timeZone: TimeZone) -> String {
-            let clock = DateFormatter()
-            clock.locale = Locale(identifier: "en_US_POSIX")
-            clock.timeZone = timeZone
-            clock.dateFormat = "HH:mm"
-            return clock.string(from: date)
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = timeZone
+            let time = calendar.dateComponents([.hour, .minute], from: date)
+            return String(format: "%02d:%02d", time.hour ?? 0, time.minute ?? 0)
         }
 
         /// The time between `start` and `end` as the card's corner says it: "4:18", "1:04:18".

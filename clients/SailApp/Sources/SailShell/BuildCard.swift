@@ -4,7 +4,7 @@ import SailControls
 import SailLook
 
 /// The build card on a new project's page (`buildCard` of the first-impressions page, section 6),
-/// drawn from ``WorkspacesModel/Build`` inside the page's list frame, which gives it the surface, its
+/// drawn from ``WorkspacesModel/BuildCard`` inside the page's list frame, which gives it the surface, its
 /// edge and a scroller where the window is too short for it. Its head: Sail's mark drawing itself
 /// while the build runs (the error mark once it stopped), the title over who started it and when,
 /// and the time since at the right; then the bar with the step it is on, the groups of steps each
@@ -32,14 +32,20 @@ final class BuildCard: NSView {
     }
 
     var onBuildAgain: @MainActor () -> Void = {}
-    private(set) var build: WorkspacesModel.Build?
+    /// The window is off screen (closed, in the Dock, the app hidden): its time does not tick.
+    var away = false {
+        didSet { keepTicking() }
+    }
+
+    private(set) var build: WorkspacesModel.BuildCard?
     let mark: BrandMark
     let spinner: Spinner
     let again: SailButton
     private let titleFont: TitleFont
     private let mono: LabelFont
-    /// Redraws the time since the build started, each second while it runs.
-    private var ticks: Timer? {
+    /// Redraws the time since the build started, each second while it runs and is on screen, a
+    /// scroll's tracking included.
+    private(set) var ticks: Timer? {
         didSet { oldValue?.invalidate() }
     }
 
@@ -69,7 +75,7 @@ final class BuildCard: NSView {
 
     /// Draws `build`: the mark that is drawing keeps drawing, so a read every 2 s never begins its
     /// cycle again.
-    func show(_ build: WorkspacesModel.Build) {
+    func show(_ build: WorkspacesModel.BuildCard) {
         self.build = build
         let running = build.stage == .building
         mark.isHidden = !running
@@ -86,11 +92,17 @@ final class BuildCard: NSView {
     }
 
     private func keepTicking() {
-        let ticking = window != nil && build?.stage == .building
+        let ticking = window != nil && !away && build?.stage == .building
         guard ticking != (ticks != nil) else { return }
-        ticks = ticking ? Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        guard ticking else {
+            ticks = nil
+            return
+        }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.needsDisplay = true }
-        } : nil
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        ticks = timer
     }
 
     @objc private func buildAgain(_: Any?) {
@@ -102,26 +114,48 @@ final class BuildCard: NSView {
         laid(width: width, now: Date()).height
     }
 
-    /// Where each part stands at `width`, left to right; ``reading(_:)`` mirrors it.
+    /// Where each part stands at a width, in the card's reading direction: the bar's fill runs from
+    /// its leading end.
     struct Laid {
         var mark = NSRect.zero
         var texts: [(text: NSAttributedString, rect: NSRect)] = []
         var bar: NSRect?
-        var icons: [(mark: WorkspacesModel.Build.Mark, rect: NSRect)] = []
+        var filled: NSRect?
+        var icons: [(mark: WorkspacesModel.BuildCard.Mark, rect: NSRect)] = []
         var box: NSRect?
         var again: NSRect?
         var refusalMark: NSRect?
         var height = 0.0
+
+        /// Laid right to left in `width`: each part where it stands measured from the other side.
+        func mirrored(_ width: Double) -> Laid {
+            let flip = { (rect: NSRect) in NSRect(x: width - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height)) }
+            var laid = self
+            laid.mark = flip(mark)
+            laid.texts = texts.map { ($0.text, flip($0.rect)) }
+            laid.bar = bar.map(flip)
+            laid.filled = filled.map(flip)
+            laid.icons = icons.map { ($0.mark, flip($0.rect)) }
+            laid.box = box.map(flip)
+            laid.again = again.map(flip)
+            laid.refusalMark = refusalMark.map(flip)
+            return laid
+        }
     }
 
     func laid(width: Double, now: Date) -> Laid {
+        let laid = laidLeftToRight(width: width, now: now)
+        return userInterfaceLayoutDirection == .rightToLeft ? laid.mirrored(width) : laid
+    }
+
+    private func laidLeftToRight(width: Double, now: Date) -> Laid {
         var laid = Laid()
         guard let build else { return laid }
         let x = Self.padding.sides, room = max(width - 2 * Self.padding.sides, 1)
         let tight = width < Self.compact.below, gap = tight ? Self.compact.gap : Self.gap, rowHeight = tight ? Self.compact.row : Self.row
         let ends = tight ? Self.compact.padding : Self.padding.top
         var y = ends
-        let elapsed = build.startedAt.map { text(WorkspacesModel.Build.elapsed(from: $0, to: build.endedAt ?? now), mono.font(Look.Step.callout.points) as NSFont, look.textSecondary) }
+        let elapsed = build.startedAt.map { text(WorkspacesModel.BuildCard.elapsed(from: $0, to: build.endedAt ?? now), mono.font(Look.Step.callout.points) as NSFont, look.textSecondary) }
         let elapsedWidth = elapsed.map { max(Double(ceil($0.size().width)), Double(ceil(text("00:00", mono.font(Look.Step.callout.points) as NSFont, look.textSecondary).size().width))) }
         let wordsX = x + Self.markColumn + Self.headGap, wordsRoom = max(room - Self.markColumn - Self.headGap - (elapsedWidth.map { $0 + Self.headGap } ?? 0), 1)
         let title = text(build.title, CTFontCreateCopyWithAttributes(titleFont.font(.title3), 20, nil, nil) as NSFont, look.text, lineHeight: 1.2, tracking: -0.01)
@@ -140,6 +174,8 @@ final class BuildCard: NSView {
         if let at = build.at {
             y += gap
             laid.bar = NSRect(x: x, y: y, width: room, height: Self.bar)
+            let filled = room * min(max(build.done, 0), 1)
+            if filled > 0 { laid.filled = NSRect(x: x, y: y, width: filled, height: Self.bar) }
             y += Self.bar + Self.barGap
             let small = mono.font(Look.Step.micro.points, .regular) as NSFont
             let said = text(at, small, look.textTertiary), atWidth = Double(ceil(said.size().width))
@@ -252,12 +288,6 @@ final class BuildCard: NSView {
         Double(ceil(text.boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading]).height))
     }
 
-    /// `rect` as it stands in the card's reading direction.
-    func reading(_ rect: NSRect) -> NSRect {
-        guard userInterfaceLayoutDirection == .rightToLeft else { return rect }
-        return NSRect(x: Double(bounds.width) - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height))
-    }
-
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         needsLayout = true
@@ -266,32 +296,29 @@ final class BuildCard: NSView {
     override func layout() {
         super.layout()
         let laid = laid(width: Double(bounds.width), now: Date())
-        mark.frame = reading(laid.mark)
-        if let button = laid.again { again.frame = again.frame(forAlignmentRect: reading(button)) }
+        mark.frame = laid.mark
+        if let button = laid.again { again.frame = again.frame(forAlignmentRect: button) }
         let running = laid.icons.first { $0.mark == .running }?.rect
         spinner.isHidden = running == nil
         if let running {
             let side = Double(spinner.intrinsicContentSize.width)
-            spinner.frame = reading(NSRect(x: running.midX - side / 2, y: running.midY - side / 2, width: side, height: side))
+            spinner.frame = NSRect(x: running.midX - side / 2, y: running.midY - side / 2, width: side, height: side)
         }
     }
 
     override func draw(_: NSRect) {
         guard let build else { return }
         let laid = laid(width: Double(bounds.width), now: Date())
-        if build.stage != .building { Draw.icon(.error, in: reading(laid.mark), ink: Tint(look.error)) }
-        if let bar = laid.bar {
-            Draw.box(reading(bar), radius: Self.bar / 2, fill: look.skeleton, edge: nil)
-            let filled = NSRect(x: bar.minX, y: bar.minY, width: bar.width * min(max(build.done, 0), 1), height: bar.height)
-            if filled.width > 0 { Draw.box(reading(filled), radius: Self.bar / 2, fill: Tint(build.stage == .failed ? look.error : look.accent), edge: nil) }
-        }
+        if build.stage != .building { Draw.icon(.error, in: laid.mark, ink: Tint(look.error)) }
+        if let bar = laid.bar { Draw.box(bar, radius: Self.bar / 2, fill: look.skeleton, edge: nil) }
+        if let filled = laid.filled { Draw.box(filled, radius: Self.bar / 2, fill: Tint(build.stage == .failed ? look.error : look.accent), edge: nil) }
         for (mark, rect) in laid.icons {
             let icon = NSRect(x: rect.midX - Self.icon / 2, y: rect.midY - Self.icon / 2, width: Self.icon, height: Self.icon)
             switch mark {
-            case .done: Draw.icon(.check, in: reading(icon), ink: Tint(look.success))
-            case .failed: Draw.icon(.close, in: reading(icon), ink: Tint(look.error))
+            case .done: Draw.icon(.check, in: icon, ink: Tint(look.success))
+            case .failed: Draw.icon(.close, in: icon, ink: Tint(look.error))
             case .coming:
-                let dot = NSBezierPath(ovalIn: reading(NSRect(x: rect.midX - Self.dot / 2, y: rect.midY - Self.dot / 2, width: Self.dot, height: Self.dot)).insetBy(dx: 0.5, dy: 0.5))
+                let dot = NSBezierPath(ovalIn: NSRect(x: rect.midX - Self.dot / 2, y: rect.midY - Self.dot / 2, width: Self.dot, height: Self.dot).insetBy(dx: 0.5, dy: 0.5))
                 NSColor(look.separatorStrong).setStroke()
                 dot.lineWidth = 1
                 dot.stroke()
@@ -300,11 +327,11 @@ final class BuildCard: NSView {
         }
         if let box = laid.box {
             let paint = BannerPaint(.error, look: look)
-            Draw.box(reading(box), radius: Look.contentRadius, fill: Tint(paint.fill), edge: paint.edge)
+            Draw.box(box, radius: Look.contentRadius, fill: Tint(paint.fill), edge: paint.edge)
         }
-        if let mark = laid.refusalMark { Draw.icon(.error, in: reading(mark), ink: Tint(look.error)) }
+        if let mark = laid.refusalMark { Draw.icon(.error, in: mark, ink: Tint(look.error)) }
         for (text, rect) in laid.texts {
-            text.draw(with: reading(rect), options: [.usesLineFragmentOrigin, .usesFontLeading])
+            text.draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading])
         }
     }
 }

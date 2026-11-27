@@ -27,7 +27,7 @@ import Testing
     /// `person`'s model with lighthouse listed as `state` and chosen, its workspaces none.
     static func model(_ person: WorkspacesModel.Person = Self.dana, _ state: TemplateState = .building) throws -> WorkspacesModel {
         var model = WorkspacesModel(person: person)
-        model.timeZone = try #require(TimeZone(identifier: "UTC"))
+        model.timeZone = try #require(TimeZone(identifier: "Asia/Kolkata"))
         let listed = ProjectList(projects: ["harbor", "lighthouse"].map { ProjectSummary(name: $0, containerStatus: .known(.notCreated), template: .known($0 == "harbor" ? .ready : state)) }, total: 2)
         model.projectsListed(.success(listed))
         model.listed(.success(WorkspaceList(project: "lighthouse", workspaces: [])), request: model.choose("lighthouse"), at: WorkspacesModelTests.at)
@@ -39,7 +39,7 @@ import Testing
         model.panel.projects.first { $0.name == "lighthouse" }?.mark
     }
 
-    static func card(_ model: WorkspacesModel) -> WorkspacesModel.Build? {
+    static func card(_ model: WorkspacesModel) -> WorkspacesModel.BuildCard? {
         guard case let .build(card)? = WorkspacesModelTests.page(model)?.body else { return nil }
         return card
     }
@@ -63,7 +63,7 @@ import Testing
         let card = try #require(Self.card(Self.read(try Self.status("template-2e-building", step: step))))
         let names = ["Project saved", "Container created", "Tools installed", "Repositories cloned", "Agents installed", "Ready for workspaces"]
         #expect(card.groups.map(\.name) == names)
-        let marks: [WorkspacesModel.Build.Mark] = (0 ..< 6).map { $0 < running ? .done : $0 == running ? .running : .coming }
+        let marks: [WorkspacesModel.BuildCard.Mark] = (0 ..< 6).map { $0 < running ? .done : $0 == running ? .running : .coming }
         #expect(card.groups.map(\.mark) == marks, "step \(step)")
         #expect(card.lines.contains("\(names[running]) · running"))
     }
@@ -94,21 +94,26 @@ import Testing
         #expect(more.at == "step 10 of 23" && more.done == 10.0 / 23.0)
         let early = try #require(Self.card(Self.read(try Self.status("template-2e-building", step: 0))))
         #expect(early.at == "step 1 of 20", "a build before its first step said \(early.at ?? "")")
+        let named = try #require(Self.card(Self.read(try Self.status("template-2e-building", step: 10, [(["step_names"], names)]))))
+        #expect(named.at == "step 10 of 20" && named.done == 0.5, "N taken from the \(names.count) names, not the server's steps: \(named.at ?? "")")
+        let past = try #require(Self.card(Self.read(try Self.status("template-2e-building", step: 25))))
+        #expect(past.at == "step 20 of 20" && past.done == 1, "a step past the server's steps said \(past.at ?? "")")
     }
 
-    /// Who started it and when, at the person's clock: "you" for the person, else their handle; the
-    /// elapsed time from its start, past an hour with the hours.
+    /// Who started it and when, at the person's clock (India's, 5:30 ahead of the server's UTC, where
+    /// this machine's own zone may be UTC too): "you" for the person, else their handle; the elapsed
+    /// time from its start, past an hour with the hours.
     @Test func theCardSaysWhoStartedItAndWhen() throws {
         let mine = try #require(Self.card(Self.read(try Self.status("template-2e-building"))))
-        #expect(mine.title == "Creating lighthouse" && mine.started == "Started by you at 08:55")
+        #expect(mine.title == "Creating lighthouse" && mine.started == "Started by you at 14:25")
         #expect(mine.foot == "You can close this; the build keeps going on the runner." && !mine.buildsAgain && mine.reason.isEmpty)
         let theirs = try #require(Self.card(Self.read(try Self.status("template-2e-building"), as: Self.ana)))
-        #expect(theirs.started == "Started by dana at 08:55" && theirs.title == "Creating lighthouse")
+        #expect(theirs.started == "Started by dana at 14:25" && theirs.title == "Creating lighthouse")
         let start = try #require(mine.startedAt)
         #expect(mine.endedAt == nil)
-        #expect(WorkspacesModel.Build.elapsed(from: start, to: start.addingTimeInterval(258)) == "4:18")
-        #expect(WorkspacesModel.Build.elapsed(from: start, to: start.addingTimeInterval(3858)) == "1:04:18")
-        #expect(WorkspacesModel.Build.elapsed(from: start, to: start.addingTimeInterval(-5)) == "0:00")
+        #expect(WorkspacesModel.BuildCard.elapsed(from: start, to: start.addingTimeInterval(258)) == "4:18")
+        #expect(WorkspacesModel.BuildCard.elapsed(from: start, to: start.addingTimeInterval(3858)) == "1:04:18")
+        #expect(WorkspacesModel.BuildCard.elapsed(from: start, to: start.addingTimeInterval(-5)) == "0:00")
     }
 
     /// A failure: which step stopped it, the failed group's cross, the server's reason and its remedy
@@ -123,12 +128,16 @@ import Testing
         ])
         #expect(failed.buildsAgain && failed.foot == "Build Again picks up at step 13; the 12 before it are kept." && failed.endedAt != nil)
         let theirs = try #require(Self.card(Self.read(try Self.status("template-2h-failed"), state: .failed, as: Self.ana)))
-        #expect(!theirs.buildsAgain && theirs.foot == "Ask a member or an admin to build it again." && theirs.started == "Started by dana at 08:55")
+        #expect(!theirs.buildsAgain && theirs.foot == "Ask an admin to build it again." && theirs.started == "Started by dana at 14:25")
         let cut = try #require(Self.card(Self.read(try Self.status("template-2h-interrupted"), state: .failed)))
         #expect(cut.reason == ["The build stopped before it finished: the runner restarted, or its process ended.", "Build it again: it picks up at the step that did not finish."])
         #expect(cut.foot == "Build Again picks up at step 9; the 8 before it are kept.")
         let second = try #require(Self.card(Self.read(try Self.status("template-2h-failed", step: 2), state: .failed)))
         #expect(second.foot == "Build Again picks up at step 2; the step before it is kept.")
+        for step in [1, 20] {
+            let all = try #require(Self.card(Self.read(try Self.status("template-2h-failed", step: step), state: .failed)))
+            #expect(all.foot == "Build Again runs every step again.", "stopped at step \(step): \(all.foot ?? "")")
+        }
     }
 
     /// The card follows each read: a read with no answer keeps it as it was, saying so quietly; built,
@@ -240,6 +249,99 @@ import Testing
         }
         let failingAsked = await failing.asked
         #expect(told == 1 && failingAsked == 1, "a pause that failed was taken as passed")
+        let answeredAsCancelled = Reads([.success(building), .success(building)], cancelling: true)
+        var late = 0
+        await Task {
+            await SailClient(transport: answeredAsCancelled, token: "tok").readTemplate("lighthouse", sleep: { _ in }) { _ in
+                late += 1
+                return true
+            }
+        }.value
+        #expect(late == 0, "an answer that came as the reads were cancelled was handed on")
+    }
+
+    /// A read the server refused is no missed answer: its words stand on the card and the reads stop
+    /// there, with no pause after it. A project gone (404) asks for the projects again; an ended
+    /// session (401) is handed to the check that says it, with nothing said on the card.
+    @MainActor @Test(arguments: [
+        ("refusal-forbidden", ["Enrollment ticket is invalid or expired."], nil),
+        ("refusal-project-not-in-catalog-sessions", ["Project 'harbor' is not in the catalog."], WorkspacesModel.AfterRead.listProjects),
+        ("refusal-missing-bearer-token", [], .sessionEnded),
+    ] as [(String, [String], WorkspacesModel.AfterRead?)])
+    func aRefusedReadIsSaidAndStopsTheReads(_ golden: String, _ said: [String], _ after: WorkspacesModel.AfterRead?) async throws {
+        let reads = Reads([.success(try Exchange("template-2e-building")), .success(try Exchange(golden)), .success(try Exchange("template-2e-building"))])
+        var model = try Self.model()
+        let slept = Mutex<[Duration]>([])
+        var followed: [WorkspacesModel.AfterRead?] = []
+        await SailClient(transport: reads, token: "tok").readTemplate("lighthouse", sleep: { duration in slept.withLock { $0.append(duration) } }) { answer in
+            followed.append(model.templateRead("lighthouse", answer))
+            return model.readsAgain("lighthouse")
+        }
+        let asked = await reads.asked
+        #expect(asked == 2 && slept.withLock { $0 } == [.seconds(2)] && followed == [nil, after], "\(followed)")
+        let card = try #require(Self.card(model))
+        #expect(card.missed == nil && card.stage == .building, "a refusal said as no answer")
+        #expect(Array(card.refusal.prefix(said.count)) == said && card.refusal.isEmpty == said.isEmpty, "\(card.refusal)")
+        _ = model.choose("harbor")
+        _ = model.choose("lighthouse")
+        #expect(model.templateShown == "lighthouse" && !model.readsAgain("lighthouse"), "a refused read read again before its page was shown again")
+        model.templateRead("lighthouse", .success(try Self.status("template-2e-building", step: 11)))
+        #expect(Self.card(model)?.refusal.isEmpty == true && model.readsAgain("lighthouse"), "a read answered kept the refusal")
+    }
+
+    /// A read with no answer is read again whatever the build's state, so "asking again" is true of a
+    /// failed card too; one before any card says so over the page with Try Again in place of the
+    /// skeleton, and a refused one in the server's words.
+    @Test func aFirstReadWithNoAnswerSaysSo() throws {
+        var model = try Self.model()
+        model.templateRead("lighthouse", .failure(.unreachable("lost")))
+        var page = try #require(WorkspacesModelTests.page(model))
+        #expect(page.body == .unlisted && model.readsAgain("lighthouse"), "\(page.body)")
+        #expect(page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t read lighthouse’s template", line: "Sail cannot reach the control plane at https://sail.example.com.", tryAgain: true))
+        model.templateRead("lighthouse", WorkspacesModelTests.answer(.template(project: "lighthouse"), "refusal-forbidden"))
+        page = try #require(WorkspacesModelTests.page(model))
+        #expect(page.body == .unlisted && !model.readsAgain("lighthouse") && page.banner?.title == "Enrollment ticket is invalid or expired." && page.banner?.tryAgain == false)
+        model.templateRead("lighthouse", .success(try Self.status("template-2e-building")))
+        #expect(WorkspacesModelTests.page(model)?.banner == nil && Self.card(model) != nil)
+        var failed = try Self.read(try Self.status("template-2h-failed"), state: .failed)
+        #expect(!failed.readsAgain("lighthouse"))
+        failed.templateRead("lighthouse", .failure(.unreachable("lost")))
+        #expect(Self.card(failed)?.missed == "No answer just now; asking again" && failed.readsAgain("lighthouse"), "a failed card said it asks again and did not")
+    }
+
+    /// A build that got no answer may have started: the template is read once, and the card shows
+    /// what the server holds, building or failed; only when none started does it say so, with Build
+    /// Again. While the build is asked, or its read under way, the page waits on the loading frame.
+    @Test(arguments: ["template-2e-building", "template-2h-failed", "template-2c-missing"])
+    func aBuildWithNoAnswerIsReadOnce(_ golden: String) throws {
+        var model = try Self.model(Self.dana, .missing)
+        #expect(model.templateShown == nil)
+        _ = model.asksBuild("lighthouse")
+        #expect(WorkspacesModelTests.page(model)?.body == .loading, "the page said lighthouse is not ready while its build was asked")
+        model.built("lighthouse", .failure(.unreachable("The request timed out.")))
+        #expect(WorkspacesModelTests.page(model)?.body == .loading && model.templateShown == "lighthouse" && model.readsAgain("lighthouse"))
+        model.templateRead("lighthouse", .success(try Self.status(golden)))
+        let card = try #require(Self.card(model))
+        switch golden {
+        case "template-2e-building": #expect(card.stage == .building && card.refusal.isEmpty && model.readsAgain("lighthouse"))
+        case "template-2h-failed": #expect(card.stage == .failed && !model.readsAgain("lighthouse"))
+        default:
+            #expect(card.stage == .unstarted && card.title == "lighthouse’s template did not start" && card.buildsAgain)
+            #expect(card.refusal == ["Sail cannot reach the control plane at https://sail.example.com."] && model.templateShown == nil)
+        }
+    }
+
+    /// A projects list asked before a read was answered is older than it: the read's state stands, so
+    /// the card does not blink to the loading frame; a list asked after it is newer and wins.
+    @Test func anOlderListKeepsTheReadsState() throws {
+        var model = try Self.model()
+        let older = model.askingProjects()
+        model.templateRead("lighthouse", .success(try Self.status("template-2h-failed")))
+        let building = ProjectList(projects: [ProjectSummary(name: "lighthouse", containerStatus: .known(.notCreated), template: .known(.building))], total: 1)
+        _ = model.projectsListed(.success(building), request: older)
+        #expect(Self.card(model)?.stage == .failed && Self.mark(model) == .buildFailed, "an older list put back the state before the read")
+        _ = model.projectsListed(.success(building), request: model.askingProjects())
+        #expect(Self.mark(model) == .building, "a newer list did not win")
     }
 
     /// Build Again asks the build once however often it is pressed while it is asked; its answer
@@ -262,9 +364,9 @@ import Testing
         #expect(building.stage == .building && building.refusal.isEmpty && model.readsAgain("lighthouse"))
     }
 
-    /// A build of a project with no template asked and refused, or not answered, stands on its card
-    /// in the server's words and what to do (never a command), with Build Again; until a build is
-    /// asked again, or the template is listed or read as being built.
+    /// A build of a project with no template asked and refused, or not answered and read as none
+    /// started, stands on its card in the server's words and what to do (never a command), with Build
+    /// Again; until a build is asked again, or the template is listed or read as being built.
     @Test func aRefusedBuildIsSaidOnTheCard() throws {
         var model = try Self.model(Self.dana, .missing)
         guard case .empty = WorkspacesModelTests.page(model)?.body else { Issue.record("\(String(describing: WorkspacesModelTests.page(model)?.body))"); return }
@@ -275,6 +377,7 @@ import Testing
         #expect(refused.refusal == ["github.com asks for credentials to fetch lighthouse's repo lamp, and dana keeps no token for it.", "An admin stores it on the runner for now."])
         #expect(WorkspacesModelTests.page(model)?.banner == nil, "the refusal stands over the page too")
         model.built("lighthouse", .failure(.unreachable("The request timed out.")))
+        model.templateRead("lighthouse", .success(try Self.status("template-2c-missing")))
         #expect(Self.card(model)?.refusal == ["Sail cannot reach the control plane at https://sail.example.com."])
         model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "lighthouse", containerStatus: .known(.notCreated), template: .known(.missing))], total: 1)))
         #expect(Self.card(model)?.refusal.isEmpty == false, "a list showing no build took the refusal away")
@@ -296,12 +399,16 @@ actor Reads: Transport {
     private var answers: [Result<Exchange, SailError>]
     private(set) var asked = 0, most = 0
     private var underWay = 0
+    /// Each answer comes as the task reading it is cancelled.
+    private let cancelling: Bool
 
-    init(_ answers: [Result<Exchange, SailError>]) {
+    init(_ answers: [Result<Exchange, SailError>], cancelling: Bool = false) {
         self.answers = answers
+        self.cancelling = cancelling
     }
 
     func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
+        if cancelling { withUnsafeCurrentTask { $0?.cancel() } }
         asked += 1
         underWay += 1
         most = max(most, underWay)

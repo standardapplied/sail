@@ -93,14 +93,9 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         return card
     }()
 
-    /// The build card's frame, which scrolls it where the window is too short for it.
-    private(set) lazy var buildFrame = ListFrame(scrolling: buildCard, look: look)
-
-    /// The build card's frame as tall as the card at the column's width.
-    private func fitBuild() {
-        guard case .build? = page?.body, bounds.width > 0 else { return }
-        buildFrame.height = buildCard.height(width: Double(bounds.width) - 2 * Self.padding.sides - 2)
-    }
+    /// The build card's frame, as tall as the card at its width, which scrolls it where the window is
+    /// too short for it.
+    private(set) lazy var buildFrame = ListFrame(scrolling: buildCard, look: look) { [buildCard] in buildCard.height(width: $0) }
     private var page: WorkspacesModel.Page?
     /// The empty state drawn alone, centred, when no project is open.
     private var centred: NSView?
@@ -166,13 +161,10 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         true
     }
 
-    /// Drawn narrow or wide by its own width, redrawn only when that changes; the build card's frame
-    /// follows the new width.
+    /// Drawn narrow or wide by its own width, redrawn only when that changes.
     override public func setFrameSize(_ newSize: NSSize) {
-        let widened = newSize.width != frame.width
         super.setFrameSize(newSize)
         if newSize.width > 0 { narrow = Double(newSize.width) < Self.wide }
-        if widened { fitBuild() }
     }
 
     /// Draws `page`.
@@ -205,7 +197,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         case let .empty(empty): views.append(Self.framed(emptyState(empty), look: look))
         case let .build(build):
             buildCard.show(build)
-            fitBuild()
+            buildFrame.invalidateIntrinsicContentSize()
+            buildFrame.needsLayout = true
             views.append(buildFrame)
         case let .list(table):
             if let scroll = frameView.scroll, filled == page.name {

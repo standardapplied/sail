@@ -225,7 +225,7 @@ public struct WorkspacesModel: Sendable {
         case empty(Empty)
         case list(Table)
         /// No workspace yet, and the template's build under way, ended short, or asked and not started.
-        case build(Build)
+        case build(BuildCard)
     }
 
     public struct Empty: Equatable, Sendable {
@@ -392,15 +392,22 @@ public struct WorkspacesModel: Sendable {
     private var choosingAfterList: [String: String] = [:]
     /// The project the person created, chosen when the projects listed next show it.
     private var created: String?
-    /// Each project's template as last read, which its build card is drawn from; and those whose last
-    /// read got no answer.
+    /// Each project's template as last read, which its build card is drawn from, and the projects
+    /// asked last when it was read: a list asked no later is older than the read.
     private var templates: [String: TemplateStatus] = [:]
-    private var templateMissed: Set<String> = []
+    private var readAt: [String: Int] = [:]
+    /// The projects whose last read got no answer, with what is said of it.
+    private var templateMissed: [String: String] = [:]
+    /// The projects whose last read the server refused, with its words (none when the session ended:
+    /// the welcome says that): read again only once the page is shown again.
+    private var templateRefused: [String: [String]] = [:]
     /// The projects whose build was asked and not yet answered.
     private var buildsAsked: Set<String> = []
     /// What a project's build card says of the build asked that did not start (its refusal, or that
     /// it got no answer), until a build is asked again, or the template reads as building or ready.
     private var buildSaid: [String: [String]] = [:]
+    /// The projects whose build got no answer: their template is read to learn whether it started.
+    private var buildUnanswered: Set<String> = []
     /// Where the person reads a clock: a build's start is said in it.
     public var timeZone = TimeZone.current
 
@@ -430,10 +437,14 @@ public struct WorkspacesModel: Sendable {
         if let request, request != projectsAsked { return nil }
         switch result {
         case let .success(list):
-            projects = list.projects
+            projects = list.projects.map { listed in
+                guard let request, let read = templates[listed.name], readAt[listed.name, default: 0] >= request else { return listed }
+                return ProjectSummary(name: listed.name, containerStatus: listed.containerStatus, template: read.state)
+            }
             projectsFailure = nil
             expanded.formIntersection(list.projects.map(\.name))
             buildSaid = buildSaid.filter { name, _ in list.projects.contains { $0.name == name && [.known(.missing), .known(.failed)].contains($0.template) } }
+            buildUnanswered.formIntersection(list.projects.map(\.name))
             if let created {
                 self.created = nil
                 if list.projects.contains(where: { $0.name == created }) {
@@ -602,43 +613,68 @@ public struct WorkspacesModel: Sendable {
     }
 
     /// The build of project `name`'s template answered: started or joined, its card drawn from the
-    /// answer; refused or not answered, said on its card in the server's words and what to do.
+    /// answer; refused, said on its card in the server's words and what to do; not answered, its
+    /// template read to learn whether it started, said on its card only if none did.
     public mutating func built(_ name: String, _ answer: Result<TemplateStatus, SailError>) {
         buildsAsked.remove(name)
         switch answer {
         case .success:
             buildSaid[name] = nil
+            buildUnanswered.remove(name)
             templateRead(name, answer)
         case let .failure(error):
             buildSaid[name] = lines(error)
+            if case .refused = error { buildUnanswered.remove(name) } else { buildUnanswered.insert(name) }
         }
+    }
+
+    /// What a template read asks of the page beyond its card: the projects listed again, since the
+    /// project is gone; or the session's end handed to the check that says it.
+    public enum AfterRead: Equatable, Sendable {
+        case listProjects, sessionEnded
     }
 
     /// Takes project `name`'s template as read: its card is drawn from it, and its pill and New
-    /// Workspace follow its state at once; a read that got no answer keeps the card as read before,
-    /// saying so.
-    public mutating func templateRead(_ name: String, _ answer: Result<TemplateStatus, SailError>) {
-        guard let index = projects?.firstIndex(where: { $0.name == name }), let project = projects?[index] else { return }
-        guard case let .success(status) = answer else {
-            templateMissed.insert(name)
-            return
+    /// Workspace follow its state at once. A read that got no answer keeps the card as read before,
+    /// saying so; one the server refused says its words on the card and stops the reads, and says
+    /// what else follows.
+    @discardableResult
+    public mutating func templateRead(_ name: String, _ answer: Result<TemplateStatus, SailError>) -> AfterRead? {
+        guard let index = projects?.firstIndex(where: { $0.name == name }), let project = projects?[index] else { return nil }
+        switch answer {
+        case let .success(status):
+            templates[name] = status
+            readAt[name] = projectsAsked
+            templateMissed[name] = nil
+            templateRefused[name] = nil
+            buildUnanswered.remove(name)
+            if [.known(.building), .known(.ready)].contains(status.state) { buildSaid[name] = nil }
+            projects?[index] = ProjectSummary(name: name, containerStatus: project.containerStatus, template: status.state)
+            return nil
+        case let .failure(.refused(refusal)):
+            templateMissed[name] = nil
+            let ended = AccountRefusal.ends(.refused(refusal))
+            templateRefused[name] = ended ? [] : lines(.refused(refusal))
+            if ended { return .sessionEnded }
+            return [.known(.projectNotInCatalog), .known(.notFound)].contains(refusal.code) ? .listProjects : nil
+        case let .failure(error):
+            templateMissed[name] = error.said(at: person.controlPlane)
+            return nil
         }
-        templates[name] = status
-        templateMissed.remove(name)
-        if [.known(.building), .known(.ready)].contains(status.state) { buildSaid[name] = nil }
-        projects?[index] = ProjectSummary(name: name, containerStatus: project.containerStatus, template: status.state)
     }
 
-    /// The project whose template its page reads: the one shown, while its template is being built
-    /// or its last build failed.
+    /// The project whose template its page reads: the one shown, while its template is being built,
+    /// its last build failed, or a build asked of it got no answer.
     public var templateShown: String? {
         guard !thisMacChosen, let project = projects?.first(where: { $0.name == chosen }) else { return nil }
-        return [.building, .buildFailed].contains(Self.mark(project.template)) ? project.name : nil
+        return [.building, .buildFailed].contains(Self.mark(project.template)) || buildUnanswered.contains(project.name) ? project.name : nil
     }
 
-    /// Whether `name`'s template is read again: its page is still shown and its build still runs.
+    /// Whether `name`'s template is read again: its page is still shown, its last read was not
+    /// refused, and its build still runs, or the last read or the build asked got no answer.
     public func readsAgain(_ name: String) -> Bool {
-        templateShown == name && projects?.first { $0.name == name }?.template == .known(.building)
+        guard templateShown == name, templateRefused[name] == nil else { return false }
+        return projects?.first { $0.name == name }?.template == .known(.building) || templateMissed[name] != nil || buildUnanswered.contains(name)
     }
 
     // MARK: Stop and delete
@@ -941,21 +977,36 @@ public struct WorkspacesModel: Sendable {
     }
 
     /// What a project whose template is not current shows with no workspace listed: its build's card;
-    /// else what is missing; else, its build not read yet, the loading frame.
+    /// nothing, when its template could not be read (the banner says why); the loading frame while
+    /// its build is asked or its template not read yet; else what is missing.
     private func notCurrent(_ project: ProjectSummary, _ unready: Unready) -> Body {
-        build(project).map(Body.build) ?? unready.missing.map(Body.empty) ?? .loading
+        if let card = build(project) { return .build(card) }
+        if unread(project) != nil { return .unlisted }
+        if buildsAsked.contains(project.name) || buildUnanswered.contains(project.name) { return .loading }
+        return unready.missing.map(Body.empty) ?? .loading
     }
 
     /// `project`'s build card: from its template as last read while that read agrees with the state
     /// listed; or, with no template and a build asked that did not start, what was said instead.
-    private func build(_ project: ProjectSummary) -> Build? {
-        let name = project.name, refusal = buildSaid[name] ?? [], asking = buildsAsked.contains(name)
+    private func build(_ project: ProjectSummary) -> BuildCard? {
+        let name = project.name, refusal = buildSaid[name] ?? templateRefused[name] ?? [], asking = buildsAsked.contains(name)
         if let status = templates[name], status.state == project.template,
-           let card = Build(status, project: name, person: person, missed: templateMissed.contains(name), asking: asking, refusal: refusal, timeZone: timeZone) {
+           let card = BuildCard(status, project: name, person: person, missed: templateMissed[name] != nil, asking: asking, refusal: refusal, timeZone: timeZone) {
             return card
         }
-        guard !refusal.isEmpty, Self.mark(project.template) == .noTemplate else { return nil }
-        return Build(unstarted: name, person: person, asking: asking, refusal: refusal)
+        guard let said = buildSaid[name], !said.isEmpty, !buildUnanswered.contains(name), Self.mark(project.template) == .noTemplate else { return nil }
+        return BuildCard(unstarted: name, person: person, asking: asking, refusal: said)
+    }
+
+    /// What stands over `project`'s page when its template, wanted for its card, could not be read
+    /// and no card shows: the server's refusal, or that it got no answer, with Try Again.
+    private func unread(_ project: ProjectSummary) -> Notice? {
+        let name = project.name
+        guard templateShown == name, build(project) == nil else { return nil }
+        if let said = templateRefused[name], let first = said.first {
+            return Notice(tone: .error, title: first, line: said.dropFirst().joined(separator: " "), tryAgain: false)
+        }
+        return templateMissed[name].map { Notice(tone: .error, title: "Couldn’t read \(name)’s template", line: $0, tryAgain: true) }
     }
 
     /// A project's page. A template not current offers no create, but never hides the workspaces
@@ -963,7 +1014,7 @@ public struct WorkspacesModel: Sendable {
     /// says why it waits; only a project with none listed says what is missing in its place.
     private func page(_ project: ProjectSummary) -> Page {
         let name = project.name, listed = listing.rows[name] != nil, unready = Self.unready(project), listFailure = listFailures[name]
-        let banner = refused[name]?.notice ?? listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? projectsBanner
+        let banner = refused[name]?.notice ?? listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? unread(project) ?? projectsBanner
         let rows = WorkspaceList(project: name, workspaces: listing.rows[name] ?? []).rows(for: person.handle)
         if let unready, rows.isEmpty, listed, listFailure == nil {
             return Page(

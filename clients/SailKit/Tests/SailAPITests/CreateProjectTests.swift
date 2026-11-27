@@ -224,8 +224,9 @@ import Testing
     }
 
     /// The created project is chosen once the projects listed show it, in This Mac's place too, and
-    /// stays chosen once the person chooses another; a build refused, or that got no answer, is said
-    /// on its card in words, never a command, until a build is asked (`BuildCardTests`).
+    /// stays chosen once the person chooses another; a build refused, or that got no answer and whose
+    /// template reads as none started, is said on its card in words, never a command, until a build
+    /// is asked (`BuildCardTests`).
     @Test func theCreatedProjectIsChosenOnceListed() throws {
         var model = Self.none(try Self.person(.admin, [.read, .write, .admin, .build]))
         model.chooseThisMac()
@@ -235,6 +236,7 @@ import Testing
         #expect(model.chosen == "lighthouse" && !model.thisMacChosen && request != nil)
         model.listed(WorkspacesModelTests.answer(.workspaces(project: "lighthouse"), "workspaces-none"), request: try #require(request), at: WorkspacesModelTests.at)
         model.built("lighthouse", .failure(.unreachable("The request timed out.")))
+        model.templateRead("lighthouse", .success(try BuildCardTests.status("template-2c-missing")))
         #expect(BuildCardTests.card(model)?.refusal == ["Sail cannot reach the control plane at https://sail.example.com."] && WorkspacesModelTests.page(model)?.banner == nil)
         model.listed(WorkspacesModelTests.answer(.workspaces(project: "lighthouse"), "workspaces-none"), request: model.listAgain(), at: WorkspacesModelTests.at)
         #expect(BuildCardTests.card(model)?.refusal.isEmpty == false, "a later list took away the build still owed")

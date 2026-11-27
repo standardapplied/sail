@@ -34,7 +34,7 @@ import Testing
 
     /// The card project `project`'s page draws for `person` once `golden` is read, and `refused` when
     /// a build asked was refused.
-    static func card(_ golden: String, project: String = Self.long, step: Int? = nil, person: WorkspacesModel.Person = Self.dana, refused: String? = nil) throws -> WorkspacesModel.Build {
+    static func card(_ golden: String, project: String = Self.long, step: Int? = nil, person: WorkspacesModel.Person = Self.dana, refused: String? = nil) throws -> WorkspacesModel.BuildCard {
         let exchange = try template(golden, project: project, step: step)
         let status = try Endpoint.template(project: project).decode(HTTPResponse(status: exchange.status, body: exchange.body))
         var model = WorkspacesModel(person: person)
@@ -55,7 +55,7 @@ import Testing
         return card
     }
 
-    static func shown(_ build: WorkspacesModel.Build, width: Double, direction: NSUserInterfaceLayoutDirection = .leftToRight) throws -> BuildCard {
+    static func shown(_ build: WorkspacesModel.BuildCard, width: Double, direction: NSUserInterfaceLayoutDirection = .leftToRight) throws -> BuildCard {
         let card = BuildCard(look: .light, titleFont: try TitleFont(directory: LookTests.fonts), mono: try LabelFont(directory: LookTests.fonts))
         card.userInterfaceLayoutDirection = direction
         card.show(build)
@@ -98,15 +98,76 @@ import Testing
 
     /// Right to left, the card is mirrored: the mark, the running group's spinner and Build Again
     /// stand at the trailing side, each where the left-to-right card has it, measured from the other
-    /// edge.
+    /// edge; so does every part it draws (each text, the bar and its fill, which runs from the right,
+    /// the groups' icons, the tinted box and the refusal's mark).
     @Test func theCardIsMirroredRightToLeft() throws {
-        for build in [try Self.card("template-2e-building", step: 10), try Self.card("template-2h-failed")] {
-            let ltr = try Self.shown(build, width: 600), rtl = try Self.shown(build, width: 600, direction: .rightToLeft)
+        let width = 600.0, now = Date(timeIntervalSince1970: 0)
+        let mirror = { (rect: NSRect) in NSRect(x: width - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height)) }
+        for build in [try Self.card("template-2e-building", step: 10), try Self.card("template-2h-failed"), try Self.card("template-2h-failed", refused: "refusal-template-read-only")] {
+            let ltr = try Self.shown(build, width: width), rtl = try Self.shown(build, width: width, direction: .rightToLeft)
             for (one, other) in [(ltr.mark, rtl.mark), (ltr.spinner, rtl.spinner), (ltr.again, rtl.again)] where !one.isHidden {
-                #expect(abs(Double(other.frame.minX) - (600 - Double(one.frame.maxX))) < 0.5 && other.frame.minY == one.frame.minY, "\(one.frame) mirrored to \(other.frame)")
-                #expect(Double(other.frame.minX) > 300, "\(other.frame) stays at the leading side")
+                #expect(abs(Double(other.frame.minX) - (width - Double(one.frame.maxX))) < 0.5 && other.frame.minY == one.frame.minY, "\(one.frame) mirrored to \(other.frame)")
+                #expect(Double(other.frame.minX) > width / 2, "\(other.frame) stays at the leading side")
             }
+            let left = ltr.laid(width: width, now: now), right = rtl.laid(width: width, now: now)
+            #expect(right.texts.map(\.text.string) == left.texts.map(\.text.string))
+            #expect(right.texts.map(\.rect) == left.texts.map { mirror($0.rect) }, "a text not mirrored: \(right.texts.map(\.rect))")
+            #expect(right.icons.map(\.rect) == left.icons.map { mirror($0.rect) } && right.icons.map(\.mark) == left.icons.map(\.mark), "an icon not mirrored")
+            #expect(right.mark == mirror(left.mark) && right.bar == left.bar.map(mirror) && right.box == left.box.map(mirror), "the mark, the bar or the box not mirrored")
+            #expect(right.again == left.again.map(mirror) && right.refusalMark == left.refusalMark.map(mirror), "Build Again or the refusal's mark not mirrored")
+            let bar = try #require(right.bar), filled = try #require(right.filled)
+            #expect(filled.maxX == bar.maxX && filled.width < bar.width && right.filled == left.filled.map(mirror), "the fill at \(filled) in \(bar) does not run from the right")
         }
+    }
+
+    /// While the window is off screen (closed, in the Dock, the app hidden) the reads stop and the
+    /// time does not tick; back on screen, the template is read again and the time ticks, through a
+    /// scroll's tracking too.
+    @Test func offScreenNothingIsReadAndNothingTicks() async throws {
+        let pauses = Pauses()
+        let (view, window, desk) = try await Self.section("building", "template-2e-building", pauses)
+        defer { window.orderOut(nil) }
+        #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && pauses.count == 1 }, "\(view.text)")
+        let card = view.project.buildCard, tracking = CFRunLoopMode(RunLoop.Mode.eventTracking.rawValue as CFString)
+        let ticks = try #require(card.ticks)
+        #expect(CFRunLoopContainsTimer(CFRunLoopGetMain(), unsafeBitCast(ticks, to: CFRunLoopTimer.self), tracking), "the time stops while a scroll tracks")
+        view.away = true
+        #expect(await RunnerTabTests.until { pauses.cancelled == 1 }, "a read went on off screen")
+        #expect(card.ticks == nil, "the time ticked off screen")
+        view.away = false
+        #expect(await RunnerTabTests.until { pauses.count == 2 }, "not read again back on screen")
+        let reads = await Self.reads(desk)
+        #expect(card.ticks != nil && reads == 2)
+    }
+
+    /// A read the server refused stops the reads where it is, never said as no answer: a refusal in
+    /// the server's words on the card; a project gone lists the projects again, so the page follows
+    /// what is true; an ended session is handed to the check that says it, nothing said on the card.
+    @Test(arguments: ["refusal-forbidden", "refusal-project-not-in-catalog-sessions", "refusal-missing-bearer-token"])
+    func aRefusedReadStopsTheReads(_ golden: String) async throws {
+        let pauses = Pauses()
+        let (view, window, desk) = try await Self.section("building", "template-2e-building", pauses)
+        defer { window.orderOut(nil) }
+        var ended = 0
+        view.onSessionEnded = { ended += 1 }
+        #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && pauses.count == 1 }, "\(view.text)")
+        let refusal = try Exchange(golden)
+        await desk.answer(Exchange(method: "GET", path: "/v1/projects/lighthouse/template", status: refusal.status, body: refusal.body))
+        await desk.answer(try Exchange("projects").altered(at: ["projects"], to: [["name": "harbor", "container_status": "running", "template": "ready"]]))
+        let lists = await desk.asked.filter { $0 == "GET /v1/projects" }.count
+        pauses.letGo()
+        switch golden {
+        case "refusal-forbidden":
+            #expect(await RunnerTabTests.until { view.text.contains("Enrollment ticket is invalid or expired.") }, "\(view.text)")
+        case "refusal-project-not-in-catalog-sessions":
+            #expect(await RunnerTabTests.until { Self.row(view) == nil && !view.text.contains("Creating lighthouse") }, "the page kept a project gone: \(view.text)")
+            #expect(await desk.asked.filter { $0 == "GET /v1/projects" }.count == lists + 1)
+        default:
+            #expect(await RunnerTabTests.until { ended == 1 }, "the ended session was not handed over")
+            #expect(view.text.contains("Creating lighthouse") && !view.text.contains("Missing bearer token"), "\(view.text)")
+        }
+        let reads = await Self.reads(desk)
+        #expect(!view.text.contains("No answer just now") && pauses.count == 1 && reads == 2, "read again after a refusal: \(view.text)")
     }
 
     /// At the least window a stopped build's Build Again stands inside the card's frame, in view with
@@ -115,10 +176,13 @@ import Testing
         let pauses = Pauses()
         let (view, window, _) = try await Self.section("failed", "template-2h-failed", pauses)
         defer { window.orderOut(nil) }
-        window.setContentSize(NSSize(width: WorkspacesViewTests.narrowestCard, height: ShellApp.leastFrame.height - ShellApp.bandHeight - 4))
         #expect(await RunnerTabTests.until { view.text.contains("Build Again picks up at step 13") }, "\(view.text)")
         view.layoutSubtreeIfNeeded()
         let card = view.project.buildCard, frame = view.project.buildFrame
+        #expect(Double(frame.frame.height) == card.height(width: Double(frame.frame.width) - 2) + 2, "the frame \(frame.frame) not the card's height at its width")
+        window.setContentSize(NSSize(width: WorkspacesViewTests.narrowestCard, height: ShellApp.leastFrame.height - ShellApp.bandHeight - 4))
+        view.layoutSubtreeIfNeeded()
+        #expect(Double(frame.frame.height) == card.height(width: Double(frame.frame.width) - 2) + 2, "the frame \(frame.frame) kept the card's height at the width before")
         let button = card.convert(card.again.alignmentRect(forFrame: card.again.frame), to: frame)
         #expect(!card.again.isHidden && frame.bounds.insetBy(dx: 1, dy: 1).contains(button), "Build Again at \(button) in a frame \(frame.bounds)")
     }

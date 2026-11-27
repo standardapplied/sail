@@ -78,6 +78,12 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         }
     }
 
+    /// Whether `error`, the answer to a call asked with the session, says that session has ended.
+    public static func ends(_ error: SailError) -> Bool {
+        guard case let .refused(refusal) = error else { return false }
+        return reason(refusal, step: .asking) == .ended
+    }
+
     static let originRefused = "Registration origin not allowed: "
 
     /// What to check when an address answered, but not as Sail's control plane answers.
