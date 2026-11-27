@@ -1,0 +1,1 @@
+{"type":"control_response","response":{"subtype":"success","request_id":"bda0b4cf-c4f6-4219-bd84-0f0617292889","response":{"behavior":"allow","updatedInput":{"command":"printf twice > twice.txt","description":"Write twice to twice.txt via printf"}}}}

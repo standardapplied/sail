@@ -41,7 +41,8 @@ import org.junit.jupiter.api.io.TempDir;
  * process left from before a restart or by a reader that stopped found and proved gone before
  * another starts, the restart's cleanup never cutting a live turn, an end read as ended only with
  * its last item, a message left waiting delivered by the next process, an idle end that cuts no
- * message, a request's bound that stops the turn, and every turn closed once.
+ * message, a request that waits for its person however long, a stop not taken that ends its
+ * process, and every turn closed once.
  */
 class ChatLifecycleTest {
 
@@ -451,63 +452,56 @@ class ChatLifecycleTest {
   }
 
   /**
-   * I9: a request unanswered at its bound has its turn stopped, said in plain words; the process
-   * stays, and the harness withdraws the request as it stops.
+   * A7, I5: a request waits for its person however long that is: past the bound S2a held it to, and
+   * over a weekend, no sweep stops its turn, withdraws it, allows it or ends its process.
    */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
-  void aRequestUnansweredAtItsBoundHasItsTurnStoppedAndTheProcessKept() {
+  void aRequestWaitsForItsPersonOverAWeekendAndItsProcessIsKept() {
     var session = bench.samsChat();
     bench.send(session, "hi");
     var fake = bench.says(INIT, ASKS);
-    fake.onWrite(
-        written -> {
-          if (written.contains("\"interrupt\"")) {
-            fake.says(STOPS.toArray(String[]::new));
-          }
-        });
 
-    bench.clock.advance(Duration.ofMinutes(4));
+    bench.clock.advance(Duration.ofMinutes(5));
     bench.host.sweep();
-    var within = bench.kinds(session);
-    bench.clock.advance(Duration.ofMinutes(1));
+    bench.clock.advance(Duration.ofDays(3));
     bench.host.sweep();
-    fake.settle();
 
-    assertEquals(List.of("message", "session", "permission"), within);
-    assertEquals(
-        List.of(
-            "message", "session", "permission", "told", "withdrawn", "interrupted", "turn_ended"),
-        bench.kinds(session));
-    assertEquals(
-        "Nobody can answer the agent's request in this version of Sail, so after 5 minutes Sail"
-            + " stopped its turn and withdrew the request.",
-        bench.items(session).get(3).get("words"));
+    assertEquals(List.of("message", "session", "permission"), bench.kinds(session));
+    assertEquals(1, fake.written.size(), "only the message was written: nothing answered for her");
     assertFalse(fake.stdinClosed(), "the process is kept");
+    assertEquals(1, bench.processes.starts.size());
   }
 
-  /** I9: a turn that does not stop a bound after it was asked to has its process ended. */
+  /** I10: a turn its person stopped that does not stop a bound after has its process ended. */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aTurnThatDoesNotStopHasItsProcessEnded() {
     var session = bench.samsChat();
     bench.send(session, "hi");
     var fake = bench.says(INIT, ASKS);
-    bench.clock.advance(Duration.ofMinutes(5));
+    assertEquals(Map.of("stopping", true), interrupt(session));
+    bench.clock.advance(Duration.ofMinutes(4));
     bench.host.sweep();
+    var within = fake.stdinClosed();
 
-    bench.clock.advance(Duration.ofMinutes(5));
+    bench.clock.advance(Duration.ofMinutes(1));
     bench.host.sweep();
     over(fake);
 
+    assertFalse(within, "the stop is given its bound");
     assertTrue(fake.stdinClosed());
     assertEquals(
-        List.of("message", "session", "permission", "told", "told", "withdrawn", "interrupted"),
+        List.of("message", "session", "permission", "told", "withdrawn", "interrupted"),
         bench.kinds(session));
     assertEquals(
         "Claude Code's turn could not be stopped, so Sail ended its process; your next message"
             + " starts it again.",
-        bench.items(session).get(4).get("words"));
+        bench.items(session).get(3).get("words"));
+  }
+
+  private Map<String, Object> interrupt(String session) {
+    return ChatBench.as("sam", () -> bench.host.answers.interrupt(session)).toMap();
   }
 
   /** I7: a request still open when its turn ends is withdrawn: nothing can answer it then. */

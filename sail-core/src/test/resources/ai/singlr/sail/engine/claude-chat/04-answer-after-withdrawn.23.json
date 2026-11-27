@@ -1,0 +1,1 @@
+{"type":"control_response","response":{"subtype":"success","request_id":"0bcc636b-45a6-475a-92eb-a0112ea13265","response":{"behavior":"allow","updatedInput":{"command":"printf withdrawn > withdrawn.txt","description":"Write withdrawn text to withdrawn.txt"}}}}
