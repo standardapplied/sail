@@ -53,6 +53,8 @@ package final class NewSessionPanel: NSObject {
     var onShell: @MainActor () -> Void = {}
     /// Told when it closes, however it closes.
     var onClose: @MainActor () -> Void = {}
+    /// Told once it stands open, placed by what showed of the page then.
+    package var onOpen: @MainActor () -> Void = {}
     /// Told Store a Key was chosen on the chosen harness.
     var onStoreKey: @MainActor (AgentOffer) -> Void = { _ in }
     /// Shows a pop-up's menu, the mode's or Sign in's: the library's opener, whose menu tracks the
@@ -132,6 +134,7 @@ package final class NewSessionPanel: NSObject {
         resizeWatch = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: nil) { [weak self] _ in
             MainActor.assumeIsolated { self?.close() }
         }
+        onOpen()
     }
 
     package func close() {

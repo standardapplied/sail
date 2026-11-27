@@ -494,6 +494,7 @@ extension Driver {
         }
         if let size = step.window ?? (step.leastWindow == true ? [Double(ShellApp.leastFrame.width), Double(ShellApp.leastFrame.height)] : nil), size.count == 2 {
             let frame = shell.window.frame
+            layoutBeforeResize = workspacesLayout
             shell.window.setFrame(NSRect(x: frame.minX, y: frame.maxY - size[1], width: size[0], height: size[1]), display: true)
             pane.layoutSubtreeIfNeeded()
             let now = shell.window.frame.size, reached = abs(Double(now.width) - size[0]) < 0.5 && abs(Double(now.height) - size[1]) < 0.5
@@ -562,10 +563,25 @@ extension Driver {
         return nil
     }
 
+    /// Where the Workspaces section stands, every frame in window coordinates: the window's on
+    /// screen, the card's, the section's, the sidebar's, the page's and what shows of it (on screen,
+    /// as the New session panel measures it), the page's direction, the backing scale and the
+    /// panel's box while it is open.
+    var workspacesLayout: String {
+        let window = shell.window, pane = shell.workspaces, project = pane.project
+        let frame = { (view: NSView?) in view.map { "\($0.convert($0.bounds, to: nil))" } ?? "none" }
+        let shows = window.convertToScreen(project.convert(project.visibleRect, to: nil))
+        return "the window \(window.frame), the card \(frame(pane.superview)), the section \(frame(pane)), the sidebar "
+            + (pane.panel.isHidden ? "hidden" : frame(pane.panel)) + ", the page \(frame(project)), what shows of it \(shows), "
+            + (project.userInterfaceLayoutDirection == .rightToLeft ? "right to left" : "left to right") + ", scale \(window.backingScaleFactor), the box "
+            + (pane.newSession.isOpen ? "\(pane.newSession.popover.frame)" : "closed")
+    }
+
     /// A1's steps: a row's + and ⋯, the New Session panel and what its Start asks of the runner.
     private func performNewSession(_ step: Step) async -> (Bool, String)? {
         let pane = shell.workspaces, panel = pane.newSession, list = pane.project.list
         let said = { panel.isOpen ? "the panel says: " + panel.view.words.joined(separator: " | ") : "the panel is closed" }
+        panel.onOpen = { [weak self] in self?.layoutAtOpen = self?.workspacesLayout ?? "" }
         if let shows = step.rowShows, let name = shows.first {
             guard await clickRow(name, in: list) else { return (false, "no row \(name) to click") }
             let titles = { Self.rowButtons(name, in: list).map(\.title) }
@@ -623,7 +639,8 @@ extension Driver {
                 return nil
             }
             let stands = await waitUntil(step.seconds ?? 5) { inPage() == nil }
-            return (stands, inPage() ?? "the box \(panel.popover.frame) stands in the page")
+            let layouts = "; before the last resize: \(layoutBeforeResize); at its opening: \(layoutAtOpen); now: \(workspacesLayout)"
+            return (stands, (inPage() ?? "the box \(panel.popover.frame) stands in the page") + layouts)
         }
         if let primary = step.newSessionPrimary, primary.count == 2 || primary.count == 3 {
             let button = { panel.view.primary }
