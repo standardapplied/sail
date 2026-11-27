@@ -157,8 +157,7 @@ final class Told: Sendable {
         let shell = try WelcomeViewTests.shell(desk, defaults: WelcomeViewTests.reached(), vault: OneSession(fde: "uday", lasts: AccountPaneTests.month))
         defer { shell.window.orderOut(nil) }
         await shell.checking?.value
-        await shell.workspaces.refresh()
-        try #require(shell.flow.standing != nil && shell.workspaces.text.contains("dock"), "\(shell.workspaces.text)")
+        try #require(await RunnerTabTests.until { shell.flow.standing != nil && !shell.workspaces.busy && shell.workspaces.text.contains("dock") }, "\(shell.workspaces.text)")
         let client = try #require(shell.workspaces.client)
         shell.select(.terminals)
         for route in ["GET /v1/projects", "POST /v1/projects/harbor/workspaces/dock/start"] {
