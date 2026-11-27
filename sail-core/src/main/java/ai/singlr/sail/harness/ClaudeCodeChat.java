@@ -6,6 +6,7 @@
 package ai.singlr.sail.harness;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.CallFields;
 import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ChatItem.Detail;
 import java.util.ArrayList;
@@ -25,6 +26,26 @@ import java.util.Map;
  * started runs, and begins a turn of its own when that task ends.
  */
 final class ClaudeCodeChat implements HarnessChat {
+
+  /**
+   * The fields each tool's detail draws, of their types: a call holding any other is drawn whole
+   * ({@link CallFields#drawnWhole}), since allowing it hands its whole input back.
+   */
+  private static final Map<String, Map<String, Class<?>>> DRAWN =
+      Map.of(
+          "Bash", Map.of("command", String.class, "run_in_background", Boolean.class),
+          "Edit",
+              Map.of(
+                  "file_path", String.class,
+                  "old_string", String.class,
+                  "new_string", String.class,
+                  "replace_all", Boolean.class),
+          "Write", Map.of("file_path", String.class, "content", String.class),
+          "Read", Map.of("file_path", String.class),
+          "Grep", Map.of("pattern", String.class, "path", String.class),
+          "Glob", Map.of("pattern", String.class, "path", String.class),
+          "WebSearch", Map.of("query", String.class),
+          "WebFetch", Map.of("url", String.class));
 
   /** The prefix Claude Code gives the name of every tool an MCP server serves. */
   private static final String MCP_TOOL = "mcp__";
@@ -60,15 +81,20 @@ final class ClaudeCodeChat implements HarnessChat {
 
   /**
    * Claude Code's own permission modes that were recorded working in a chat: its {@code default}
-   * first, named at the start as {@code manual}, the name its {@code --help} lists for it (it lists
-   * no {@code default}), so a workspace's own default never overrides the person's choice. The mode
-   * a chat is in is the one Claude Code says ({@code init}, {@code status}). In plan mode the
-   * recorded turns ran on a model other than the one {@code --model} named, until the plan was
-   * approved. Never asks ({@code bypassPermissions}) is not offered: it was never recorded at a
-   * chat's start or as a switch. What Edits freely runs without asking is what probe 2 recorded
-   * (04b): {@code rm}, {@code mv}, {@code cp}, {@code sed -i} and {@code nice rm} inside the
-   * workspace, and a request for {@code rm} outside it; {@code mkdir} and {@code touch} are from
-   * its documentation.
+   * first, named at the start as {@code manual}, the name its {@code --help} lists for it, so a
+   * workspace's own default never overrides the person's choice: probe 3 recorded the launch taken,
+   * {@code init} then saying {@code default}, and an edit and a command each asking in a workspace
+   * whose settings default to {@code acceptEdits} (01a, 01c). {@code --permission-mode default},
+   * which {@code --help} does not list, was taken the same way (01d). The mode a chat is in is the
+   * one Claude Code says ({@code init}, {@code status}). In plan mode the recorded turns ran on a
+   * model other than the one {@code --model} named, until the plan was approved. Never asks ({@code
+   * bypassPermissions}) is not offered: it was never recorded at a chat's start or as a switch.
+   * Each mode's words say only what a recording shows it doing (asserted, line by line, in {@code
+   * LiveChatTest.everyModeWordIsARecordedDecision}): Asks first asked before a Write and a command,
+   * and ran {@code sleep} and {@code echo} unasked; Edits freely ran a Write and {@code rm}, {@code
+   * mv}, {@code cp}, {@code sed -i} and {@code nice rm} inside the workspace unasked, and asked
+   * before {@code rm} outside it. "Any folder you let it work in" is its documentation's {@code
+   * additionalDirectories}: said so as never to say less than it grants.
    */
   @Override
   public List<Harness.Mode> modes() {
@@ -76,15 +102,16 @@ final class ClaudeCodeChat implements HarnessChat {
         new Harness.Mode(
             "default",
             "Asks first",
-            "Asks before edits, shell commands and network actions.",
+            "Asks before it edits a file or runs a command, except commands it counts as safe,"
+                + " such as sleep or echo, which run without asking.",
             " --permission-mode manual",
             false),
         ClaudeCode.permissionMode(
             "acceptEdits",
             "Edits freely",
-            "Edits, moves and deletes files inside this workspace, and in any folder you let it"
-                + " work in, without asking, with file edits and file commands such as rm, mv, cp,"
-                + " sed, mkdir and touch; it asks before anything else.",
+            "Edits files, and runs file commands such as rm, mv, cp and sed, inside this workspace"
+                + " and any folder you let it work in, without asking; it still asks before such a"
+                + " command anywhere else.",
             false),
         ClaudeCode.permissionMode(
             "plan",
@@ -118,6 +145,9 @@ final class ClaudeCodeChat implements HarnessChat {
    */
   @Override
   public Detail detail(String tool, Map<String, Object> input) {
+    if (!CallFields.drawnWhole(tool, input, DRAWN.getOrDefault(tool, Map.of()))) {
+      return new Detail.Other(tool, YamlUtil.dumpJsonValue(input), false);
+    }
     return switch (tool) {
       case "Bash" ->
           new Detail.Command(

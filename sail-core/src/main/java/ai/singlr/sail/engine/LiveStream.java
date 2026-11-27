@@ -154,7 +154,11 @@ public final class LiveStream {
         String requestId, String callId, Map<String, Object> input, List<ChatItem.Asked> questions)
         implements Step {}
 
-    /** The agent asks a person to approve its {@code plan}, as a request to leave plan mode. */
+    /**
+     * The agent asks a person to approve its {@code plan}, as a request to leave plan mode; one
+     * whose input holds anything its card does not draw ({@link CallFields#plan}) is a {@link
+     * Permission} of its tool instead, its whole input shown, and so is such a question.
+     */
     record Plan(String requestId, String callId, Map<String, Object> input, String plan)
         implements Step {}
 
@@ -277,7 +281,9 @@ public final class LiveStream {
    * what this reader cannot take, naming its type when it names one. No line is fatal, whatever it
    * holds: one that throws while it is read (a {@code null} where a value was, an id that is not
    * safe) says nothing, and so does one nested so deep that parsing it overflows the stack, a depth
-   * the agent chooses (an MCP server's structured result), not the host.
+   * the agent chooses (an MCP server's structured result), not the host. A request among them is
+   * {@link Step.Unreadable} naming no id, so the host stops the turn rather than wait on what no
+   * person sees; one past the frame ceiling is too large to show.
    */
   public static Step read(String line) {
     if (line != null && line.length() > MAX_LINE_CHARS) {
@@ -309,7 +315,9 @@ public final class LiveStream {
         default -> turn(type, event);
       };
     } catch (RuntimeException | StackOverflowError malformed) {
-      return new Step.Other(type);
+      return line != null && REQUEST_START.matcher(line).lookingAt()
+          ? new Step.Unreadable(null, false)
+          : new Step.Other(type);
     }
   }
 
@@ -476,24 +484,30 @@ public final class LiveStream {
                 shown != null && shown.codePointCount(0, shown.length()) > CONTENT_CODE_POINTS)) {
       return new Step.Unreadable(id, true);
     }
+    var permission =
+        new Step.Permission(
+            id,
+            call,
+            request.containsKey("agent_id") ? id(request, "agent_id") : null,
+            tool,
+            Objects.toString(text(request, "display_name"), ""),
+            input,
+            text(request, "description"),
+            text(request, "decision_reason"),
+            request.get("permission_suggestions") instanceof List<?> suggestions
+                    && !suggestions.contains(null)
+                ? List.copyOf(suggestions)
+                : List.of());
     return switch (tool) {
-      case "AskUserQuestion" -> new Step.Question(id, call, input, questions(input));
+      case "AskUserQuestion" ->
+          CallFields.questions(input)
+              ? new Step.Question(id, call, input, questions(input))
+              : permission;
       case "ExitPlanMode" ->
-          new Step.Plan(id, call, input, Objects.toString(text(input, "plan"), ""));
-      default ->
-          new Step.Permission(
-              id,
-              call,
-              request.containsKey("agent_id") ? id(request, "agent_id") : null,
-              tool,
-              Objects.toString(text(request, "display_name"), ""),
-              input,
-              text(request, "description"),
-              text(request, "decision_reason"),
-              request.get("permission_suggestions") instanceof List<?> suggestions
-                      && !suggestions.contains(null)
-                  ? List.copyOf(suggestions)
-                  : List.of());
+          CallFields.plan(input)
+              ? new Step.Plan(id, call, input, Objects.toString(text(input, "plan"), ""))
+              : permission;
+      default -> permission;
     };
   }
 

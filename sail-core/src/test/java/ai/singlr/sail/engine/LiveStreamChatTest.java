@@ -179,6 +179,27 @@ class LiveStreamChatTest {
   }
 
   /**
+   * Asks first, launched as {@code --permission-mode manual} (probe 3): Claude Code says it is in
+   * {@code default}, the chat mode's own name, and an edit and a command each ask, even in a
+   * workspace whose settings make {@code acceptEdits} its default (01c:2).
+   */
+  @Test
+  void asksFirstLaunchedAsManualIsDefaultAndAsksOverAWorkspaceDefault() {
+    var recording = "01c-mode-manual-over-workspace-acceptEdits";
+
+    assertEquals(
+        "{\"permissions\": {\"defaultMode\": \"acceptEdits\"}}",
+        Recorded.parsed(recording, 2).get("content"));
+    assertEquals(
+        List.of("default", "default", "Edit", "Bash"),
+        List.of(
+            ((Step.Init) read("01a-mode-manual", 4)).mode(),
+            ((Step.Init) read(recording, 4)).mode(),
+            ((Step.Permission) read(recording, 40)).tool(),
+            ((Step.Permission) read(recording, 68)).tool()));
+  }
+
+  /**
    * A subagent's request comes as any other, with no {@code parent_tool_use_id}, naming the agent
    * that asks ({@code agent_id}, probe 2's 04a:45), which the subagent's own lines name beside the
    * call that started it (04a:44): so a host draws the request under that call's row.
@@ -548,6 +569,80 @@ class LiveStreamChatTest {
         new Step.Other(""),
         LiveStream.read("{\"x\":\"{\\\"type\\\":\\\"control_request\\\"," + padding + "\"}"),
         "only a line that starts as a request is one");
+  }
+
+  /**
+   * A plan or a question with a field its card does not draw is asked as any other call, its whole
+   * input shown: a person is shown everything they allow. Recorded: a plan's {@code plan} and
+   * {@code planFilePath} (03b:28), a question's fields (03a:21).
+   */
+  @Test
+  @SuppressWarnings("unchecked")
+  void aPlanOrQuestionWithAFieldItsCardDoesNotDrawIsAskedAsACall() {
+    var asked =
+        "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
+            + "\"can_use_tool\",\"tool_name\":\"%s\",\"tool_use_id\":\"t1\",\"input\":%s}}";
+    for (var call :
+        List.of(
+            List.of("ExitPlanMode", "{\"plan\":\"p\",\"allowedPrompts\":[{\"tool\":\"Bash\"}]}"),
+            List.of("ExitPlanMode", "{\"plan\":7}"),
+            List.of("AskUserQuestion", "{\"questions\":[],\"answers\":{\"q\":\"a\"}}"),
+            List.of(
+                "AskUserQuestion", "{\"questions\":[{\"question\":\"q\",\"options\":[],\"x\":1}]}"),
+            List.of(
+                "AskUserQuestion",
+                "{\"questions\":[{\"question\":\"q\",\"options\":[{\"label\":\"a\",\"x\":1}]}]}"),
+            List.of("AskUserQuestion", "{\"questions\":[\"q\"]}"))) {
+      var line = asked.formatted(call.get(0), call.get(1));
+      assertEquals(
+          new Step.Permission(
+              "r1",
+              "t1",
+              null,
+              call.get(0),
+              "",
+              (Map<String, Object>)
+                  ((Map<String, Object>) Recorded.parsed(line).get("request")).get("input"),
+              null,
+              null,
+              List.of()),
+          LiveStream.read(line),
+          call.toString());
+    }
+    assertEquals(
+        Step.Plan.class,
+        LiveStream.read(
+                asked.formatted("ExitPlanMode", "{\"plan\":\"p\",\"planFilePath\":\"/p.md\"}"))
+            .getClass(),
+        "the plan's file only describes it (03b:28)");
+  }
+
+  /**
+   * A request line that cannot be parsed under the frame ceiling, malformed or nested past what a
+   * reader takes, is unreadable and names no id to answer: the host stops the turn, so it never
+   * waits on a request no person sees.
+   */
+  @Test
+  void aRequestLineThatCannotBeParsedStopsTheTurn() {
+    var depth = 5_000;
+    var nested =
+        "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
+            + "\"can_use_tool\",\"tool_name\":\"mcp__x__y\",\"tool_use_id\":\"t1\",\"input\":"
+            + "{\"a\":"
+            + "[".repeat(depth)
+            + "]".repeat(depth)
+            + "}}}";
+    assertTrue(nested.length() < LiveStream.MAX_LINE_CHARS);
+
+    assertEquals(new Step.Unreadable(null, false), LiveStream.read(nested));
+    assertEquals(
+        new Step.Unreadable(null, false),
+        LiveStream.read("{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{"),
+        "malformed");
+    assertEquals(
+        new Step.Other(""),
+        LiveStream.read("{\"type\":\"user\",\"message\":{"),
+        "any other line that cannot be parsed says nothing, as before");
   }
 
   @Test
