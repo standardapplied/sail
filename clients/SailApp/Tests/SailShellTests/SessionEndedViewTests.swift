@@ -58,7 +58,10 @@ final class Told: Sendable {
         await view.projectsAsked?.value
         #expect(Self.sailsOwn(view.text) && view.text.contains("Your sign-in ended."), "\(view.text)")
         #expect(told.times == 1)
-        if listedBefore { #expect(Driverless.button("Try Again", in: view) == nil, "an ended sign-in's banner offers Try Again") }
+        if listedBefore {
+            let offered = ReattachTests.buttons(view).filter { $0.title == "Try Again" && !$0.isHiddenOrHasHiddenAncestor }
+            #expect(offered.isEmpty, "an ended sign-in's banner offers Try Again")
+        }
     }
 
     @Test func aProjectsWorkspacesListingSaysTheEndInSailsWords() async throws {
@@ -218,12 +221,14 @@ final class Told: Sendable {
         let client = try #require(shell.workspaces.client)
         shell.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
         await shell.checking?.value
-        try #require(await Self.checks(desk) == 2 && shell.flow.standing != nil, "the activation's check did not answer signed in")
+        let activated = await Self.checks(desk)
+        try #require(activated == 2 && shell.flow.standing != nil, "the activation's check did not answer signed in: \(activated) checks")
         try await Self.ended(desk)
         _ = try? await client.send(.logins)
         let ending = try #require(shell.flow.ending, "a call from before the activation asked nothing")
         await ending.value
-        #expect(await Self.checks(desk) == 3 && Self.welcomed(shell), "\(shell.welcome.text)")
+        let checks = await Self.checks(desk)
+        #expect(checks == 3 && Self.welcomed(shell), "\(checks) checks: \(shell.welcome.text)")
     }
 
     /// A call that finds the session ended while a check is under way that asked before the end, and
@@ -242,7 +247,8 @@ final class Told: Sendable {
         await shell.checking?.value
         let ending = try #require(shell.flow.ending, "the check under way answered signed in, and nothing asked again")
         await ending.value
-        #expect(await Self.checks(desk) == 3 && Self.welcomed(shell), "\(shell.welcome.text)")
+        let checks = await Self.checks(desk)
+        #expect(checks == 3 && Self.welcomed(shell), "\(checks) checks: \(shell.welcome.text)")
     }
 
     /// A check under way that finds the session ended serves the call that found it meanwhile: the
@@ -260,7 +266,8 @@ final class Told: Sendable {
         await desk.release()
         await shell.checking?.value
         await shell.flow.ending?.value
-        #expect(await Self.checks(desk) == 2 && shell.flow.ending == nil && Self.welcomed(shell), "\(shell.welcome.text)")
+        let checks = await Self.checks(desk)
+        #expect(checks == 2 && shell.flow.ending == nil && Self.welcomed(shell), "\(checks) checks: \(shell.welcome.text)")
     }
 
     /// A call made with a sign-in since replaced (Sign In Again) that finds that session ended asks
@@ -273,11 +280,12 @@ final class Told: Sendable {
         try #require(shell.flow.signInAgain { _ in })
         await shell.flow.underWay?.value
         try #require(shell.flow.standing != nil, "Sign In Again did not sign in")
-        let checks = await Self.checks(desk)
+        let before = await Self.checks(desk)
         try await Self.ended(desk)
         _ = try? await old.send(.logins)
         #expect(shell.flow.ending == nil && shell.flow.standing != nil, "the old sign-in's call asked who is signed in")
-        #expect(await Self.checks(desk) == checks)
+        let after = await Self.checks(desk)
+        #expect(after == before, "\(after - before) checks asked")
     }
 
     /// Signed in again after the welcome, a call that finds the new session ended takes the person
@@ -298,6 +306,7 @@ final class Told: Sendable {
             await shell.flow.underWay?.value
             await desk.answer(try Self.ending("GET /v1/whoami", "refusal-invalid-bearer-token"))
         }
-        #expect(await Self.checks(desk) == 5, "\(await desk.asked)")
+        let asked = await desk.asked
+        #expect(asked.filter { $0 == "GET /v1/whoami" }.count == 5, "\(asked)")
     }
 }
