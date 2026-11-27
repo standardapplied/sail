@@ -610,8 +610,8 @@
                                         <include>ai.singlr.sail.api.EventStreamClient</include>
                                     </includes>
                                     <!--
-                                        EventStreamClient runs a virtual-thread SSE reader that
-                                        carries two defensive catch blocks: a generic 'stream
+                                        EventStreamClient reads its SSE stream on its client's
+                                        work and carries two defensive catch blocks: a generic 'stream
                                         ended' handler (fires when the HTTP body throws while
                                         the watcher main loop is still alive) and a silent
                                         close() that swallows IOException from the underlying

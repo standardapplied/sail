@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.sail.commands;
+package ai.singlr.sail.api;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -18,7 +18,7 @@ import java.nio.charset.StandardCharsets;
  * stream as HTTP ends it ({@code dropped} false) or closes the connection mid-stream, as a sail-api
  * that restarts under its followers does.
  */
-final class StreamServer implements AutoCloseable {
+public final class StreamServer implements AutoCloseable {
 
   private final ServerSocket socket;
   private final Thread answering;
@@ -28,15 +28,15 @@ final class StreamServer implements AutoCloseable {
     answering = Thread.ofVirtual().start(() -> answer(frames, dropped));
   }
 
-  static StreamServer ending(String frames) throws IOException {
+  public static StreamServer ending(String frames) throws IOException {
     return new StreamServer(frames, false);
   }
 
-  static StreamServer dropping(String frames) throws IOException {
+  public static StreamServer dropping(String frames) throws IOException {
     return new StreamServer(frames, true);
   }
 
-  int port() {
+  public int port() {
     return socket.getLocalPort();
   }
 
