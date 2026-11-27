@@ -1528,7 +1528,9 @@ class FdeCommandTest {
       Thread.interrupted();
     }
 
-    assertEquals("Interrupted while removing ada's key from this box's containers.", refusal);
+    assertEquals(
+        "Interrupted while removing ada's key from this box's containers: InterruptedException",
+        refusal);
     assertEquals(List.of(keygen.made.getFirst().blob()), pairedKeys());
     assertEquals(List.of("mast-ada"), tokens().stream().map(TokenStore.TokenInfo::name).toList());
   }

@@ -6,6 +6,8 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.commands.FdeCommand.Box;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.OperatorAuthorizedKeys;
 import ai.singlr.sail.engine.PairingTrust;
@@ -52,7 +54,7 @@ final class PairingRevocation {
       return new OperatorAuthorizedKeys(box.home())
           .removeCommented(FdeCommand.pairingComment(handle));
     } catch (IOException failure) {
-      throw new UncheckedIOException(
+      throw Remedied.state(
           "Could not remove "
               + handle
               + "'s key line from "
@@ -61,11 +63,13 @@ final class PairingRevocation {
               + failure.getClass().getSimpleName()
               + "), so nothing of "
               + handle
-              + " was removed and its pairing still works. Check that "
-              + box.home().resolve(".ssh")
-              + " is writable by "
-              + box.operator()
-              + ", then run the command again.",
+              + " was removed and its pairing still works.",
+          Remedy.of(
+              "Check that "
+                  + box.home().resolve(".ssh")
+                  + " is writable by "
+                  + box.operator()
+                  + ", then run the command again."),
           failure);
     }
   }
