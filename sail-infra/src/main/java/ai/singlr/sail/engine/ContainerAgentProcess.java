@@ -39,11 +39,12 @@ public final class ContainerAgentProcess implements AgentProcess {
    * {@code $1} the pid file, {@code $2} the log file beside it, {@code $3} the start record beside
    * it, the rest the command: the folder that holds them is made first, for a process that has no
    * run's folder made for it (a chat's), and the start is recorded before the pid, so the start
-   * beside a pid file is never an earlier process's.
+   * beside a pid file is never an earlier process's; a step that fails starts nothing, so no agent
+   * runs whose start is not recorded.
    */
   private static final String WRAP =
-      "; mkdir -p -- \"${1%/*}\"; cat /proc/$$/stat > \"$3\"; printf '%s\\n' \"$$\" > \"$1\";"
-          + " exec \"${@:4}\" 2>> \"$2\"";
+      "; mkdir -p -- \"${1%/*}\" && cat /proc/$$/stat > \"$3\" && printf '%s\\n' \"$$\" > \"$1\""
+          + " && exec \"${@:4}\" 2>> \"$2\"";
 
   private final ShellExec shell;
   private final UnaryOperator<List<String>> transport;

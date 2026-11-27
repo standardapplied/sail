@@ -6,6 +6,8 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,10 +25,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
+import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
@@ -98,8 +102,8 @@ class ContainerAgentProcessTest {
             "-lc",
             "f=/home/dev/.sail/runs/r/launch.env; set +x; while IFS= read -r kv; do export \"$kv\";"
                 + " done <"
-                + " \"$f\" || exit 1; rm -f \"$f\"; mkdir -p -- \"${1%/*}\"; cat /proc/$$/stat >"
-                + " \"$3\"; printf '%s\\n' \"$$\" > \"$1\"; exec \"${@:4}\" 2>> \"$2\"",
+                + " \"$f\" || exit 1; rm -f \"$f\"; mkdir -p -- \"${1%/*}\" && cat /proc/$$/stat >"
+                + " \"$3\" && printf '%s\\n' \"$$\" > \"$1\" && exec \"${@:4}\" 2>> \"$2\"",
             "bash",
             "/home/dev/.sail/runs/r/agent.pid",
             "/home/dev/.sail/runs/r/agent.log",
@@ -160,6 +164,7 @@ class ContainerAgentProcessTest {
    */
   @Test
   @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void theWrapperRecordsTheStartOfTheProcessItsPidNames() throws Exception {
     var pidFile = dir.resolve("agent.pid");
     var handle =
@@ -183,6 +188,32 @@ class ContainerAgentProcessTest {
 
     assertNotNull(recorded);
     assertEquals(live, recorded);
+  }
+
+  /** A start the wrapper cannot record starts nothing: no agent runs whose identity is unknown. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aStartTheWrapperCannotRecordStartsNoAgent() throws Exception {
+    var pidFile = dir.resolve("agent.pid");
+    Files.createDirectory(Path.of(AgentUnit.startPath(pidFile.toString())));
+    var handle =
+        held(
+            new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of("bash", "-c", "echo started"),
+                    pidFile.toString(),
+                    dir.resolve("agent.log").toString(),
+                    launchEnv("SAIL_RUN_CREDENTIAL=c1")));
+
+    assertNull(handle.stdout().read(), "the agent never started");
+    var exit = handle.waitFor(PATIENCE);
+    assertTrue(exit.isPresent());
+    assertNotEquals(0, exit.getAsInt(), "the wrapper failed");
+    assertFalse(Files.exists(pidFile), "and wrote no pid");
   }
 
   /**

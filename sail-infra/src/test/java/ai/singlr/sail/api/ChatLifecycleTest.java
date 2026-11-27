@@ -11,6 +11,7 @@ import static ai.singlr.sail.api.ChatBench.over;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,6 +27,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -270,7 +272,7 @@ class ChatLifecycleTest {
    */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
-  void aMessageWaitingWhenSailRestartedIsDelivered() {
+  void aMessageWaitingWhenSailRestartedIsDelivered() throws Exception {
     var session = bench.samsChat();
     bench.send(session, "hi");
     bench.says(INIT);
@@ -278,7 +280,7 @@ class ChatLifecycleTest {
     var restarted = bench.restarted();
 
     restarted.reclaim();
-    restarted.deliverWaiting();
+    assertTrue(restarted.deliverWaiting().join(ChatBench.PATIENCE));
 
     assertEquals(2, bench.processes.starts.size());
     assertEquals(List.of(LiveStream.userMessage("second")), bench.processes.latest().written);
@@ -293,7 +295,7 @@ class ChatLifecycleTest {
    */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
-  void aWaitingMessageThatCannotBeDeliveredNowIsSaidAndGoesFirstLater() {
+  void aWaitingMessageThatCannotBeDeliveredNowIsSaidAndGoesFirstLater() throws Exception {
     var session = bench.samsChat();
     bench.send(session, "hi");
     bench.says(INIT);
@@ -303,7 +305,7 @@ class ChatLifecycleTest {
 
     var restarted = bench.restarted();
     restarted.reclaim();
-    restarted.deliverWaiting();
+    assertTrue(restarted.deliverWaiting().join(ChatBench.PATIENCE));
     var said = bench.items(session).getLast();
     bench.fdes.logins().store(bench.samId, claude, "work", "api-key", "fake-key-sam");
     var third = as("sam", () -> restarted.send(session, "third"));
@@ -346,7 +348,7 @@ class ChatLifecycleTest {
   /** I5, I10: a waiting message whose opener may no longer act here is said so, and kept. */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
-  void aWaitingMessageWhoseOpenerMayNoLongerActIsSaidAndKept() {
+  void aWaitingMessageWhoseOpenerMayNoLongerActIsSaidAndKept() throws Exception {
     var session = bench.samsChat();
     bench.send(session, "hi");
     bench.says(INIT);
@@ -355,7 +357,7 @@ class ChatLifecycleTest {
     var restarted = bench.restarted();
 
     restarted.reclaim();
-    restarted.deliverWaiting();
+    assertTrue(restarted.deliverWaiting().join(ChatBench.PATIENCE));
 
     assertEquals(1, bench.processes.starts.size());
     assertEquals(
@@ -741,5 +743,69 @@ class ChatLifecycleTest {
     second.releasesItsEnd();
 
     assertTrue(sweeping.join(ChatBench.PATIENCE), "the sweep was done");
+  }
+
+  /**
+   * I2, I5: a send that reaches a chat before the restart's delivery does starts its process; the
+   * delivery then leaves that process alone, and the waiting message goes before the new one.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aSendBeforeTheRestartsDeliveryIsTheOneProcessAndKeepsTheOrder() throws Exception {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    bench.says(INIT);
+    bench.send(session, "second");
+    var restarted = bench.restarted();
+    restarted.reclaim();
+
+    var sent = as("sam", () -> restarted.send(session, "third"));
+    var started = bench.processes.latest();
+    assertTrue(restarted.deliverWaiting().join(ChatBench.PATIENCE));
+    started.says(INIT, ENDS);
+    started.settle();
+
+    assertTrue(sent.queued());
+    assertEquals(2, bench.processes.starts.size(), "one start since the restart");
+    assertSame(started, bench.processes.latest());
+    assertEquals(List.of(), started.signals);
+    assertTrue(bench.processes.container().alive(started.runId), "never halted");
+    assertEquals(
+        List.of(LiveStream.userMessage("second"), LiveStream.userMessage("third")),
+        started.written);
+    assertEquals(
+        1,
+        bench.kinds(session).stream().filter("interrupted"::equals).count(),
+        "only the turn the restart left is cut");
+  }
+
+  /** The restart's delivery runs on a thread of its own: whoever starts it is not held by it. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void theRestartsDeliveryHoldsUpNoneWhoStartIt() throws Exception {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    bench.says(INIT);
+    bench.send(session, "second");
+    var restarted = bench.restarted();
+    restarted.reclaim();
+    var release = new CountDownLatch(1);
+    bench.processes.onStart(
+        started -> {
+          started.onClose(started::exitsIfRunning);
+          try {
+            release.await(ChatBench.PATIENCE.toSeconds(), TimeUnit.SECONDS);
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+          }
+        });
+
+    var delivering = restarted.deliverWaiting();
+    var heldWhileDelivering = delivering.isAlive();
+    release.countDown();
+
+    assertTrue(heldWhileDelivering, "the call returned while its delivery waited");
+    assertTrue(delivering.join(ChatBench.PATIENCE));
+    assertEquals(List.of(LiveStream.userMessage("second")), bench.processes.latest().written);
   }
 }

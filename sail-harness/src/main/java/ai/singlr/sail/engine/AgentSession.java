@@ -483,15 +483,12 @@ public final class AgentSession {
    * a process that has ended: never one a later process wrote, and never a pid the box may give
    * another process, which a later kill by this file would then signal.
    */
-  public boolean forgetPid(String containerName, AgentUnit unit, int pid)
+  public void forgetPid(String containerName, AgentUnit unit, int pid)
       throws IOException, InterruptedException, TimeoutException {
-    return shell
-        .exec(
-            ContainerExec.asDevUser(
-                containerName,
-                List.of(
-                    "bash", "-c", FORGET_PID_SCRIPT, "bash", unit.pidPath(), String.valueOf(pid))))
-        .ok();
+    shell.exec(
+        ContainerExec.asDevUser(
+            containerName,
+            List.of("bash", "-c", FORGET_PID_SCRIPT, "bash", unit.pidPath(), String.valueOf(pid))));
   }
 
   /** Removes the file its first argument names when it holds exactly its second; exits 0. */
@@ -499,26 +496,62 @@ public final class AgentSession {
       "if [ \"$(cat -- \"$1\" 2>/dev/null)\" = \"$2\" ]; then rm -f -- \"$1\"; fi";
 
   /**
+   * Halts, from inside the container, the process the pid file its first argument names, only while
+   * it is the process whose start the record its second names holds (field 22 of {@code
+   * /proc/<pid>/stat}, read as {@link #parseStartTicks} reads it), and says what became of it: by
+   * SIGTERM, the grace its third argument gives in seconds, and SIGKILL only to that same process
+   * still there, then as many asks a second apart as its fourth allows. It prints {@code gone}, the
+   * pid file removed, once no process holds that pid with that start (another process at the pid, a
+   * record missing, a pid file naming none are never signalled), and {@code alive} when the process
+   * outlived its signals; a run of it that printed neither says nothing of the process.
+   */
+  static final String KILL_STARTED_SCRIPT =
+      """
+      ticks() { set -- $(sed 's/.*) //' "$1" 2>/dev/null); printf %s "${20}"; }
+      pid=$(tr -d '[:space:]' < "$1" 2>/dev/null)
+      case "$pid" in ''|0|*[!0-9]*) printf gone; exit 0 ;; esac
+      mine=$(ticks "$2")
+      ours() { [ -n "$mine" ] && [ "$(ticks "/proc/$pid/stat")" = "$mine" ]; }
+      if ours; then
+        kill "$pid" || exit 1
+        sleep "$3"
+        if ours; then
+          kill -9 "$pid"
+          asks=0
+          while [ "$asks" -lt "$4" ] && ours; do sleep 1; asks=$((asks + 1)); done
+        fi
+      fi
+      if ours; then printf alive; else rm -f -- "$1"; printf gone; fi
+      """;
+
+  /**
    * Halts the process {@code unit}'s pid file names, which a wrapper over pipes started and whose
-   * start it recorded beside the pid ({@link AgentUnit#startPath}), only while the process at that
-   * pid is still that one ({@link #startedAt}): a pid the box has given another process since, or
-   * one whose start cannot be read on either side, is never signalled. The process the file was
-   * written for is then gone: the pid file is removed, and the halt is {@link Halt.Ended} once the
-   * container answered the removal. Otherwise it is halted as {@link #killAgent} halts a session
-   * that is no unit.
+   * start it recorded beside the pid ({@link AgentUnit#startPath}), in one script in the container
+   * ({@link #KILL_STARTED_SCRIPT}) whose printed answer is the only thing believed: a pid the box
+   * has given another process since, or one whose start is not recorded, is never signalled and
+   * reads as {@link Halt.Ended}, its process gone; a script that could not be run, or came back
+   * with no answer, is {@link Halt.Unanswered}, and nothing is removed.
    */
   public Halt killStarted(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    var pid = pidOf(containerName, unit);
-    if (pid == null) {
-      return new Halt.Unanswered();
-    }
-    var recorded =
-        shell.exec(ContainerExec.asDevUser(containerName, List.of("cat", unit.startPath())));
-    if (!startedAt(containerName, pid, recorded.ok() ? parseStartTicks(recorded.stdout()) : null)) {
-      return forgetPid(containerName, unit, pid) ? new Halt.Ended() : new Halt.Unanswered();
-    }
-    return haltPid(containerName, unit, pid);
+    var halted =
+        shell.exec(
+            ContainerExec.asDevUser(
+                containerName,
+                List.of(
+                    "sh",
+                    "-c",
+                    KILL_STARTED_SCRIPT,
+                    "sh",
+                    unit.pidPath(),
+                    unit.startPath(),
+                    String.valueOf(TERM_GRACE_SECONDS),
+                    String.valueOf(KILL_SETTLE_ASKS))));
+    return switch (halted.ok() ? halted.stdout().strip() : "") {
+      case "gone" -> new Halt.Ended();
+      case "alive" -> new Halt.Survived();
+      default -> new Halt.Unanswered();
+    };
   }
 
   private Integer pidOf(String containerName, AgentUnit unit)
@@ -531,11 +564,9 @@ public final class AgentSession {
   private Halt killByPidFile(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var pid = pidOf(containerName, unit);
-    return pid == null ? new Halt.Unanswered() : haltPid(containerName, unit, pid);
-  }
-
-  private Halt haltPid(String containerName, AgentUnit unit, int pid)
-      throws IOException, InterruptedException, TimeoutException {
+    if (pid == null) {
+      return new Halt.Unanswered();
+    }
     var halted =
         shell.exec(
             ContainerExec.asDevUser(

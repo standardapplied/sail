@@ -46,6 +46,12 @@ public final class ChatHost implements AutoCloseable {
   /** The most characters of items one read answers, beyond its first item. */
   static final int PAGE_CHARS = 1 << 20;
 
+  /**
+   * How many chats a restart's cleanup or delivery takes up at once: each runs commands in its
+   * workspace, all through the one Incus daemon.
+   */
+  static final int AT_ONCE = 8;
+
   /** How long a chat's log is kept once it ended. */
   static final Duration RETENTION = Duration.ofDays(30);
 
@@ -265,14 +271,14 @@ public final class ChatHost implements AutoCloseable {
 
   /**
    * Takes up what a sail before this one left: each process started for a chat that no process of
-   * this host holds and that is not known gone is halted and proved gone, each chat on a thread of
-   * its own, and a turn it held cut, said so; one its workspace does not answer for is asked again
+   * this host holds and that is not known gone is halted and proved gone, {@link #AT_ONCE} chats at
+   * a time, and a turn it held cut, said so; one its workspace does not answer for is asked again
    * by the sweep, and before the chat's next start. It is safe at any time: a chat's process is
    * looked for under its lock. Returns how many turns it cut.
    */
   int reclaim() {
     var cut = new AtomicInteger();
-    try (var each = Executors.newVirtualThreadPerTaskExecutor()) {
+    try (var each = Executors.newFixedThreadPool(AT_ONCE, Thread.ofVirtual().factory())) {
       for (var session : store.launched()) {
         each.execute(
             () -> {
@@ -286,21 +292,26 @@ public final class ChatHost implements AutoCloseable {
   }
 
   /**
-   * Delivers each chat's messages that a sail before this one left waiting, by a process started as
-   * its opener, each chat on a thread of its own, so one that waits on its workspace holds up no
-   * other.
+   * Delivers, on a thread of its own, which it returns, each chat's messages that a sail before
+   * this one left waiting, by a process started as its opener, {@link #AT_ONCE} chats at a time, so
+   * one that waits on its workspace holds up neither its caller nor most others.
    */
-  public void deliverWaiting() {
-    try (var each = Executors.newVirtualThreadPerTaskExecutor()) {
-      for (var session : store.queued(MESSAGE)) {
-        each.execute(
+  public Thread deliverWaiting() {
+    return Thread.ofVirtual()
+        .name("sail-chat-deliver")
+        .start(
             () -> {
-              synchronized (lock(session)) {
-                resumeQueued(session);
+              try (var each = Executors.newFixedThreadPool(AT_ONCE, Thread.ofVirtual().factory())) {
+                for (var session : store.queued(MESSAGE)) {
+                  each.execute(
+                      () -> {
+                        synchronized (lock(session)) {
+                          resumeQueued(session);
+                        }
+                      });
+                }
               }
             });
-      }
-    }
   }
 
   /** Erases the chats of workspace {@code workspace} of {@code project}, which was deleted. */
@@ -431,14 +442,15 @@ public final class ChatHost implements AutoCloseable {
   }
 
   /**
-   * Delivers chat {@code session}'s messages left waiting, when it is open and has any: a process
-   * is started for it as its opener, admitted as any start is, and handed the oldest, the rest as
-   * each turn ends. One that is refused now is said in the refusal's words, and its messages keep
-   * waiting. Called under the chat's lock.
+   * Delivers chat {@code session}'s messages left waiting, when it is open, has any, and no process
+   * of this host holds it (one that does hands them as each turn ends): a process is started for it
+   * as its opener, admitted as any start is, and handed the oldest, the rest as each turn ends. One
+   * that is refused now is said in the refusal's words, and its messages keep waiting. Called under
+   * the chat's lock.
    */
   private void resumeQueued(String session) {
     var chat = store.find(session).filter(found -> !found.ended()).orElse(null);
-    if (chat == null || store.unhanded(session, MESSAGE).isEmpty()) {
+    if (chat == null || live.containsKey(session) || store.unhanded(session, MESSAGE).isEmpty()) {
       return;
     }
     try {

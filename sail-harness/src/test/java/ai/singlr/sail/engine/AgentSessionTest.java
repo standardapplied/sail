@@ -32,6 +32,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
@@ -544,91 +545,108 @@ class AgentSessionTest {
   private static final String HALT_PID = "bash 9999";
 
   private static final AgentUnit CHAT = AgentUnit.chat(RUN_ID);
-  private static final String READ_START = "cat " + CHAT.startPath();
-  private static final String READ_CHAT_PID = "cat " + CHAT.pidPath();
-  private static final String READ_LIVE_START = "cat /proc/9999/stat";
-  private static final String FORGET_CHAT_PID = "bash " + CHAT.pidPath() + " 9999";
-
-  private static String stat(long ticks) {
-    return "9999 (claude) S 1 9999 9999 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 " + ticks + " 0 0";
-  }
-
-  /** The process a wrapper started, still at its pid, is halted by that pid. */
-  @Test
-  void aProcessStillAtThePidItsWrapperRecordedIsHalted() throws Exception {
-    var shell =
-        new ScriptedShellExecutor()
-            .onOk(READ_START, stat(555))
-            .onOk(READ_CHAT_PID, "9999\n")
-            .onOk(READ_LIVE_START, stat(555))
-            .onOk(HALT_PID, "gone")
-            .onOk("rm -f");
-
-    var halt = new AgentSession(shell).killStarted("acme-try", CHAT);
-
-    assertInstanceOf(AgentSession.Halt.Ended.class, halt);
-    assertEquals(1, count(shell, HALT_PID));
-  }
+  private static final String HALT_STARTED = "sh " + CHAT.pidPath() + " " + CHAT.startPath();
 
   /**
-   * A pid the box gave another process since its wrapper recorded it, or whose start cannot be read
-   * on either side, is never signalled: the process the file was written for is gone, and its pid
-   * file is cleaned.
+   * A started process's halt is one script in the container, its paths as arguments, and only the
+   * word it prints is believed: a run that failed or said nothing is unanswered, whatever it
+   * printed.
    */
   @Test
-  void aPidWhoseProcessIsNotTheOneItsWrapperRecordedIsNeverSignalled() throws Exception {
-    var reused =
-        new ScriptedShellExecutor()
-            .onOk(READ_START, stat(555))
-            .onOk(READ_CHAT_PID, "9999\n")
-            .onOk(READ_LIVE_START, stat(777))
-            .onOk(FORGET_CHAT_PID);
-    var unrecorded =
-        new ScriptedShellExecutor()
-            .onOk(READ_CHAT_PID, "9999\n")
-            .onOk(READ_LIVE_START, stat(555))
-            .onOk(FORGET_CHAT_PID);
-    var gone =
-        new ScriptedShellExecutor()
-            .onOk(READ_START, stat(555))
-            .onOk(READ_CHAT_PID, "9999\n")
-            .onOk(FORGET_CHAT_PID);
+  void aStartedProcessIsHaltedByOneScriptWhoseWordAloneIsBelieved() throws Exception {
+    var answers =
+        List.of(
+            new ShellExec.Result(0, "gone", ""),
+            new ShellExec.Result(0, "alive", ""),
+            new ShellExec.Result(0, "", ""),
+            new ShellExec.Result(1, "gone", "Error: websocket: close 1006"));
+    var halts = new ArrayList<AgentSession.Halt>();
+    var shells = new ArrayList<ScriptedShellExecutor>();
+    for (var answer : answers) {
+      var shell = new ScriptedShellExecutor().on(HALT_STARTED, answer);
+      shells.add(shell);
+      halts.add(new AgentSession(shell).killStarted("acme-try", CHAT));
+    }
 
-    for (var shell : List.of(reused, unrecorded, gone)) {
-      var halt = new AgentSession(shell).killStarted("acme-try", CHAT);
-
-      assertInstanceOf(AgentSession.Halt.Ended.class, halt);
-      assertEquals(0, count(shell, HALT_PID), "nothing is signalled");
-      assertEquals(1, count(shell, FORGET_CHAT_PID), "the pid file is cleaned");
+    assertEquals(
+        List.of(
+            AgentSession.Halt.Ended.class,
+            AgentSession.Halt.Survived.class,
+            AgentSession.Halt.Unanswered.class,
+            AgentSession.Halt.Unanswered.class),
+        halts.stream().map(Object::getClass).toList());
+    for (var shell : shells) {
+      assertEquals(1, shell.invocations().size(), "one script, and nothing removed beside it");
+      assertEquals(1, count(shell, HALT_STARTED + " 3 5"));
     }
   }
 
-  /** A container that does not answer the cleaning proves nothing gone. */
+  /**
+   * The halt's script on this machine's real processes: the process its wrapper recorded is ended
+   * and its pid file removed; a pid another process holds (one that started at another time: this
+   * test's own), the pid of a process gone, and a live pid with no record are never signalled, and
+   * read as gone.
+   */
   @Test
-  void aPidNotProvedTheProcessItsWrapperRecordedInAContainerThatStopsAnsweringIsUnanswered()
-      throws Exception {
-    var shell =
-        new ScriptedShellExecutor()
-            .onOk(READ_START, stat(555))
-            .onOk(READ_CHAT_PID, "9999\n")
-            .onOk(READ_LIVE_START, stat(777));
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void theHaltSignalsOnlyTheProcessItsWrapperRecorded(@TempDir Path dir) throws Exception {
+    var right = process("sleep", "300");
+    var reused = process("sleep", "300");
+    var dead = process("sleep", "300");
+    var deadStart = startOf(dead);
+    dead.destroy();
+    assertTrue(dead.waitFor(10, TimeUnit.SECONDS));
+    var unrecorded = process("sleep", "300");
 
-    var halt = new AgentSession(shell).killStarted("acme-try", CHAT);
+    var rightSaid = halted(dir, "right", right, startOf(right));
+    var reusedSaid =
+        halted(
+            dir,
+            "reused",
+            reused,
+            Files.readString(
+                Path.of("/proc", String.valueOf(ProcessHandle.current().pid()), "stat")));
+    var deadSaid = halted(dir, "dead", dead, deadStart);
+    var unrecordedSaid = halted(dir, "unrecorded", unrecorded, null);
 
-    assertInstanceOf(AgentSession.Halt.Unanswered.class, halt);
-    assertEquals(0, count(shell, HALT_PID));
+    assertEquals(
+        List.of("gone", "gone", "gone", "gone"),
+        List.of(rightSaid, reusedSaid, deadSaid, unrecordedSaid));
+    assertTrue(right.waitFor(10, TimeUnit.SECONDS));
+    assertEquals(143, right.exitValue(), "by SIGTERM");
+    assertTrue(reused.isAlive(), "another process at the pid is never signalled");
+    assertTrue(unrecorded.isAlive(), "a pid with no record is never signalled");
+    for (var name : List.of("right", "reused", "dead", "unrecorded")) {
+      assertFalse(Files.exists(dir.resolve(name + ".pid")), name + "'s pid file is removed");
+    }
   }
 
-  /** With no pid file to read, nothing is asked further and nothing is known. */
-  @Test
-  void aProcessWithNoPidFileToReadIsUnansweredByItsWrapperHalt() throws Exception {
-    var shell = new ScriptedShellExecutor();
+  private static String startOf(Process process) throws IOException {
+    return Files.readString(Path.of("/proc", String.valueOf(process.pid()), "stat"));
+  }
 
-    var halt = new AgentSession(shell).killStarted("acme-try", CHAT);
-
-    assertInstanceOf(AgentSession.Halt.Unanswered.class, halt);
-    assertEquals(1, shell.invocations().size(), "only the pid file was read");
-    assertEquals(1, count(shell, READ_CHAT_PID));
+  /** What the halt's script says of {@code process}, its start recorded as {@code start}. */
+  private static String halted(Path dir, String name, Process process, String start)
+      throws IOException, InterruptedException {
+    var pid = Files.writeString(dir.resolve(name + ".pid"), process.pid() + "\n");
+    var record = dir.resolve(name + ".pid.start");
+    if (start != null) {
+      Files.writeString(record, start);
+    }
+    var ran =
+        Child.run(
+            new ProcessBuilder(
+                "sh",
+                "-c",
+                AgentSession.KILL_STARTED_SCRIPT,
+                "sh",
+                pid.toString(),
+                record.toString(),
+                "1",
+                "5"));
+    assertEquals(0, ran.exit(), ran.stderr());
+    return ran.stdout();
   }
 
   @Test

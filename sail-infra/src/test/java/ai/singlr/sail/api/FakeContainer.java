@@ -469,6 +469,9 @@ final class FakeContainer implements ShellExec {
     if (ReportLines.asks(inner)) {
       return ReportLines.answer(files.get(inner.get(4)), inner);
     }
+    if (inner.get(2).startsWith("ticks() {")) {
+      return haltStarted(inner.get(4), inner.get(5));
+    }
     if (inner.get(2).startsWith("for d in")) {
       var skillsDir = inner.getLast();
       var stamped =
@@ -560,12 +563,6 @@ final class FakeContainer implements ShellExec {
     if (inner.get(2).startsWith("kill \"$1\" || exit 1")) {
       return halt(inner.get(4));
     }
-    if (inner.get(2).startsWith("if [ \"$(cat -- \"$1\"")) {
-      if (inner.get(5).equals(Optional.ofNullable(files.get(inner.get(4))).orElse("").strip())) {
-        remove(inner.get(4));
-      }
-      return ok("");
-    }
     var script = inner.stream().filter(arg -> arg.contains("printf '%s' \"$1\" >")).findFirst();
     if (script.isPresent()) {
       files.put(inner.get(inner.size() - 1), inner.get(inner.size() - 2));
@@ -581,6 +578,23 @@ final class FakeContainer implements ShellExec {
     var agent = Optional.ofNullable(holder(pid));
     agent.ifPresent(this::end);
     return ok(agent.filter(found -> found.alive).isPresent() ? "alive" : "gone");
+  }
+
+  /**
+   * The halt of a process a wrapper started: the process its pid file names is signalled only while
+   * it has the start its record holds, and the script says {@code alive}, or {@code gone} with the
+   * pid file removed.
+   */
+  private Result haltStarted(String pidPath, String startPath) {
+    var agent = Optional.ofNullable(files.get(pidPath)).map(String::strip).map(this::holder);
+    var mine = Optional.ofNullable(files.get(startPath));
+    var ours = agent.filter(found -> found.alive && mine.filter(found.stat()::equals).isPresent());
+    ours.ifPresent(this::end);
+    if (ours.filter(found -> found.alive).isPresent()) {
+      return ok("alive");
+    }
+    remove(pidPath);
+    return ok("gone");
   }
 
   /**
