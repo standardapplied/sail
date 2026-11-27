@@ -67,15 +67,13 @@ final class ChatEnd {
   }
 
   /**
-   * Ends the process, given {@code first} to end on its own, then interrupted and terminated; a
-   * later {@code why} replaces the first's. Returns whether it is over.
+   * Ends the process, given {@code first} to end on its own, then interrupted and terminated; the
+   * first end begun says why. Returns whether it is over.
    */
   boolean end(Duration first, String why) {
     synchronized (guard) {
       if (!ending) {
         begin(why);
-      } else if (why != null) {
-        reason = why;
       }
     }
     return ProcessEnd.signalled(handle, timing.grace(), first, false, this::settled);
