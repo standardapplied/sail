@@ -70,7 +70,7 @@ public final class HolderWatch: NSObject {
 /// What every control draws the same way: a box in its corners, filled, with a 1 pt edge laid on
 /// pixel boundaries, and the focus halo around it.
 package enum Draw {
-    static func box(_ box: NSRect, radius: Double, fill: Tint?, edge: Tint?, dash: [CGFloat] = []) {
+    package static func box(_ box: NSRect, radius: Double, fill: Tint?, edge: Tint?, dash: [CGFloat] = []) {
         if let fill {
             NSColor(fill).setFill()
             NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius).fill()
