@@ -131,7 +131,7 @@ class LiveStreamTest {
                     "Bash",
                     "x".repeat(119) + "\uD83D\uDE00",
                     Map.of("timeout", 5, "command", command, "description", "second")),
-                new ToolCall("toolu_2", "T".repeat(64), "", Map.of("limit", 3)),
+                new ToolCall("toolu_2", "T".repeat(80), "", Map.of("limit", 3)),
                 new ToolCall("toolu_3", "", "", Map.of()))),
         LiveStream.read(
             "{\"type\":\"assistant\",\"message\":{\"content\":["

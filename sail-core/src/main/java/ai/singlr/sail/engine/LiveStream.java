@@ -24,10 +24,12 @@ import java.util.stream.Collectors;
  * JSON line that prompts it, and what each JSON line it writes says happened. Everything a line
  * carries is the agent's and so untrusted: a session id, a request's id and a tool call's are taken
  * only when they are safe to hand back (as {@link Harness#isSafeSessionId} judges a session id), a
- * name (a tool's, a line's type), a summary and what a call gave back are clipped where they are
- * read, a line too long to be worth parsing (a large tool result) says nothing, and a line of a
- * type this reader does not read is an {@link Step.Other} naming its type, so a harness that adds a
- * line type breaks no reader. A chat's own lines, its answers and requests, are {@link LiveChat}'s.
+ * name that picks how a line is read (a line's type) and a call's summary are clipped where they
+ * are read, what a person is shown is clipped by the {@link ChatItem} it is shown in, and what a
+ * host hands back to the agent (a call's input) is never clipped, a line too long to be worth
+ * parsing (a large tool result) says nothing, and a line of a type this reader does not read is an
+ * {@link Step.Other} naming its type, so a harness that adds a line type breaks no reader. A chat's
+ * own lines, its answers and requests, are {@link LiveChat}'s.
  *
  * <p>A subagent's lines carry the tool call that started it: they are a {@link Step.Subagent},
  * never the agent's own steps, since what a subagent writes is not what the agent says.
@@ -41,17 +43,6 @@ public final class LiveStream {
    * turn's end; and a request, which then waits unseen until a person stops the turn.
    */
   public static final int MAX_LINE_CHARS = 1 << 20;
-
-  /** How much of a tool's first string argument a reader of the room is shown. */
-  public static final int SUMMARY_CODE_POINTS = 120;
-
-  /**
-   * How much of what the agent wrote, a call's input or what it gave back, a person is shown; what
-   * a host hands back to the agent (a call's input) is never clipped.
-   */
-  public static final int CONTENT_CODE_POINTS = 1 << 16;
-
-  private static final int NAME_CODE_POINTS = 64;
 
   private static final String SUCCESS = "success";
 
@@ -163,7 +154,19 @@ public final class LiveStream {
     /** The agent is at work on its turn, with nothing to show for this line. */
     record Working() implements Step {}
 
-    /** A line this reader does not read: of {@code type}, empty for a line that names none. */
+    /**
+     * A request Claude Code made of the host that could not be read whole (an id that is not safe
+     * to hand back, no input, no tool): no person is asked it, so the host refuses it at once
+     * ({@link LiveChat#refuseUnreadable}), or, when {@code requestId} is null because it named none
+     * that is safe, stops the turn, which would otherwise wait on it.
+     */
+    record Unreadable(String requestId) implements Step {}
+
+    /**
+     * A line this reader does not read: of {@code type}, empty for a line that names none, and a
+     * {@code system} line or a request of the host other than {@code can_use_tool} named with its
+     * subtype ({@code system/task_started}, {@code control_request/elicitation}).
+     */
     record Other(String type) implements Step {}
   }
 
@@ -253,9 +256,9 @@ public final class LiveStream {
               ? new Step.Other(type)
               : new Step.Shown(
                   new ChatItem.Refused(
-                      id(response, "request_id"),
-                      Strings.clip(
-                          Objects.toString(text(response, "error"), ""), SUMMARY_CODE_POINTS)));
+                      safeId(response.get("request_id")),
+                      Objects.toString(text(response, "error"), ""),
+                      false));
         }
         default -> turn(type, event);
       };
@@ -299,7 +302,7 @@ public final class LiveStream {
         .map(block -> text(block, "text"))
         .filter(Objects::nonNull)
         .reduce((first, next) -> first + "\n\n" + next)
-        .<Step>map(said -> new Step.Said(Strings.clip(said, CONTENT_CODE_POINTS)))
+        .<Step>map(Step.Said::new)
         .orElseGet(() -> new Step.Other(type));
   }
 
@@ -356,13 +359,15 @@ public final class LiveStream {
                   (int) count(event, "attempt"),
                   (int) count(event, "max_retries"),
                   count(event, "retry_delay_ms"),
-                  text(event, "error")));
+                  text(event, "error"),
+                  false));
       case "compact_boundary" ->
           new Step.Shown(
               new ChatItem.Compacted(
                   text(metadata, "trigger"),
                   count(metadata, "pre_tokens"),
-                  count(metadata, "post_tokens")));
+                  count(metadata, "post_tokens"),
+                  false));
       default -> new Step.Other("system/" + subtype);
     };
   }
@@ -380,40 +385,56 @@ public final class LiveStream {
   }
 
   /**
-   * A request Claude Code makes of the host: only {@code can_use_tool}, which asks before a call,
-   * and asks a question or a plan's approval as a call of its question or plan tool. A request is
-   * its process's: it dies with it, and a resumed conversation replays none (recorded).
+   * A request Claude Code makes of the host: only {@code can_use_tool} is read, which asks before a
+   * call, and asks a question or a plan's approval as a call of its question or plan tool; one that
+   * cannot be read whole is {@link Step.Unreadable}, so the turn never waits on it unseen. A
+   * request is its process's: it dies with it, and a resumed conversation replays none (recorded).
    */
   private static Step request(Map<String, Object> event) {
     var request = map(event.get("request"));
-    if (!"can_use_tool".equals(request.get("subtype"))) {
-      return new Step.Other("control_request");
+    var subtype = name(request.get("subtype"));
+    if (!"can_use_tool".equals(subtype)) {
+      return new Step.Other("control_request/" + subtype);
     }
-    var id = id(event, "request_id");
+    try {
+      return asked(id(event, "request_id"), request);
+    } catch (RuntimeException unreadable) {
+      return new Step.Unreadable(safeId(event.get("request_id")));
+    }
+  }
+
+  private static Step asked(String id, Map<String, Object> request) {
     var call = id(request, "tool_use_id");
+    var tool = string(request.get("tool_name"));
+    if (tool.isBlank() || !(request.get("input") instanceof Map<?, ?>)) {
+      throw new IllegalArgumentException("Not a call: " + tool);
+    }
     var input = map(request.get("input"));
-    var tool = name(request.get("tool_name"));
     return switch (tool) {
       case "AskUserQuestion" -> new Step.Question(id, call, input, questions(input));
       case "ExitPlanMode" ->
-          new Step.Plan(
-              id,
-              call,
-              input,
-              Strings.clip(Objects.toString(text(input, "plan"), ""), CONTENT_CODE_POINTS));
+          new Step.Plan(id, call, input, Objects.toString(text(input, "plan"), ""));
       default ->
           new Step.Permission(
               id,
               call,
               tool,
-              name(request.get("display_name")),
+              string(request.get("display_name")),
               input,
               text(request, "description"),
               text(request, "decision_reason"),
-              request.get("permission_suggestions") instanceof List<?> suggestions
-                  ? List.copyOf(suggestions)
-                  : List.of());
+              suggestions(request.get("permission_suggestions")));
     };
+  }
+
+  /**
+   * The harness's own suggestions, to hand back as they came; none when there are none, or when one
+   * is missing ({@code null}), since what is left of them is no longer what it offered to keep.
+   */
+  private static List<Object> suggestions(Object suggested) {
+    return suggested instanceof List<?> suggestions && !suggestions.contains(null)
+        ? List.copyOf(suggestions)
+        : List.of();
   }
 
   private static List<ChatItem.Asked> questions(Map<String, Object> input) {
@@ -429,9 +450,10 @@ public final class LiveStream {
                         .map(
                             option ->
                                 new ChatItem.Choice(
-                                    text(option, "label"), text(option, "description")))
+                                    text(option, "label"), text(option, "description"), false))
                         .toList(),
-                    Boolean.TRUE.equals(asked.get("multiSelect"))))
+                    Boolean.TRUE.equals(asked.get("multiSelect")),
+                    false))
         .toList();
   }
 
@@ -458,10 +480,7 @@ public final class LiveStream {
                 block -> {
                   var input = map(block.get("input"));
                   return new ToolCall(
-                      id(block, "id"),
-                      Strings.clip(Objects.toString(block.get("name"), ""), NAME_CODE_POINTS),
-                      summary(input),
-                      input);
+                      id(block, "id"), string(block.get("name")), summary(input), input);
                 })
             .toList();
     return calls.isEmpty() ? otherwise : new Step.ToolCalls(calls);
@@ -481,24 +500,26 @@ public final class LiveStream {
     return results.isEmpty() ? new Step.Other("user") : new Step.ToolResults(results);
   }
 
-  /** A call's output, clipped: its text, or the text of the blocks it came back as. */
+  /** A call's output: its text, or the text of the blocks it came back as. */
   private static String output(Object content) {
-    return Strings.clip(
-        content instanceof String text
-            ? text
-            : list(content).stream()
-                .map(block -> text(map(block), "text"))
-                .filter(Objects::nonNull)
-                .collect(Collectors.joining("\n")),
-        CONTENT_CODE_POINTS);
+    return content instanceof String text
+        ? text
+        : list(content).stream()
+            .map(block -> text(map(block), "text"))
+            .filter(Objects::nonNull)
+            .collect(Collectors.joining("\n"));
   }
 
   private static String summary(Map<String, Object> input) {
+    return Strings.clip(first(input), ChatItem.SUMMARY_CODE_POINTS);
+  }
+
+  /** A call's first string argument, whole; empty when it has none. */
+  static String first(Map<String, Object> input) {
     return input.values().stream()
         .filter(String.class::isInstance)
         .map(String.class::cast)
         .findFirst()
-        .map(first -> Strings.clip(first, SUMMARY_CODE_POINTS))
         .orElse("");
   }
 
@@ -506,13 +527,17 @@ public final class LiveStream {
     return list(map(event.get("message")).get("content")).stream().map(LiveStream::map).toList();
   }
 
-  /** {@code value} as a name the agent gave, clipped; empty for anything that is not text. */
+  /** {@code value} as a name that picks how a line is read, clipped; empty for what is no text. */
   private static String name(Object value) {
-    return value instanceof String named ? Strings.clip(named, NAME_CODE_POINTS) : "";
+    return Strings.clip(string(value), ChatItem.NAME_CODE_POINTS);
+  }
+
+  private static String string(Object value) {
+    return value instanceof String text ? text : "";
   }
 
   private static List<String> names(Object value) {
-    return list(value).stream().filter(String.class::isInstance).map(LiveStream::name).toList();
+    return list(value).stream().filter(String.class::isInstance).map(String.class::cast).toList();
   }
 
   /**
@@ -525,6 +550,11 @@ public final class LiveStream {
       return id;
     }
     throw new IllegalArgumentException("Not an id: " + key);
+  }
+
+  /** {@code value} when it is an id safe to hand back, else null. */
+  private static String safeId(Object value) {
+    return value instanceof String id && Harness.isSafeSessionId(id) ? id : null;
   }
 
   private static String text(Map<String, Object> from, String key) {

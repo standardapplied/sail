@@ -114,7 +114,10 @@ class LiveStreamChatTest {
                 new Asked(
                     "Which color?",
                     "Color",
-                    List.of(new Choice("Red", "Choose red"), new Choice("Blue", "Choose blue")),
+                    List.of(
+                        new Choice("Red", "Choose red", false),
+                        new Choice("Blue", "Choose blue", false)),
+                    false,
                     false))),
         read("03a-ask-user-question", 21));
   }
@@ -144,15 +147,21 @@ class LiveStreamChatTest {
         read("04b-set-permission-mode-and-background-task", 78));
     assertEquals(new Step.Other("control_response"), read("04a-cancel-request-by-interrupt", 21));
     assertEquals(
-        new Step.Shown(new ChatItem.Refused("mode-2", "Cannot set permission mode")),
+        new Step.Shown(new ChatItem.Refused("mode-2", "Cannot set permission mode", false)),
         LiveStream.read(
             "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\","
                 + "\"request_id\":\"mode-2\",\"error\":\"Cannot set permission mode\"}}"),
         "a refusal is no success, whatever else it says");
     assertEquals(
-        new Step.Shown(new ChatItem.Refused("mode-3", "")),
+        new Step.Shown(new ChatItem.Refused("mode-3", "", false)),
         LiveStream.read(
             "{\"type\":\"control_response\",\"response\":{\"request_id\":\"mode-3\"}}"));
+    assertEquals(
+        new Step.Shown(new ChatItem.Refused(null, "Cannot set permission mode", false)),
+        LiveStream.read(
+            "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\","
+                + "\"error\":\"Cannot set permission mode\"}}"),
+        "a refusal that names no request is still shown");
   }
 
   @Test
@@ -216,9 +225,11 @@ class LiveStreamChatTest {
   @Test
   void aRetryACompactionAndStatusAreRead() {
     assertEquals(
-        new Step.Shown(new ChatItem.Retrying(1, 2, 513, "overloaded")), read("05e-api-retry", 5));
+        new Step.Shown(new ChatItem.Retrying(1, 2, 513, "overloaded", false)),
+        read("05e-api-retry", 5));
     assertEquals(
-        new Step.Shown(new ChatItem.Compacted("manual", 18074, 3069)), read("05d-compact", 17));
+        new Step.Shown(new ChatItem.Compacted("manual", 18074, 3069, false)),
+        read("05d-compact", 17));
     assertEquals(new Step.Status("requesting", null), read("01-baseline-live-flags", 4));
     assertEquals(new Step.Status("compacting", null), read("05d-compact", 14));
     assertEquals(new Step.Status(null, null), read("05d-compact", 15));
@@ -413,7 +424,11 @@ class LiveStreamChatTest {
                         List.of(Map.of("label", "A"), Map.of("label", "B"))))),
             List.of(
                 new Asked(
-                    "Which?", null, List.of(new Choice("A", null), new Choice("B", null)), true))),
+                    "Which?",
+                    null,
+                    List.of(new Choice("A", null, false), new Choice("B", null, false)),
+                    true,
+                    false))),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
                 + "\"can_use_tool\",\"tool_name\":\"AskUserQuestion\",\"tool_use_id\":\"t1\","
@@ -422,19 +437,18 @@ class LiveStreamChatTest {
   }
 
   @Test
-  void whatTheAgentWroteIsClippedButWhatIsHandedBackIsWhole() {
-    var longer = "y".repeat(LiveStream.CONTENT_CODE_POINTS + 5);
-    var clipped = "y".repeat(LiveStream.CONTENT_CODE_POINTS);
+  void whatTheAgentWroteIsReadWholeForItsItemToClip() {
+    var longer = "y".repeat(ChatItem.CONTENT_CODE_POINTS + 5);
 
     assertEquals(
-        new Step.ToolResults(List.of(new ToolResult("t1", clipped, false))),
+        new Step.ToolResults(List.of(new ToolResult("t1", longer, false))),
         LiveStream.read(
             "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\","
                 + "\"tool_use_id\":\"t1\",\"content\":\""
                 + longer
                 + "\"}]}}"));
     assertEquals(
-        new Step.Plan("r1", "t1", Map.of("plan", longer), clipped),
+        new Step.Plan("r1", "t1", Map.of("plan", longer), longer),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
                 + "\"can_use_tool\",\"tool_name\":\"ExitPlanMode\",\"tool_use_id\":\"t1\","
@@ -446,12 +460,13 @@ class LiveStreamChatTest {
   @Test
   void noLineIsFatalWhateverItHolds() {
     assertEquals(
-        new Step.Other("control_request"),
+        new Step.Permission("r1", "t1", "Bash", "", Map.of(), null, null, List.of()),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
-                + "\"can_use_tool\",\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\","
-                + "\"permission_suggestions\":[null]}}"),
-        "a null where a suggestion was");
+                + "\"can_use_tool\",\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\",\"input\":{},"
+                + "\"permission_suggestions\":[{\"type\":\"setMode\",\"mode\":\"acceptEdits\","
+                + "\"destination\":\"session\"},null]}}"),
+        "a null where a suggestion was: the request is read, and offers nothing to keep");
     var depth = 200_000;
     var nested = "{\"type\":\"user\",\"message\":" + "[".repeat(depth) + "]".repeat(depth) + "}";
     assertTrue(nested.length() < LiveStream.MAX_LINE_CHARS);
@@ -463,18 +478,18 @@ class LiveStreamChatTest {
     var unsafe = List.of("x".repeat(129), "-p", "a b", "../x", "");
     for (var id : unsafe) {
       assertEquals(
-          new Step.Other("control_request"),
+          new Step.Unreadable(null),
           LiveStream.read(
               "{\"type\":\"control_request\",\"request_id\":\""
                   + id
                   + "\",\"request\":{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\","
-                  + "\"tool_use_id\":\"t1\"}}"),
+                  + "\"input\":{},\"tool_use_id\":\"t1\"}}"),
           id);
       assertEquals(
-          new Step.Other("control_request"),
+          new Step.Unreadable("r1"),
           LiveStream.read(
               "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
-                  + "\"can_use_tool\",\"tool_name\":\"Bash\",\"tool_use_id\":\""
+                  + "\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":{},\"tool_use_id\":\""
                   + id
                   + "\"}}"),
           id);
@@ -499,7 +514,7 @@ class LiveStreamChatTest {
                   + "\"}]}}"),
           id);
       assertEquals(
-          new Step.Other("control_response"),
+          new Step.Shown(new ChatItem.Refused(null, "", false)),
           LiveStream.read(
               "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\","
                   + "\"request_id\":\""
@@ -526,17 +541,50 @@ class LiveStreamChatTest {
   }
 
   @Test
-  void aRequestThatNamesNoRequestIsKeptNotRead() {
+  void aRequestThatCannotBeReadWholeIsOneToRefuseAtOnce() {
     assertEquals(
-        new Step.Other("control_request"),
+        new Step.Unreadable(null),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request\":{\"subtype\":\"can_use_tool\","
-                + "\"tool_name\":\"Bash\"}}"));
+                + "\"tool_name\":\"Bash\",\"input\":{},\"tool_use_id\":\"t1\"}}"),
+        "no request id: the turn is stopped, since nothing can answer it");
     assertEquals(
-        new Step.Other("control_request"),
+        new Step.Unreadable("r1"),
+        LiveStream.read(
+            "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":"
+                + "{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":{}}}"),
+        "no call");
+    assertEquals(
+        new Step.Unreadable("r1"),
+        LiveStream.read(
+            "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":"
+                + "{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\"}}"),
+        "no input to run or hand back");
+    assertEquals(
+        new Step.Unreadable("r1"),
+        LiveStream.read(
+            "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":"
+                + "{\"subtype\":\"can_use_tool\",\"input\":{},\"tool_use_id\":\"t1\"}}"),
+        "no tool");
+    assertEquals(
+        new Step.Unreadable("r1"),
+        LiveStream.read(
+            "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":"
+                + "{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":[],"
+                + "\"tool_use_id\":\"t1\"}}"),
+        "an input that is no object");
+  }
+
+  @Test
+  void aRequestOfAnotherKindIsKeptNamingItsSubtype() {
+    assertEquals(
+        new Step.Other("control_request/hook_callback"),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":"
                 + "{\"subtype\":\"hook_callback\"}}"));
+    assertEquals(
+        new Step.Other("control_request/"),
+        LiveStream.read("{\"type\":\"control_request\",\"request_id\":\"r1\"}"));
     assertEquals(
         new Step.Other("control_cancel_request"),
         LiveStream.read("{\"type\":\"control_cancel_request\",\"request_id\":7}"));

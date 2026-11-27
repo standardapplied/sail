@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.harness.LoginOutcome;
 import java.util.List;
 
@@ -13,11 +14,24 @@ import java.util.List;
  * harness's stream maps onto these, so a client draws a chat with no code of any harness, and no
  * harness's own names (its tools' input keys, its suggestion objects) reach an item. An item
  * carries what its harness said and nothing it did not: an {@code under} is the id of the {@link
- * Tool} row of the subagent the item belongs to, or null for the agent itself, and a mode is one of
- * the harness's chat modes by name ({@code HarnessChat.modes}). What the agent wrote is clipped
- * ({@link LiveStream#CONTENT_CODE_POINTS}) and is never markup.
+ * Tool} row of the subagent the item belongs to, or null for the agent itself, and a mode is the
+ * harness's own name for it, which need not be one of its chat modes ({@code HarnessChat.modes}).
+ *
+ * <p>What the agent wrote is never markup, and is clipped where the item is made, to its bound:
+ * {@link #NAME_CODE_POINTS} for a name, {@link #SUMMARY_CODE_POINTS} for a short line, {@link
+ * #CONTENT_CODE_POINTS} for anything long. A piece holding text that was cut says so in its one
+ * {@code clipped} flag, so a client marks it as shown in part.
  */
 public sealed interface ChatItem {
+
+  /** How much of a name the agent gave, a mode's, a model's, a command's, a person is shown. */
+  int NAME_CODE_POINTS = 64;
+
+  /** How much of a short line, a row's words, a reason, a label, a person is shown. */
+  int SUMMARY_CODE_POINTS = 120;
+
+  /** How much of what the agent wrote at length, a text, a call's input or output, is shown. */
+  int CONTENT_CODE_POINTS = 1 << 16;
 
   /** What a tool call does, as a person reads its row. */
   enum ToolKind {
@@ -38,25 +52,90 @@ public sealed interface ChatItem {
   sealed interface Detail {
 
     /** A command {@code line} run in the workspace's shell. */
-    record Command(String line) implements Detail {}
+    record Command(String line, boolean clipped) implements Detail {
+      public Command {
+        clipped |= cut(line, CONTENT_CODE_POINTS);
+        line = clip(line, CONTENT_CODE_POINTS);
+      }
+    }
 
-    /**
-     * A change to the file at {@code path}, from the text {@code before} to {@code after}; {@code
-     * before} is null when the harness writes the whole file, new or over what was there.
-     */
-    record Edit(String path, String before, String after) implements Detail {}
+    /** Changes to files, one or several, in the order the harness gave them. */
+    record Edit(List<Change> changes) implements Detail {}
 
     /** A read of the file at {@code path}. */
-    record Read(String path) implements Detail {}
+    record Read(String path, boolean clipped) implements Detail {
+      public Read {
+        clipped |= cut(path, CONTENT_CODE_POINTS);
+        path = clip(path, CONTENT_CODE_POINTS);
+      }
+    }
 
     /** A search for {@code what}, in {@code where} when it says. */
-    record Search(String what, String where) implements Detail {}
+    record Search(String what, String where, boolean clipped) implements Detail {
+      public Search {
+        clipped |= cut(what, CONTENT_CODE_POINTS) || cut(where, CONTENT_CODE_POINTS);
+        what = clip(what, CONTENT_CODE_POINTS);
+        where = clip(where, CONTENT_CODE_POINTS);
+      }
+    }
 
     /** A fetch of the page at {@code address}. */
-    record Fetch(String address) implements Detail {}
+    record Fetch(String address, boolean clipped) implements Detail {
+      public Fetch {
+        clipped |= cut(address, CONTENT_CODE_POINTS);
+        address = clip(address, CONTENT_CODE_POINTS);
+      }
+    }
 
     /** Any other call: the tool's {@code name} and its {@code input} as text, shown as text. */
-    record Other(String name, String input) implements Detail {}
+    record Other(String name, String input, boolean clipped) implements Detail {
+      public Other {
+        clipped |= cut(name, NAME_CODE_POINTS) || cut(input, CONTENT_CODE_POINTS);
+        name = clip(name, NAME_CODE_POINTS);
+        input = clip(input, CONTENT_CODE_POINTS);
+      }
+    }
+  }
+
+  /** How a file changes. */
+  enum ChangeKind {
+    /** The file at its path changes from {@code before} to {@code after}. */
+    CHANGE,
+    /** A new file at its path, holding {@code after}. */
+    ADD,
+    /** The file at its path is deleted; {@code before} is what it held, when said. */
+    DELETE,
+    /**
+     * The file at {@code from} moves to its path, changing from {@code before} to {@code after}.
+     */
+    MOVE
+  }
+
+  /**
+   * One file's change: of {@code kind}, to the file at {@code path}, moved from {@code from} (null
+   * unless it moves), from the text {@code before} to {@code after}. A {@link ChangeKind#CHANGE}
+   * with {@code before} null writes the whole file as {@code after}, over whatever was there; one
+   * that is {@code everywhere} makes the change at every place {@code before} occurs, not once.
+   */
+  record Change(
+      ChangeKind kind,
+      String path,
+      String from,
+      String before,
+      String after,
+      boolean everywhere,
+      boolean clipped) {
+    public Change {
+      clipped |=
+          cut(path, CONTENT_CODE_POINTS)
+              || cut(from, CONTENT_CODE_POINTS)
+              || cut(before, CONTENT_CODE_POINTS)
+              || cut(after, CONTENT_CODE_POINTS);
+      path = clip(path, CONTENT_CODE_POINTS);
+      from = clip(from, CONTENT_CODE_POINTS);
+      before = clip(before, CONTENT_CODE_POINTS);
+      after = clip(after, CONTENT_CODE_POINTS);
+    }
   }
 
   /**
@@ -64,27 +143,63 @@ public sealed interface ChatItem {
    * mode it is in, and the commands and skills a person can name in it. Said at every turn, since
    * any of them can change between turns.
    */
-  record Session(String model, String mode, List<String> commands, List<String> skills)
-      implements ChatItem {}
+  record Session(
+      String model, String mode, List<String> commands, List<String> skills, boolean clipped)
+      implements ChatItem {
+    public Session {
+      clipped |=
+          cut(model, NAME_CODE_POINTS)
+              || cut(mode, NAME_CODE_POINTS)
+              || commands.stream().anyMatch(name -> cut(name, NAME_CODE_POINTS))
+              || skills.stream().anyMatch(name -> cut(name, NAME_CODE_POINTS));
+      model = clip(model, NAME_CODE_POINTS);
+      mode = clip(mode, NAME_CODE_POINTS);
+      commands = commands.stream().map(name -> clip(name, NAME_CODE_POINTS)).toList();
+      skills = skills.stream().map(name -> clip(name, NAME_CODE_POINTS)).toList();
+    }
+  }
 
   /** The agent is in {@code mode} now, whoever changed it. */
-  record ModeChanged(String mode) implements ChatItem {}
+  record ModeChanged(String mode, boolean clipped) implements ChatItem {
+    public ModeChanged {
+      clipped |= cut(mode, NAME_CODE_POINTS);
+      mode = clip(mode, NAME_CODE_POINTS);
+    }
+  }
 
   /**
    * The agent's text: a fragment of what it is saying, appended to what it said before, or, when
    * {@code newParagraph}, the start of a new paragraph, which a block said whole is. A subagent's
    * text can arrive after its turn ended, before the turn the harness starts itself.
    */
-  record Text(String under, String text, boolean newParagraph) implements ChatItem {}
+  record Text(String under, String text, boolean newParagraph, boolean clipped)
+      implements ChatItem {
+    public Text {
+      clipped |= cut(text, CONTENT_CODE_POINTS);
+      text = clip(text, CONTENT_CODE_POINTS);
+    }
+  }
 
   /** A tool call began: its row, in the plain {@code words} of what it does, and its detail. */
-  record Tool(String under, String id, ToolKind kind, String words, Detail detail)
-      implements ChatItem {}
+  record Tool(String under, String id, ToolKind kind, String words, Detail detail, boolean clipped)
+      implements ChatItem {
+    public Tool {
+      clipped |= cut(words, SUMMARY_CODE_POINTS);
+      words = clip(words, SUMMARY_CODE_POINTS);
+    }
+  }
 
   /**
    * The tool call {@code id} came back with {@code output}, which says why when it {@code failed}.
+   * A clipped output keeps its beginning.
    */
-  record ToolDone(String under, String id, String output, boolean failed) implements ChatItem {}
+  record ToolDone(String under, String id, String output, boolean failed, boolean clipped)
+      implements ChatItem {
+    public ToolDone {
+      clipped |= cut(output, CONTENT_CODE_POINTS);
+      output = clip(output, CONTENT_CODE_POINTS);
+    }
+  }
 
   /**
    * The agent waits for a person: its {@code id} is the one an answer names, and {@code call} the
@@ -99,9 +214,12 @@ public sealed interface ChatItem {
   }
 
   /**
-   * The agent asks to make a call: in {@code words}, with why when the harness says ({@code
-   * reason}, else null), and {@code always}, one sentence for each thing allowing it always would
-   * change, from now on and where, in the harness's words: none when it offers no such choice.
+   * The agent asks to make a call. Its {@code words} are the agent's own description of the call
+   * (for a command, the model wrote them) and need not say what the call does: a card always shows
+   * the {@code detail} beside them. With why when the harness says ({@code reason}, else null), and
+   * the ways to allow it always the harness offers ({@code always}): none when it offers none, or
+   * when any part of one is a shape that cannot be said in plain words, so a person is never
+   * offered more than they read.
    */
   record Permission(
       String id,
@@ -110,20 +228,51 @@ public sealed interface ChatItem {
       String words,
       String reason,
       Detail detail,
-      List<String> always)
-      implements Request {}
+      List<Always> always,
+      boolean clipped)
+      implements Request {
+    public Permission {
+      clipped |= cut(words, SUMMARY_CODE_POINTS) || cut(reason, SUMMARY_CODE_POINTS);
+      words = clip(words, SUMMARY_CODE_POINTS);
+      reason = clip(reason, SUMMARY_CODE_POINTS);
+    }
+  }
+
+  /**
+   * One way to allow a call always: everything choosing it changes, one plain sentence each ({@code
+   * words}), each saying what is allowed or changed and where, said whole and never clipped.
+   */
+  record Always(List<String> words) {}
 
   /** The agent asks a person to choose, one answer to each of {@code questions}. */
   record Question(String id, String call, List<Asked> questions) implements Request {}
 
   /** One question: its text, its short {@code header}, and its choices, one or several. */
-  record Asked(String question, String header, List<Choice> choices, boolean multiSelect) {}
+  record Asked(
+      String question, String header, List<Choice> choices, boolean multiSelect, boolean clipped) {
+    public Asked {
+      clipped |= cut(question, CONTENT_CODE_POINTS) || cut(header, SUMMARY_CODE_POINTS);
+      question = clip(question, CONTENT_CODE_POINTS);
+      header = clip(header, SUMMARY_CODE_POINTS);
+    }
+  }
 
   /** One choice of a question, and what it means. */
-  record Choice(String label, String about) {}
+  record Choice(String label, String about, boolean clipped) {
+    public Choice {
+      clipped |= cut(label, SUMMARY_CODE_POINTS) || cut(about, CONTENT_CODE_POINTS);
+      label = clip(label, SUMMARY_CODE_POINTS);
+      about = clip(about, CONTENT_CODE_POINTS);
+    }
+  }
 
   /** The agent asks a person to approve its {@code plan} before it changes anything. */
-  record Plan(String id, String call, String plan) implements Request {}
+  record Plan(String id, String call, String plan, boolean clipped) implements Request {
+    public Plan {
+      clipped |= cut(plan, CONTENT_CODE_POINTS);
+      plan = clip(plan, CONTENT_CODE_POINTS);
+    }
+  }
 
   /**
    * The request {@code id} needs no answer now: the harness withdrew it, or its process ended,
@@ -135,19 +284,42 @@ public sealed interface ChatItem {
   sealed interface Notice extends ChatItem {}
 
   /** A request to the model failed with {@code error}; try {@code attempt} of {@code attempts}. */
-  record Retrying(int attempt, int attempts, long delayMs, String error) implements Notice {}
+  record Retrying(int attempt, int attempts, long delayMs, String error, boolean clipped)
+      implements Notice {
+    public Retrying {
+      clipped |= cut(error, SUMMARY_CODE_POINTS);
+      error = clip(error, SUMMARY_CODE_POINTS);
+    }
+  }
 
   /** The conversation was compacted from {@code tokensBefore} tokens to {@code tokensAfter}. */
-  record Compacted(String trigger, long tokensBefore, long tokensAfter) implements Notice {}
+  record Compacted(String trigger, long tokensBefore, long tokensAfter, boolean clipped)
+      implements Notice {
+    public Compacted {
+      clipped |= cut(trigger, NAME_CODE_POINTS);
+      trigger = clip(trigger, NAME_CODE_POINTS);
+    }
+  }
 
   /** The turn was stopped before it finished, at a person's word. */
   record Interrupted() implements Notice {}
 
   /**
-   * The harness refused the request {@code id} the host made of it, such as a change of mode, in
-   * its own {@code words}.
+   * The harness refused a request the host made of it, such as a change of mode, in its own {@code
+   * words}: the request {@code id}, or null when the refusal names none the host could have made.
    */
-  record Refused(String id, String words) implements Notice {}
+  record Refused(String id, String words, boolean clipped) implements Notice {
+    public Refused {
+      clipped |= cut(words, SUMMARY_CODE_POINTS);
+      words = clip(words, SUMMARY_CODE_POINTS);
+    }
+  }
+
+  /**
+   * The agent asked something that could not be read whole, so no person was asked: the host
+   * refused it at once, or, when it named no request to answer, stopped the turn.
+   */
+  record Unreadable() implements Notice {}
 
   /** The turn that ends next was begun by the agent itself, not by a person's message. */
   record SelfStarted() implements ChatItem {}
@@ -156,7 +328,12 @@ public sealed interface ChatItem {
    * The turn failed: in the harness's own {@code words}, and what came of the login when that is
    * why ({@code login}, else null).
    */
-  record Failed(String words, LoginOutcome login) implements ChatItem {}
+  record Failed(String words, LoginOutcome login, boolean clipped) implements ChatItem {
+    public Failed {
+      clipped |= cut(words, CONTENT_CODE_POINTS);
+      words = clip(words, CONTENT_CODE_POINTS);
+    }
+  }
 
   /**
    * A turn ended: what this turn alone cost at API prices, null when the harness does not say
@@ -165,4 +342,12 @@ public sealed interface ChatItem {
    */
   record TurnEnded(Double costUsd, long tokensIn, long tokensOut, long durationMs)
       implements ChatItem {}
+
+  private static boolean cut(String text, int bound) {
+    return text != null && text.codePointCount(0, text.length()) > bound;
+  }
+
+  private static String clip(String text, int bound) {
+    return text == null ? null : Strings.clip(text, bound);
+  }
 }
