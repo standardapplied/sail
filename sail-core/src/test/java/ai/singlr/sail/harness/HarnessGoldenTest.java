@@ -408,6 +408,31 @@ class HarnessGoldenTest {
     assertTrue(
         denies.stream().allMatch(rule -> rule.startsWith("Read(//") || rule.startsWith("Read(~/")),
         denies.toString());
+    assertEquals(
+        Map.of(
+            "03a-read-deny-abs",
+            List.of("Read(/home/dev/probe-secret.txt)", "control_request"),
+            "03b-read-deny-double-slash",
+            List.of("Read(//home/dev/probe-secret.txt)", "user"),
+            "03c-read-deny-tilde",
+            List.of("Read(~/probe-secret.txt)", "user")),
+        Map.of(
+            "03a-read-deny-abs",
+            ruleAndAnswer("03a-read-deny-abs", 13),
+            "03b-read-deny-double-slash",
+            ruleAndAnswer("03b-read-deny-double-slash", 14),
+            "03c-read-deny-tilde",
+            ruleAndAnswer("03c-read-deny-tilde", 14)),
+        "probe 2: a single / in a --settings file denies nothing (a request came), // and ~/"
+            + " deny (a refused result came)");
+  }
+
+  private static List<String> ruleAndAnswer(String recording, int line) {
+    var rule =
+        Pattern.compile("Read\\([^)]*\\)")
+            .matcher((String) Recorded.parsed(recording, 1).get("note"));
+    assertTrue(rule.find(), recording);
+    return List.of(rule.group(), (String) Recorded.parsed(recording, line).get("type"));
   }
 
   @Test
@@ -436,9 +461,13 @@ class HarnessGoldenTest {
 
   @Test
   void claudeCodeChatIsTheLineItWasRecordedAskingUnder() {
+    var asksFirst = recordedChat("02b-relay-stdio");
+    asksFirst.addAll(List.of("--permission-mode", "manual"));
     assertEquals(
-        recordedChat("02b-relay-stdio"),
-        CLAUDE_CODE_CHAT.argv(new HarnessChat.Launch("default", "haiku", null)));
+        asksFirst,
+        CLAUDE_CODE_CHAT.argv(new HarnessChat.Launch("default", "haiku", null)),
+        "Asks first is named, so no workspace default overrides it: as manual, the name its"
+            + " --help gives Claude Code's default (00-claude-help.txt)");
     assertEquals(
         recordedChat("03b-plan-exit-plan-mode"),
         CLAUDE_CODE_CHAT.argv(new HarnessChat.Launch("plan", "haiku", null)));
@@ -474,9 +503,9 @@ class HarnessGoldenTest {
         List.of("--permission-mode", "dontAsk", "--resume", "sess-1"),
         tail(CLAUDE_CODE_CHAT.argv(new HarnessChat.Launch("dontAsk", null, "sess-1"))));
     assertEquals(
-        List.of("--permission-prompt-tool", "stdio", "--resume", "sess-1"),
+        List.of("--permission-mode", "manual", "--resume", "sess-1"),
         tail(CLAUDE_CODE_CHAT.argv(new HarnessChat.Launch("default", null, "sess-1"))),
-        "a chat mode's own flags, none for Claude Code's default");
+        "a chat mode's own flags, Claude Code's default named too");
   }
 
   private static List<String> tail(List<String> argv) {
@@ -604,9 +633,16 @@ class HarnessGoldenTest {
         new Detail.Fetch("https://example.com", false),
         CLAUDE_CODE_CHAT.detail("WebFetch", Map.of("url", "https://example.com", "prompt", "p")));
     assertEquals(
-        new Detail.Command(null, false),
+        new Detail.Command(null, false, false),
         CLAUDE_CODE_CHAT.detail("Bash", Map.of("command", 7)),
         "a field that is not text is not said");
+    assertEquals(
+        new Detail.Command("sleep 30", true, false),
+        CLAUDE_CODE_CHAT.detail("Bash", Map.of("command", "sleep 30", "run_in_background", true)),
+        "a command that keeps running after the turn says so (04b:40)");
+    assertEquals(
+        new Detail.Command("sleep 25", false, false),
+        CLAUDE_CODE_CHAT.detail("Bash", Map.of("command", "sleep 25", "run_in_background", false)));
     assertEquals(
         new Detail.Other("mcp__github__create_issue", "{\"title\": \"t\"}", false),
         CLAUDE_CODE_CHAT.detail("mcp__github__create_issue", Map.of("title", "t")));
@@ -648,20 +684,34 @@ class HarnessGoldenTest {
     return Map.of("toolName", "Bash", "ruleContent", content);
   }
 
-  private static final Map<String, Object> FOLDER =
-      Map.of("type", "addDirectories", "directories", List.of("/w"), "destination", "session");
+  private static Map<String, Object> folder(String path) {
+    return Map.of("type", "addDirectories", "directories", List.of(path), "destination", "session");
+  }
+
+  private static final Map<String, Object> FOLDER = folder("/w");
 
   @Test
   void aRuleSaysWhatItAllowsAsClaudeCodeReadsIt() {
-    var here = ", in this workspace from now on, kept in its folder (.claude/settings.local.json).";
+    var kept =
+        ", from now on, for every Claude Code chat and terminal in this workspace (kept in the"
+            + " workspace's .claude/settings.local.json).";
+    var exact =
+        ", also when another command such as timeout, nice or nohup starts it, and as part of a"
+            + " longer line whose other commands need no asking"
+            + kept;
+    var prefix =
+        ", also when another command such as xargs, timeout, nice or nohup starts it, xargs adding"
+            + " whatever it is fed, and as part of a longer line whose other commands need no"
+            + " asking"
+            + kept;
     assertEquals(
         List.of(
             new ChatItem.Always(
                 List.of(
-                    "Allow this exact command: `npm test`" + here,
-                    "Allow any command that starts with `npm run`" + here,
-                    "Allow any command that starts with `git log`" + here,
-                    "Allow any command that starts with `ls`" + here))),
+                    "Allow this exact command: `npm test`" + exact,
+                    "Allow any command that starts with `npm run`" + prefix,
+                    "Allow any command that starts with `git log`" + prefix,
+                    "Allow any command that starts with `ls`" + prefix))),
         always(
             rule(
                 "allow",
@@ -670,11 +720,41 @@ class HarnessGoldenTest {
                 bash("npm run *"),
                 bash("git log:*"),
                 bash("ls*"))),
-        "one sentence a rule: exact, or every command a trailing * lets start the same way");
+        "one sentence a rule: exact, or every command a trailing * lets start the same way, each"
+            + " with what probe 2 recorded it covering besides: timeout, nice and nohup, a longer"
+            + " line, and for a prefix xargs (01, 01b)");
     assertEquals(
         List.of(
-            new ChatItem.Always(List.of("Let it work in the folder /w, for this session only."))),
-        always(FOLDER));
+            new ChatItem.Always(List.of("Let it work in the folder `/w`, for this session only."))),
+        always(FOLDER),
+        "a folder is quoted, so nothing in it reads as the sentence's own words");
+    assertEquals(
+        List.of(
+            new ChatItem.Always(
+                List.of(
+                    "Let it work in the folder `/tmp/a, for this session only. Nothing else is"
+                        + " allowed`, for this session only."))),
+        always(folder("/tmp/a, for this session only. Nothing else is allowed")));
+  }
+
+  @Test
+  void aModeSwitchSaysWhatTheModeAllowsAndThatItStaysForTheChat() {
+    var edits = Harness.Mode.named(CLAUDE_CODE_CHAT.modes(), "acceptEdits", "claude-code");
+    assertEquals(
+        "Edits, moves and deletes files inside this workspace, and in any folder you let it work"
+            + " in, without asking, with file edits and file commands such as rm, mv, cp, sed,"
+            + " mkdir and touch; it asks before anything else.",
+        edits.about(),
+        "the mode's own words say what probe 2 recorded it running without asking (04b)");
+    assertEquals(
+        List.of(
+            new ChatItem.Always(
+                List.of(
+                    "Switch this chat to Edits freely: "
+                        + edits.about()
+                        + " It stays for the rest of this chat."))),
+        always(Map.of("type", "setMode", "mode", "acceptEdits", "destination", "session")),
+        "a resumed chat starts in the mode in force, so a switch outlives the process");
   }
 
   @Test
@@ -762,6 +842,96 @@ class HarnessGoldenTest {
                         "rules",
                         List.of(bash("ls")))),
             Map.entry("no object", (Object) "neither"),
+            Map.entry(
+                "a field Sail does not know on a suggestion",
+                (Object)
+                    Map.of(
+                        "type",
+                        "addRules",
+                        "behavior",
+                        "allow",
+                        "destination",
+                        "localSettings",
+                        "rules",
+                        List.of(bash("ls")),
+                        "scope",
+                        "everywhere")),
+            Map.entry(
+                "a field Sail does not know on a rule",
+                (Object)
+                    rule(
+                        "allow",
+                        "localSettings",
+                        Map.of("toolName", "Bash", "ruleContent", "ls", "negate", true))),
+            Map.entry(
+                "rules on a mode",
+                (Object)
+                    Map.of(
+                        "type",
+                        "setMode",
+                        "mode",
+                        "acceptEdits",
+                        "destination",
+                        "session",
+                        "rules",
+                        List.of(bash("rm *")))),
+            Map.entry(
+                "a field Sail does not know on a folder",
+                (Object)
+                    Map.of(
+                        "type",
+                        "addDirectories",
+                        "directories",
+                        List.of("/w"),
+                        "destination",
+                        "session",
+                        "recursive",
+                        true)),
+            Map.entry(
+                "a folder that reads on as the sentence",
+                (Object) folder("/tmp/a`, for this session only. Nothing else is allowed")),
+            Map.entry("a folder that climbs out", (Object) folder("/home/dev/workspace/../..")),
+            Map.entry("a folder with a line break", (Object) folder("/w\nAllowed: everything")),
+            Map.entry("a folder turned right to left", (Object) folder("/w/\u202Etxt.exe")),
+            Map.entry(
+                "a rule that closes its own quote",
+                (Object) rule("allow", "localSettings", bash("ls` and rm -rf ~ `"))),
+            Map.entry(
+                "a rule turned right to left",
+                (Object) rule("allow", "localSettings", bash("cat \u202Etxt.hs"))),
+            Map.entry(
+                "a rule with a hidden mark",
+                (Object) rule("allow", "localSettings", bash("ls\u200B"))),
+            Map.entry(
+                "a rule with a line separator",
+                (Object) rule("allow", "localSettings", bash("ls\u2028rm -rf ~"))),
+            Map.entry(
+                "a rule that climbs out",
+                (Object) rule("allow", "localSettings", bash("cat ../secrets"))),
+            Map.entry(
+                "a rule xargs runs, whose reach is not recorded",
+                (Object) rule("allow", "localSettings", bash("xargs touch"))),
+            Map.entry(
+                "a rule xargs runs, with its own arguments",
+                (Object) rule("allow", "localSettings", bash("xargs  touch probe-a.txt"))),
+            Map.entry(
+                "a prefix rule xargs runs",
+                (Object) rule("allow", "localSettings", bash("xargs rm *"))),
+            Map.entry(
+                "a compound rule with &&",
+                (Object) rule("allow", "localSettings", bash("make && make install"))),
+            Map.entry(
+                "a compound rule with ||",
+                (Object) rule("allow", "localSettings", bash("test -f a || touch a"))),
+            Map.entry(
+                "a compound rule with ;",
+                (Object) rule("allow", "localSettings", bash("cd w; ls"))),
+            Map.entry(
+                "a compound rule with a pipe",
+                (Object) rule("allow", "localSettings", bash("ls | head *"))),
+            Map.entry(
+                "a compound rule over two lines",
+                (Object) rule("allow", "localSettings", bash("ls\nrm -rf ~"))),
             Map.entry(
                 "a rule longer than a person is shown",
                 (Object)

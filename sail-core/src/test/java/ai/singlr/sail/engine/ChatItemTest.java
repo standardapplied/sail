@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.ChatItem.Asked;
@@ -16,6 +17,7 @@ import ai.singlr.sail.engine.ChatItem.ChangeKind;
 import ai.singlr.sail.engine.ChatItem.Choice;
 import ai.singlr.sail.engine.ChatItem.Detail;
 import ai.singlr.sail.engine.ChatItem.ToolKind;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -37,14 +39,16 @@ class ChatItemTest {
 
   @Test
   void aDetailIsClippedToItsBoundAndSaysSo() {
-    assertEquals(new Detail.Command(CONTENT, true), new Detail.Command(over(CONTENT), false));
+    assertEquals(
+        new Detail.Command(CONTENT, false, true), new Detail.Command(over(CONTENT), false, false));
     assertEquals(new Detail.Read(CONTENT, true), new Detail.Read(over(CONTENT), false));
     assertEquals(
         new Detail.Search(CONTENT, "w", true), new Detail.Search(over(CONTENT), "w", false));
     assertEquals(
         new Detail.Search("q", CONTENT, true), new Detail.Search("q", over(CONTENT), false));
     assertEquals(new Detail.Fetch(CONTENT, true), new Detail.Fetch(over(CONTENT), false));
-    assertEquals(new Detail.Other(NAME, "{}", true), new Detail.Other(over(NAME), "{}", false));
+    assertEquals(
+        new Detail.Other(CONTENT, "{}", true), new Detail.Other(over(CONTENT), "{}", false));
     assertEquals(new Detail.Other("t", CONTENT, true), new Detail.Other("t", over(CONTENT), false));
   }
 
@@ -101,32 +105,88 @@ class ChatItemTest {
         new ChatItem.Failed(CONTENT, null, true), new ChatItem.Failed(over(CONTENT), null, false));
   }
 
+  /**
+   * Every part of a request is bounded by the content bound, the card's own, since a person decides
+   * on all of it: the reader refuses a request any part of which is longer, so none is clipped.
+   */
   @Test
-  void aRequestsWordsAreClippedAndSaySo() {
-    assertEquals(permission(SUMMARY, "why", true), permission(over(SUMMARY), "why", false));
-    assertEquals(permission("words", SUMMARY, true), permission("words", over(SUMMARY), false));
+  void aRequestsWordsAreBoundedAsWhatIsDecidedOn() {
+    assertEquals(permission(CONTENT, "why", true), permission(over(CONTENT), "why", false));
+    assertEquals(permission("words", CONTENT, true), permission("words", over(CONTENT), false));
     assertEquals(
         new Asked(CONTENT, "h", List.of(), false, true),
         new Asked(over(CONTENT), "h", List.of(), false, false));
     assertEquals(
-        new Asked("q", SUMMARY, List.of(), false, true),
-        new Asked("q", over(SUMMARY), List.of(), false, false));
-    assertEquals(new Choice(SUMMARY, "a", true), new Choice(over(SUMMARY), "a", false));
+        new Asked("q", CONTENT, List.of(), false, true),
+        new Asked("q", over(CONTENT), List.of(), false, false));
+    assertEquals(new Choice(CONTENT, "a", true), new Choice(over(CONTENT), "a", false));
     assertEquals(new Choice("l", CONTENT, true), new Choice("l", over(CONTENT), false));
+    var whole = permission(CONTENT, CONTENT, false);
+    assertEquals(
+        List.of(CONTENT, CONTENT, CONTENT, CONTENT, CONTENT),
+        List.of(
+            whole.words(),
+            whole.reason(),
+            new Asked("q", CONTENT, List.of(), false, false).header(),
+            new Choice(CONTENT, null, false).label(),
+            new Detail.Other(CONTENT, "{}", false).name()),
+        "a request's every part is whole up to the content bound");
   }
 
   private static ChatItem.Permission permission(String words, String reason, boolean cut) {
-    return new ChatItem.Permission("r", "t", ToolKind.COMMAND, words, reason, null, List.of(), cut);
+    return new ChatItem.Permission(
+        "r", "t", null, ToolKind.COMMAND, words, reason, null, List.of(), cut);
   }
 
   @Test
   void textAtItsBoundIsWholeAndUnmarked() {
-    assertEquals(CONTENT, new Detail.Command(CONTENT, false).line());
-    assertFalse(new Detail.Command(CONTENT, false).clipped());
-    assertFalse(permission(SUMMARY, null, false).clipped());
+    assertEquals(CONTENT, new Detail.Command(CONTENT, false, false).line());
+    assertFalse(new Detail.Command(CONTENT, false, false).clipped());
+    assertFalse(permission(CONTENT, null, false).clipped());
     assertFalse(new ChatItem.ModeChanged(NAME, false).clipped());
-    assertNull(new Detail.Command(null, false).line(), "what was not said");
-    assertTrue(new Detail.Command("ls", true).clipped(), "a piece once cut stays so");
+    assertNull(new Detail.Command(null, false, false).line(), "what was not said");
+    assertTrue(new Detail.Command("ls", false, true).clipped(), "a piece once cut stays so");
+  }
+
+  @Test
+  void anEditIsClippedWhenAnyOfItsChangesIs() {
+    assertFalse(new Detail.Edit(List.of(change("p", null, "b", "a", false))).clipped());
+    assertTrue(
+        new Detail.Edit(
+                List.of(change("p", null, "b", "a", false), change("p", null, "b", "a", true)))
+            .clipped());
+  }
+
+  @Test
+  void whatAnItemHoldsCannotChangeAfterItIsMade() {
+    var words = new ArrayList<>(List.of("Allow it."));
+    var changes = new ArrayList<>(List.of(change("p", null, "b", "a", false)));
+    var choices = new ArrayList<>(List.of(new Choice("l", null, false)));
+    var asked = new ArrayList<>(List.of(new Asked("q", null, choices, false, false)));
+    var always = new ArrayList<>(List.of(new ChatItem.Always(words)));
+    var commands = new ArrayList<>(List.of("/review"));
+
+    var kept =
+        List.of(
+            new ChatItem.Always(words).words(),
+            new Detail.Edit(changes).changes(),
+            new Asked("q", null, choices, false, false).choices(),
+            new ChatItem.Question("r", "t", asked).questions(),
+            new ChatItem.Permission(
+                    "r", "t", null, ToolKind.COMMAND, "w", null, null, always, false)
+                .always(),
+            new ChatItem.Session("m", "d", commands, commands, false).commands());
+    words.clear();
+    changes.clear();
+    choices.clear();
+    asked.clear();
+    always.clear();
+    commands.clear();
+
+    for (var list : kept) {
+      assertEquals(1, list.size());
+      assertThrows(UnsupportedOperationException.class, list::clear);
+    }
   }
 
   @Test

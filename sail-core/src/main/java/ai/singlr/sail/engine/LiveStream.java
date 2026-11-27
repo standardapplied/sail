@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The two directions of Claude Code's streaming mode, as a live member and a chat speak it: the
@@ -37,12 +38,29 @@ import java.util.stream.Collectors;
 public final class LiveStream {
 
   /**
-   * A longer line is skipped unparsed: the frame ceiling, in UTF-16 characters, not bytes. What
-   * such a line held is lost: a call's row (an {@code assistant} line holds a call's input twice),
-   * whose result then names a row never shown, or a call's result, whose row a host closes at the
-   * turn's end; and a request, which then waits unseen until a person stops the turn.
+   * A longer line is skipped unparsed: the frame ceiling, in UTF-16 characters, not bytes. Only its
+   * start is read ({@link #REQUEST_START}): a request is never lost, it is too large to show a
+   * person and so refused. What any other such line held is lost: a call's row (an {@code
+   * assistant} line holds a call's input twice), whose result then names a row never shown, or a
+   * call's result, whose row a host closes at the turn's end.
    */
   public static final int MAX_LINE_CHARS = 1 << 20;
+
+  /**
+   * How much of a line past the frame ceiling is read: enough for a request's type, its id and its
+   * subtype, which Claude Code writes first, in that order (02b:16).
+   */
+  private static final int START_CHARS = 512;
+
+  /**
+   * The start of a request Claude Code makes of the host, with its id when it is a {@code
+   * can_use_tool} that names it first, as Claude Code writes one (02b:16).
+   */
+  private static final Pattern REQUEST_START =
+      Pattern.compile(
+          "\\{\\s*\"type\"\\s*:\\s*\"control_request\"\\s*,(?:\\s*\"request_id\"\\s*:\\s*"
+              + "\"([^\"\\\\]{1,128})\"\\s*,\\s*\"request\"\\s*:\\s*\\{\\s*\"subtype\"\\s*:\\s*"
+              + "\"can_use_tool\")?");
 
   /** How much of a name the agent gave, a mode's, a model's, a command's, a person is shown. */
   public static final int NAME_CODE_POINTS = 64;
@@ -109,13 +127,16 @@ public final class LiveStream {
         implements Step {}
 
     /**
-     * Claude Code asks before the call {@code callId} of {@code tool}: with the call's {@code
-     * input}, its own {@code description} of it and why it asks ({@code reason}), when it says, and
-     * the rules it would add to allow it always ({@code suggestions}, to hand back as they are).
+     * Claude Code asks before the call {@code callId} of {@code tool}, made by the subagent {@code
+     * agentId} (null for the agent itself; probe 2 recorded a subagent's request as any other, with
+     * no {@code parent_tool_use_id}): with the call's {@code input}, its own {@code description} of
+     * it and why it asks ({@code reason}), when it says, and the rules it would add to allow it
+     * always ({@code suggestions}, to hand back as they are).
      */
     record Permission(
         String requestId,
         String callId,
+        String agentId,
         String tool,
         String displayName,
         Map<String, Object> input,
@@ -124,7 +145,11 @@ public final class LiveStream {
         List<Object> suggestions)
         implements Step {}
 
-    /** The agent asks a person {@code questions}, as a request to allow its question tool. */
+    /**
+     * The agent asks a person {@code questions}, as a request to allow its question tool: each
+     * whole, since one any part of which would be cut is never asked, so an answer hands back the
+     * label chosen exactly ({@link LiveChat#answer}).
+     */
     record Question(
         String requestId, String callId, Map<String, Object> input, List<ChatItem.Asked> questions)
         implements Step {}
@@ -168,11 +193,14 @@ public final class LiveStream {
 
     /**
      * A request Claude Code made of the host that could not be read whole (an id that is not safe
-     * to hand back, no input, no tool): no person is asked it, so the host refuses it at once
-     * ({@link LiveChat#refuseUnreadable}), or, when {@code requestId} is null because it named none
-     * that is safe, stops the turn, which would otherwise wait on it.
+     * to hand back, no input, no tool), or that is {@code tooLarge} to show a person whole (any
+     * part of it, its input as JSON included, past {@link #CONTENT_CODE_POINTS}, or its line past
+     * {@link #MAX_LINE_CHARS}): no person is asked it, and it holds nothing to allow, so the host
+     * refuses it at once ({@link LiveChat#refuseUnreadable}), or, when {@code requestId} is null
+     * because it named none that is safe, or a request no refusal answers, stops the turn, which
+     * would otherwise wait on it.
      */
-    record Unreadable(String requestId) implements Step {}
+    record Unreadable(String requestId, boolean tooLarge) implements Step {}
 
     /**
      * A line this reader does not read: of {@code type}, empty for a line that names none, and a
@@ -252,6 +280,12 @@ public final class LiveStream {
    * the agent chooses (an MCP server's structured result), not the host.
    */
   public static Step read(String line) {
+    if (line != null && line.length() > MAX_LINE_CHARS) {
+      var start = REQUEST_START.matcher(line.substring(0, START_CHARS));
+      return start.lookingAt()
+          ? new Step.Unreadable(safeId(start.group(1)), true)
+          : new Step.Other("");
+    }
     var type = "";
     try {
       var event = YamlUtil.parseJsonLine(line, MAX_LINE_CHARS);
@@ -412,14 +446,17 @@ public final class LiveStream {
     try {
       return asked(id(event, "request_id"), request);
     } catch (RuntimeException unreadable) {
-      return new Step.Unreadable(safeId(event.get("request_id")));
+      return new Step.Unreadable(safeId(event.get("request_id")), false);
     }
   }
 
   /**
-   * A {@code can_use_tool} read whole. Its suggestions are the harness's own, to hand back as they
-   * came: none when there are none, or when one is missing ({@code null}), since what is left of
-   * them is no longer what it offered to keep.
+   * A {@code can_use_tool} read whole, or {@link Step.Unreadable} too large when a person could not
+   * be shown it whole: when any of what a card of it shows, its tool, its words, why it asks or its
+   * input as JSON (which holds every other part: a command, an edit, a plan, a question), is past
+   * {@link #CONTENT_CODE_POINTS}. Its suggestions are the harness's own, to hand back as they came:
+   * none when there are none, or when one is missing ({@code null}), since what is left of them is
+   * no longer what it offered to keep.
    */
   private static Step asked(String id, Map<String, Object> request) {
     var call = id(request, "tool_use_id");
@@ -428,6 +465,17 @@ public final class LiveStream {
       throw new IllegalArgumentException("Not a call: " + tool);
     }
     var input = map(request.get("input"));
+    if (Stream.of(
+            YamlUtil.dumpJsonValue(input),
+            tool,
+            text(request, "display_name"),
+            text(request, "description"),
+            text(request, "decision_reason"))
+        .anyMatch(
+            shown ->
+                shown != null && shown.codePointCount(0, shown.length()) > CONTENT_CODE_POINTS)) {
+      return new Step.Unreadable(id, true);
+    }
     return switch (tool) {
       case "AskUserQuestion" -> new Step.Question(id, call, input, questions(input));
       case "ExitPlanMode" ->
@@ -436,6 +484,7 @@ public final class LiveStream {
           new Step.Permission(
               id,
               call,
+              request.containsKey("agent_id") ? id(request, "agent_id") : null,
               tool,
               Objects.toString(text(request, "display_name"), ""),
               input,

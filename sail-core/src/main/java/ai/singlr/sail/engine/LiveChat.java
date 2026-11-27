@@ -60,7 +60,7 @@ public final class LiveChat {
       case Step.Plan asked ->
           List.of(new ChatItem.Plan(asked.requestId(), asked.callId(), asked.plan(), false));
       case Step.Shown shown -> List.of(shown.item());
-      case Step.Unreadable _ -> List.of(new ChatItem.Unreadable());
+      case Step.Unreadable unreadable -> List.of(new ChatItem.Unreadable(unreadable.tooLarge()));
       case Step.Status status ->
           status.mode() == null
               ? List.of()
@@ -92,6 +92,7 @@ public final class LiveChat {
     return new ChatItem.Permission(
         asked.requestId(),
         asked.callId(),
+        asked.agentId(),
         chat.kind(asked.tool()),
         Strings.isNotBlank(asked.description()) ? asked.description() : asked.displayName(),
         asked.reason(),
@@ -159,7 +160,9 @@ public final class LiveChat {
 
   /**
    * Answers a question: its {@code input}, the questions as asked, with {@code answers}, each
-   * question's text to the label chosen.
+   * question's text to the label chosen, exactly as the step holds them ({@link
+   * Step.Question#questions}, whole, since a question any part of which would be cut is never
+   * asked).
    */
   public static String answer(
       String requestId, Map<String, Object> input, Map<String, String> answers) {
@@ -169,14 +172,21 @@ public final class LiveChat {
   }
 
   /**
-   * Refuses a request that could not be read whole ({@link Step.Unreadable}), at once, so its turn
-   * goes on: the agent is told why in plain words.
+   * Refuses a request that could not be read whole, or that is too large to show a person whole
+   * ({@link Step.Unreadable}), at once, so its turn goes on: the agent is told why in plain words,
+   * and to split one too large into smaller steps.
+   *
+   * @throws IllegalArgumentException for one that names no request id: stop its turn instead
    */
-  public static String refuseUnreadable(String requestId) {
+  public static String refuseUnreadable(Step.Unreadable unreadable) {
     return deny(
-        requestId,
-        "Sail could not read this request whole, so no person was asked and it is refused."
-            + " Ask again in another way if it is still needed.");
+        unreadable.requestId(),
+        unreadable.tooLarge()
+            ? "This is too large to show a person whole, so no person was asked and it is refused."
+                + " Split it into smaller steps, such as a shorter command or a large file written"
+                + " in parts."
+            : "Sail could not read this request whole, so no person was asked and it is refused."
+                + " Ask again in another way if it is still needed.");
   }
 
   /** Refuses the call, a question or a plan, saying why to the agent in {@code message}. */

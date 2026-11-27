@@ -50,7 +50,7 @@ final class ClaudeCodeChat implements HarnessChat {
     return modes().stream()
         .filter(offered -> offered.name().equals(mode))
         .findFirst()
-        .map(offered -> offered.args().isBlank() ? List.<String>of() : split(offered.args()))
+        .map(offered -> split(offered.args()))
         .orElseGet(() -> List.of("--permission-mode", mode));
   }
 
@@ -59,12 +59,16 @@ final class ClaudeCodeChat implements HarnessChat {
   }
 
   /**
-   * Claude Code's own permission modes that were recorded working in a chat: its {@code default},
-   * which a start with no mode is in, first. A workspace's settings may name another default, so
-   * the mode a chat is in is the one Claude Code says ({@code init}, {@code status}). In plan mode
-   * the recorded turns ran on a model other than the one {@code --model} named, until the plan was
+   * Claude Code's own permission modes that were recorded working in a chat: its {@code default}
+   * first, named at the start as {@code manual}, the name its {@code --help} lists for it (it lists
+   * no {@code default}), so a workspace's own default never overrides the person's choice. The mode
+   * a chat is in is the one Claude Code says ({@code init}, {@code status}). In plan mode the
+   * recorded turns ran on a model other than the one {@code --model} named, until the plan was
    * approved. Never asks ({@code bypassPermissions}) is not offered: it was never recorded at a
-   * chat's start or as a switch.
+   * chat's start or as a switch. What Edits freely runs without asking is what probe 2 recorded
+   * (04b): {@code rm}, {@code mv}, {@code cp}, {@code sed -i} and {@code nice rm} inside the
+   * workspace, and a request for {@code rm} outside it; {@code mkdir} and {@code touch} are from
+   * its documentation.
    */
   @Override
   public List<Harness.Mode> modes() {
@@ -73,13 +77,14 @@ final class ClaudeCodeChat implements HarnessChat {
             "default",
             "Asks first",
             "Asks before edits, shell commands and network actions.",
-            "",
+            " --permission-mode manual",
             false),
         ClaudeCode.permissionMode(
             "acceptEdits",
             "Edits freely",
-            "Makes file edits and common filesystem commands without asking, and asks before the"
-                + " rest.",
+            "Edits, moves and deletes files inside this workspace, and in any folder you let it"
+                + " work in, without asking, with file edits and file commands such as rm, mv, cp,"
+                + " sed, mkdir and touch; it asks before anything else.",
             false),
         ClaudeCode.permissionMode(
             "plan",
@@ -103,17 +108,20 @@ final class ClaudeCodeChat implements HarnessChat {
   }
 
   /**
-   * A call's detail from its input as Claude Code names it: {@code command} (Bash, recorded),
-   * {@code file_path} with {@code old_string}, {@code new_string} and {@code replace_all} (Edit) or
-   * {@code content} (Write, recorded), {@code file_path} (Read), {@code pattern} and {@code path}
-   * (Grep, Glob), {@code query} (WebSearch) and {@code url} (WebFetch), each as its tool's schema
-   * names it in a recorded transcript; any other is its input as JSON. An edit is one change:
-   * 2.1.332 has no tool that changes several files in one call (its {@code init} lists its tools).
+   * A call's detail from its input as Claude Code names it: {@code command} and {@code
+   * run_in_background} (Bash, recorded), {@code file_path} with {@code old_string}, {@code
+   * new_string} and {@code replace_all} (Edit) or {@code content} (Write, recorded), {@code
+   * file_path} (Read), {@code pattern} and {@code path} (Grep, Glob), {@code query} (WebSearch) and
+   * {@code url} (WebFetch), each as its tool's schema names it in a recorded transcript; any other
+   * is its input as JSON. An edit is one change: 2.1.332 has no tool that changes several files in
+   * one call (its {@code init} lists its tools).
    */
   @Override
   public Detail detail(String tool, Map<String, Object> input) {
     return switch (tool) {
-      case "Bash" -> new Detail.Command(field(input, "command"), false);
+      case "Bash" ->
+          new Detail.Command(
+              field(input, "command"), Boolean.TRUE.equals(input.get("run_in_background")), false);
       case "Edit" ->
           edit(
               field(input, "file_path"),

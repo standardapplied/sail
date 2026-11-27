@@ -13,10 +13,12 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * A line Claude Code 2.1.332 wrote, or was written, in the S0 probe of 2026-11-27, cut whole from
+ * A line Claude Code 2.1.332 wrote, or was written, in the S0 probes of 2026-11-27, cut whole from
  * its recording: {@code claude-chat/<recording>.<line>.json} is line {@code <line>} of {@code
- * probe/claude/<recording>.jsonl}, its {@code msg} as it went over the pipe, or for a recording's
- * first line the {@code argv} it ran.
+ * probe/claude/<recording>.jsonl} (the first probe) or {@code probe2/claude/<recording>.jsonl} (the
+ * second: always rules behind wrappers, the bypass mode, read-deny paths, a subagent's request and
+ * Edits freely), its {@code msg} as it went over the pipe, or for a recording's first line the
+ * {@code argv} it ran and the probe's {@code note}.
  */
 public final class Recorded {
 
