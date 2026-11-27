@@ -109,8 +109,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     public enum Entry {
         /// A group head with its count; with none, its title alone (a list still loading); its icon
-        /// before its words when it has one.
-        case head(String, count: Int?, icon: LineIcon? = nil)
+        /// before its words when it has one; its action, a quiet button, before its count.
+        case head(String, count: Int?, icon: LineIcon? = nil, action: NSView? = nil)
         case item(Item)
     }
 
@@ -359,7 +359,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     private static func id(_ entry: Entry) -> String? {
         switch entry {
         case let .item(item): item.id
-        case let .head(title, _, _): "\u{0}head\u{0}" + title
+        case let .head(title, _, _, _): "\u{0}head\u{0}" + title
         }
     }
 
@@ -573,11 +573,11 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     private func cell(for row: Int) -> NSView? {
         guard entries.indices.contains(row) else { return nil }
         switch entries[row] {
-        case let .head(title, count, icon):
+        case let .head(title, count, icon, action):
             let sidebar = rowStyle == .sidebar
             let leading = sidebar ? HeadCell.sidebarLeading : RowStyle.list.leading
             let trailing = sidebar ? rowStyle.margin + rowStyle.trailing + (actionsColumn ?? 0) : nil
-            return HeadCell(title, count: count, icon: icon, at: (leading, trailing), look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
+            return HeadCell(title, count: count, icon: icon, at: (leading, trailing), look: look, mono: mono, hairline: rowStyle.hairline && row > 0, action: action)
         case let .item(item):
             rowsMade += 1
             if let cell = makeView(withIdentifier: Self.cellID, owner: nil) as? RowCell {
@@ -858,10 +858,10 @@ final class SailRowView: NSTableRowView {
 
 /// A group head's words: mono capitals 20 pt in (14 pt in a sidebar, as the design's panel draws
 /// its heads), after its icon when it has one, the count 8 pt after them (in a sidebar, at its rows'
-/// trailing end), on the line the browser puts a 10 pt line in the row's middle. In a sidebar what
-/// sits at its end keeps its place and the words yield: where they would come within 8 pt of the
-/// count, or of what the head holds beside it, they are cut in their middle, and its tooltip says
-/// them whole.
+/// trailing end), on the line the browser puts a 10 pt line in the row's middle; its action, the
+/// one subview it may hold, 8 pt before the count. In a sidebar what sits at its end keeps its
+/// place and the words yield: where they would come within 8 pt of the count, or of its action,
+/// they are cut in their middle, and its tooltip says them whole.
 @MainActor
 package final class HeadCell: NSView {
     package static let countGap = 8.0
@@ -879,7 +879,7 @@ package final class HeadCell: NSView {
     /// Its words whole, on hover while they are cut.
     package let tooltip: Tooltip
 
-    init(_ title: String, count: Int?, icon: LineIcon?, at inset: (leading: Double, trailing: Double?), look: Look, mono: LabelFont, hairline: Bool) {
+    package init(_ title: String, count: Int?, icon: LineIcon?, at inset: (leading: Double, trailing: Double?), look: Look, mono: LabelFont, hairline: Bool, action: NSView? = nil) {
         leading = inset.leading
         trailing = inset.trailing
         self.icon = icon
@@ -893,6 +893,7 @@ package final class HeadCell: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         setAccessibilityLabel(count.map { "\(title), \($0)" } ?? title)
+        if let action { addSubview(action) }
         tooltip.attach(to: self, saying: title)
     }
 
@@ -912,6 +913,14 @@ package final class HeadCell: NSView {
 
     private var words: Double {
         leading + (icon == nil ? 0 : Self.iconSide + Self.iconGap)
+    }
+
+    /// Its action placed 8 pt before the count, at the width it is given.
+    override package func resizeSubviews(withOldSize _: NSSize) {
+        guard let action = subviews.first else { return }
+        let size = action.intrinsicContentSize, top = hairline ? 1.0 : 0, count = countFrame
+        let x = userInterfaceLayoutDirection == .rightToLeft ? Double(count.maxX) + Self.countGap : Double(count.minX) - Self.countGap - Double(size.width)
+        action.frame = action.frame(forAlignmentRect: NSRect(x: x, y: top + (Double(bounds.height) - top - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height)))
     }
 
     /// Its words as drawn: whole, or in a sidebar cut in their middle to end 8 pt before what

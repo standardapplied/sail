@@ -90,7 +90,7 @@ import Testing
     @Test func whoamiAndAProjectAreBuiltFromTheirFieldsAsTheServersAnswersRead() throws {
         #expect(try Endpoint.whoami.decode(response(try Exchange("whoami"))) == Whoami(
             fde: "uday", name: "uday", displayName: "Uday", email: "uday@example.com", role: .known(.admin),
-            capabilities: [.known(.read), .known(.write), .known(.admin), .unknown("build")]
+            capabilities: [.known(.read), .known(.write), .known(.admin), .known(.build)]
         ))
         #expect(try Endpoint.projects.decode(response(try Exchange("projects"))) == ProjectList(
             projects: [ProjectSummary(name: "harbor", containerStatus: .known(.notCreated), template: .known(.ready))], total: 1

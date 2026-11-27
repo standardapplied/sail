@@ -837,7 +837,7 @@ import Testing
     static func said(_ entries: [SailList.Entry]) -> [String] {
         entries.map { entry in
             switch entry {
-            case let .head(title, count, icon): "head \(title) \(count.map { "\($0)" } ?? "-") \(icon?.rawValue ?? "-")"
+            case let .head(title, count, icon, _): "head \(title) \(count.map { "\($0)" } ?? "-") \(icon?.rawValue ?? "-")"
             case let .item(item): "item \(item.id) \(item.actions.map { "\($0.title)\($0.onRow ? "" : " in ⋯")\($0.key.isEmpty ? "" : " ⌘\($0.key)")" })"
             }
         }

@@ -16,6 +16,8 @@ package final class LeftPanel: NSView {
     static let remembered = "leftPanel.width"
 
     var onChoose: @MainActor (String) -> Void = { _ in }
+    /// Create Project, on the control plane's head beside its count.
+    var onCreate: @MainActor () -> Void = {}
     /// Try Again under the control plane's head, which could list no project.
     var onTryAgain: @MainActor () -> Void = {}
     /// Its look; a change redraws its words and rows in it.
@@ -28,11 +30,14 @@ package final class LeftPanel: NSView {
     /// drag edge, so a reach for the thumb never resizes the panel.
     package let scroll: QuietScrollView
     let heading = NSTextField(labelWithString: "Workspaces")
-    /// "No project is open to you yet.", with none listed, or why none could be.
+    /// "No projects yet." or "No project is open to you yet.", with none listed, or why none could be.
     let emptyLine = NSTextField(labelWithString: "")
     /// Under the empty line while no project could be listed and This Mac's page is shown, where
     /// no card offers its own: the projects asked again.
     package let tryAgain: SailButton
+    /// Create Project, a quiet + on the control plane's head before its count, offered to those who
+    /// may create and build a project once projects are listed.
+    package let createProject: SailButton
     /// Skeleton rows, each a tile and a name, before any project is listed.
     private let skeletons: [(tile: Skeleton, name: Skeleton)]
     private let mono: LabelFont
@@ -41,6 +46,8 @@ package final class LeftPanel: NSView {
     private var headed: String?
     /// The control plane's head's count as drawn, nil before its projects are listed.
     private var counted: Int?
+    /// Create Project is on the control plane's head as drawn.
+    private var offered = false
     /// The names are drawn in the secondary ink: what is shown failed to refresh.
     private var stale = false
     /// What it last showed, drawn again in a new look.
@@ -54,7 +61,11 @@ package final class LeftPanel: NSView {
         scroll = QuietScrollView(look: look)
         skeletons = [70.0, 52, 88, 60, 74].map { (tile: Skeleton(width: TilePaint.side, height: TilePaint.side, look: look), name: Skeleton(width: $0, look: look)) }
         tryAgain = SailButton("Try Again", kind: .quiet, size: .small, look: look, target: nil, action: nil)
+        createProject = SailButton(icon: .plus, label: "Create Project", kind: .quiet, size: .small, look: look, target: nil, action: nil)
         super.init(frame: .zero)
+        createProject.isHidden = true
+        createProject.target = self
+        createProject.action = #selector(create(_:))
         emptyLine.isHidden = true
         addSubview(emptyLine)
         tryAgain.isHidden = true
@@ -107,6 +118,7 @@ package final class LeftPanel: NSView {
         scroll.look = look
         list.barInset = look.cardEdge == nil ? 0 : Look.hairline
         tryAgain.look = look
+        createProject.look = look
         for (tile, name) in skeletons {
             tile.look = look
             name.look = look
@@ -126,17 +138,19 @@ package final class LeftPanel: NSView {
         let failed = !panel.listed && panel.emptyLine != nil
         loading(!panel.listed && !failed)
         tryAgain.isHidden = !failed || panel.chosen != WorkspacesModel.thisMac
+        createProject.isHidden = !panel.creates
         emptyLine.isHidden = panel.emptyLine == nil
         emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),
         ])
         let count = panel.listed ? panel.projects.count : nil
-        if panel.projects != projects || panel.stale != stale || panel.controlPlane != headed || count != counted {
+        if panel.projects != projects || panel.stale != stale || panel.controlPlane != headed || count != counted || panel.creates != offered {
             projects = panel.projects
             stale = panel.stale
             headed = panel.controlPlane
             counted = count
-            list.entries = thisMac + [.head(panel.controlPlane, count: count, icon: .cloud)] + panel.projects.map { project in
+            offered = panel.creates
+            list.entries = thisMac + [.head(panel.controlPlane, count: count, icon: .cloud, action: panel.creates ? createProject : nil)] + panel.projects.map { project in
                 .item(row(project))
             }
         }
@@ -146,6 +160,10 @@ package final class LeftPanel: NSView {
 
     @objc private func askAgain(_: Any?) {
         onTryAgain()
+    }
+
+    @objc private func create(_: Any?) {
+        onCreate()
     }
 
     private func loading(_ loading: Bool) {
