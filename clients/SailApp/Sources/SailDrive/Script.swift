@@ -369,9 +369,9 @@ struct Step: Decodable {
     /// The left panel's group heads are these, in order, each its title and its count when it has
     /// one ("127.0.0.1:7979 9"), within `seconds` (10 by default).
     var panelHeads: [String]?
-    /// The left panel's project of this name opened or shut by a click on its disclosure, waited
-    /// on until it is.
-    var panelDisclose: String?
+    /// `[project, "open" | "shut"]`: the left panel's project made so by a click on its disclosure
+    /// where it is not so already, waited on until it is.
+    var panelDisclose: [String]?
     /// The left panel's rows under the control plane's head are these, by name, in order, within
     /// `seconds` (10 by default).
     var panelRows: [String]?
@@ -384,7 +384,7 @@ struct Step: Decodable {
     /// The + of the left panel's row of this id clicked; New Session then opens.
     var panelPlus: String?
     /// New Session stands in the window less 8 pt, its top on the top of the left panel's row of this
-    /// id.
+    /// id, or, where it cannot hang from there, its foot on the window's least.
     var newSessionBeside: String?
     /// Workspaces is the signed-in person's at this control plane address from now on, the
     /// requests still going where they went: what its host draws, seen with the goldens' answers;

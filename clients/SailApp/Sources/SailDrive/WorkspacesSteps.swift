@@ -616,12 +616,14 @@ extension Driver {
         let cell = { (id: String) -> SidebarRowCell? in
             Self.row(id, in: list).flatMap { list.rowView(atRow: $0, makeIfNecessary: false) }.flatMap { Self.found(SidebarRowCell.self, in: $0).first }
         }
-        if let name = step.panelDisclose {
+        if let pair = step.panelDisclose, pair.count == 2, let name = pair.first {
+            let open = pair[1] == "open"
             guard let disclosure = cell(name)?.disclosure else { return (false, "\(name) shows no disclosure; the panel's rows: \(rows())") }
-            let was = disclosure.open
-            guard await click(disclosure, at: NSPoint(x: disclosure.bounds.midX, y: disclosure.bounds.midY)) else { return (false, "\(name)'s disclosure could not be clicked") }
-            let turned = await waitUntil(step.seconds ?? 10) { cell(name)?.disclosure?.open == !was }
-            return (turned, "\(name) \(cell(name)?.disclosure?.open == true ? "open" : "shut"); the panel's rows: \(rows())")
+            if disclosure.open != open {
+                guard await click(disclosure, at: NSPoint(x: disclosure.bounds.midX, y: disclosure.bounds.midY)) else { return (false, "\(name)'s disclosure could not be clicked") }
+            }
+            let made = await waitUntil(step.seconds ?? 10) { cell(name)?.disclosure?.open == open }
+            return (made, "\(name) \(cell(name)?.disclosure?.open == true ? "open" : "shut"); the panel's rows: \(rows())")
         }
         if let wanted = step.panelRows {
             let found = await waitUntil(step.seconds ?? 10) { rows() == wanted }
@@ -652,7 +654,8 @@ extension Driver {
                 guard parts.count == 2, box.isOpen, let window = pane.window, let row = panel.rowFrame(parts[0], parts[1]).map(window.convertToScreen) else { return "closed, or no row \(id)" }
                 let shown = Self.shown(pane, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5), frame = box.popover.frame
                 guard shown.contains(frame) else { return "the box \(frame) leaves the window less 8 pt \(shown)" }
-                return abs(Double(frame.maxY) - Double(row.maxY)) < 0.5 ? nil : "the box's top \(frame.maxY) is not the row's \(row.maxY)"
+                let atRow = abs(Double(frame.maxY) - Double(row.maxY)) < 0.5, raised = abs(Double(frame.minY) - Double(shown.minY)) < 1
+                return atRow || raised ? nil : "the box's top \(frame.maxY) is not the row's \(row.maxY), nor its foot the window's least"
             }
             let stands = await waitUntil(step.seconds ?? 5) { fault() == nil }
             return (stands, (fault() ?? "the box \(box.popover.frame) stands beside \(id)") + "; \(workspacesLayout)")
