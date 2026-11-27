@@ -153,11 +153,15 @@ class ContainerAgentProcessTest {
     assertEquals(OptionalInt.of(4242), handle.pid());
   }
 
-  /** A chat's process has no run's folder: its wrapper makes the folder its pid file is in. */
+  /**
+   * A chat's process has no run's folder: its wrapper makes the folder its pid file is in. A chat
+   * signed in inside the workspace is handed an empty login file, as the hand-over writes one.
+   */
   @Test
   @EnabledOnOs(OS.LINUX)
   void theWrapperMakesTheFolderItsPidFileIsIn() throws Exception {
     var pidFile = dir.resolve("chats/c1/agent.pid");
+    var nothing = Files.writeString(dir.resolve("login.env"), "").toString();
     var handle =
         held(
             new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
@@ -168,7 +172,7 @@ class ContainerAgentProcessTest {
                     List.of("bash", "-c", "echo started"),
                     pidFile.toString(),
                     dir.resolve("chats/c1/agent.log").toString(),
-                    launchEnv("")));
+                    nothing));
 
     assertEquals("started", handle.stdout().read());
     assertNull(handle.stdout().read());
