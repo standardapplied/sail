@@ -1,0 +1,25 @@
+{
+  "request": {
+    "body": {
+      "name": "Harbor Docks"
+    },
+    "method": "POST",
+    "path": "/v1/projects"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [
+          {
+            "field": "name",
+            "message": "Invalid project name: 'Harbor Docks'. Must match [a-z0-9][a-z0-9-]*, max 63 characters."
+          }
+        ],
+        "message": "Invalid project name: 'Harbor Docks'. Must match [a-z0-9][a-z0-9-]*, max 63 characters."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

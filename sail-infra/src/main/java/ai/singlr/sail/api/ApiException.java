@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 
@@ -43,12 +44,25 @@ public final class ApiException extends RuntimeException implements Remedied {
 
   /**
    * The answer for {@code failure}, a refusal from below the door: its reason and remedy as they
-   * are, so neither is flattened to a sentence on the way out.
+   * are, so neither is flattened to a sentence on the way out, and each field it names with the
+   * sentence said under it.
    */
   public static ApiException of(ErrorCode errorCode, Exception failure) {
-    return failure instanceof Remedied remedied
-        ? new ApiException(errorCode, remedied.reason(), remedied.remedy(), failure)
-        : new ApiException(errorCode, failure.getMessage(), Remedy.NONE, failure);
+    return switch (failure) {
+      case Remedied remedied ->
+          new ApiException(errorCode, remedied.reason(), remedied.remedy(), failure);
+      case FieldsRefused refused ->
+          new ApiException(
+              new Result.Failure<>(
+                  errorCode,
+                  refused.getMessage(),
+                  Remedy.NONE,
+                  refused.fields().entrySet().stream()
+                      .map(field -> FieldError.of(field.getKey(), field.getValue()))
+                      .toList(),
+                  failure));
+      default -> new ApiException(errorCode, failure.getMessage(), Remedy.NONE, failure);
+    };
   }
 
   /**

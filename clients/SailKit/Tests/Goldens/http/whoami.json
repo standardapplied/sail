@@ -8,7 +8,8 @@
       "capabilities": [
         "read",
         "write",
-        "admin"
+        "admin",
+        "build"
       ],
       "display_name": "Uday",
       "email": "uday@example.com",

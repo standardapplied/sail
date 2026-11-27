@@ -369,6 +369,10 @@ struct Step: Decodable {
     /// The left panel's group heads are these, in order, each its title and its count when it has
     /// one ("127.0.0.1:7979 9"), within `seconds` (10 by default).
     var panelHeads: [String]?
+    /// Workspaces is the signed-in person's at this control plane address from now on, the
+    /// requests still going where they went: what its host draws, seen with the goldens' answers;
+    /// "" gives it back the sign-in's own.
+    var panelHost: String?
     /// This Mac's session row of this title clicked as a person clicks it: chosen, the list holding
     /// the keys, within `seconds` (5 by default).
     var chooseSession: String?

@@ -858,10 +858,14 @@ final class SailRowView: NSTableRowView {
 
 /// A group head's words: mono capitals 20 pt in (14 pt in a sidebar, as the design's panel draws
 /// its heads), after its icon when it has one, the count 8 pt after them (in a sidebar, at its rows'
-/// trailing end), on the line the browser puts a 10 pt line in the row's middle.
+/// trailing end), on the line the browser puts a 10 pt line in the row's middle. In a sidebar what
+/// sits at its end keeps its place and the words yield: where they would come within 8 pt of the
+/// count, or of what the head holds beside it, they are cut in their middle, and its tooltip says
+/// them whole.
 @MainActor
 package final class HeadCell: NSView {
-    static let countGap = 8.0, iconSide = 12.0, iconGap = 6.0, sidebarLeading = 14.0
+    package static let countGap = 8.0
+    static let iconSide = 12.0, iconGap = 6.0, sidebarLeading = 14.0
 
     private let title: NSAttributedString
     private let count: NSAttributedString
@@ -872,6 +876,8 @@ package final class HeadCell: NSView {
     package let leading: Double
     /// How far before its trailing edge the count ends, nil for the count after the words.
     private let trailing: Double?
+    /// Its words whole, on hover while they are cut.
+    package let tooltip: Tooltip
 
     init(_ title: String, count: Int?, icon: LineIcon?, at inset: (leading: Double, trailing: Double?), look: Look, mono: LabelFont, hairline: Bool) {
         leading = inset.leading
@@ -882,10 +888,12 @@ package final class HeadCell: NSView {
         self.title = Draw.text(title, font, look.textTertiary, tracking: Look.Tracking.eyebrow, upper: true)
         self.count = Draw.text(count.map { "\($0)" } ?? "", font, Tint(look.textTertiary.rgb, alpha: look.textTertiary.alpha * 0.8), tracking: Look.Tracking.eyebrow)
         self.hairline = hairline
+        tooltip = Tooltip(title, look: look, mono: nil)
         super.init(frame: .zero)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         setAccessibilityLabel(count.map { "\(title), \($0)" } ?? title)
+        tooltip.attach(to: self, saying: title)
     }
 
     @available(*, unavailable)
@@ -897,21 +905,49 @@ package final class HeadCell: NSView {
         true
     }
 
+    override package func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        tooltip.isOn = fitted.length < title.length
+    }
+
+    private var words: Double {
+        leading + (icon == nil ? 0 : Self.iconSide + Self.iconGap)
+    }
+
+    /// Its words as drawn: whole, or in a sidebar cut in their middle to end 8 pt before what
+    /// sits at its end, its count or what it holds beside it, whichever comes first.
+    package var fitted: NSAttributedString {
+        guard let trailing else { return title }
+        let width = Double(bounds.width), rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+        let end = subviews.map { rightToLeft ? width - Double($0.frame.maxX) : Double($0.frame.minX) }.reduce(width - trailing - Double(count.size().width), min)
+        return title.cutInTheMiddle(to: end - Self.countGap - words)
+    }
+
+    /// The band its words take, as wide as they are drawn.
+    package var titleFrame: NSRect {
+        band(from: words, width: Double(fitted.size().width))
+    }
+
+    /// The band its count takes: at its end in a sidebar, else 8 pt after its words.
+    package var countFrame: NSRect {
+        let width = Double(count.size().width)
+        return band(from: trailing.map { Double(bounds.width) - $0 - width } ?? words + Double(title.size().width) + Self.countGap, width: width)
+    }
+
+    /// Its whole height, `width` wide, starting `start` from its leading edge: mirrored right to left.
+    private func band(from start: Double, width: Double) -> NSRect {
+        let x = userInterfaceLayoutDirection == .rightToLeft ? Double(bounds.width) - start - width : start
+        return NSRect(x: x, y: 0, width: width, height: Double(bounds.height))
+    }
+
     override package func draw(_: NSRect) {
         let points = Look.Step.caption.points, top = hairline ? 1.0 : 0
         let baseline = TextLine.baseline(top: top + (Double(bounds.height) - top - points) / 2, points: points, lineHeight: points)
-        let titleWidth = Double(title.size().width), countWidth = Double(count.size().width), width = Double(bounds.width)
-        let words = leading + (icon == nil ? 0 : Self.iconSide + Self.iconGap)
-        let iconTop = top + (Double(bounds.height) - top - Self.iconSide) / 2
-        if userInterfaceLayoutDirection == .rightToLeft {
-            let x = width - words - titleWidth
-            Draw.line(title, x: x, baseline: baseline)
-            Draw.line(count, x: trailing ?? x - Self.countGap - countWidth, baseline: baseline)
-            if let icon { Draw.icon(icon, in: NSRect(x: width - leading - Self.iconSide, y: iconTop, width: Self.iconSide, height: Self.iconSide), ink: ink) }
-        } else {
-            Draw.line(title, x: words, baseline: baseline)
-            Draw.line(count, x: trailing.map { width - $0 - countWidth } ?? words + titleWidth + Self.countGap, baseline: baseline)
-            if let icon { Draw.icon(icon, in: NSRect(x: leading, y: iconTop, width: Self.iconSide, height: Self.iconSide), ink: ink) }
+        Draw.line(fitted, x: Double(titleFrame.minX), baseline: baseline)
+        Draw.line(count, x: Double(countFrame.minX), baseline: baseline)
+        if let icon {
+            let iconTop = top + (Double(bounds.height) - top - Self.iconSide) / 2
+            Draw.icon(icon, in: NSRect(x: Double(band(from: leading, width: Self.iconSide).minX), y: iconTop, width: Self.iconSide, height: Self.iconSide), ink: ink)
         }
     }
 }

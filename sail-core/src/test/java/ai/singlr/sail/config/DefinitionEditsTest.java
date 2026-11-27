@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.FieldsRefused;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -181,12 +182,15 @@ class DefinitionEditsTest {
   }
 
   @Test
-  void addRepoThrowsOnDuplicatePath() {
+  void aRepoAddedAtAPathHeldIsRefusedWhenTheEditIsCheckedWhole() {
     var repo = new ProjectDefinition.Repo("https://github.com/other/backend.git", "backend", null);
-    var ex =
-        assertThrows(
-            IllegalStateException.class, () -> DefinitionEdits.addRepo(parse(BASE_YAML), repo));
-    assertTrue(ex.getMessage().contains("already exists"));
+    var edited = DefinitionEdits.addRepo(parse(BASE_YAML), repo);
+
+    var refused = assertThrows(FieldsRefused.class, () -> ProjectDefinitionJson.validated(edited));
+
+    var sentence = "More than one repository is cloned to backend: give each its own path.";
+    assertEquals(sentence, refused.getMessage());
+    assertEquals(List.of("repos[0].path", "repos[1].path"), List.copyOf(refused.fields().keySet()));
   }
 
   @Test
