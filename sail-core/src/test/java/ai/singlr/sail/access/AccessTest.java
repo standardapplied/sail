@@ -1165,7 +1165,11 @@ class AccessTest {
   @Test
   void aPrincipalIsShownItsRoleItsLaneAndWhatItsRolesColumnGrants() {
     assertEquals(
-        new Whoami("admin", "api", List.of("read", "write", "admin")), Whoami.of(Actors.ADMIN));
+        new Whoami("admin", "api", List.of("read", "write", "admin", "build")),
+        Whoami.of(Actors.ADMIN));
+    assertEquals(
+        new Whoami("admin", "sync", List.of("read", "write", "admin", "build")),
+        Whoami.of(Actors.ADMIN_SYNC));
     assertEquals(
         new Whoami("member", "cli", List.of("read", "write")), Whoami.of(Actors.OWNER_CLI));
     assertEquals(new Whoami("viewer", "api", List.of("read")), Whoami.of(Actors.VIEWER));
@@ -1176,6 +1180,23 @@ class AccessTest {
         Whoami.of(Actors.ADMIN_IN_CONTAINER));
     assertThrows(NullPointerException.class, () -> new Whoami(null, "api", List.of()));
     assertThrows(NullPointerException.class, () -> new Whoami("viewer", null, List.of()));
+  }
+
+  @Test
+  void whoamiSaysBuildExactlyWhenTheTemplateBuildIsAllowed() {
+    var cast = new ArrayList<>(List.of(Actors.AGENT, Actors.ROOM, Actors.MAIN, Actors.SYSTEM));
+    for (var role : Role.values()) {
+      for (var lane : Actor.Lane.values()) {
+        cast.add(new Actor(Actors.OWNER, role, lane));
+      }
+    }
+    for (var actor : cast) {
+      assertEquals(
+          Access.decide(actor, Action.BUILD_TEMPLATE, Resources.project("acme", Actors.OTHER))
+              instanceof Decision.Allowed,
+          Whoami.of(actor).capabilities().contains("build"),
+          actor.toString());
+    }
   }
 
   @Test
