@@ -22,6 +22,101 @@ import Testing
     }
     static let at = Date(timeIntervalSince1970: 1_800_000_000)
 
+    /// The panel's two groups: This Mac, the one local project, first, and chosen when it is; then
+    /// the control plane's projects under its host as a person reads it, with their count.
+    @Test func thisMacIsListedFirstApartFromTheControlPlanesProjects() throws {
+        var model = WorkspacesModel(person: WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "https://main.acme.dev:8443"))
+        model.projectsListed(Self.answer(.projects, "projects"))
+        guard case let .shown(panel, .project) = model.screen else {
+            Issue.record("no project shown: \(model.screen)")
+            return
+        }
+        #expect(panel.controlPlane == "main.acme.dev:8443" && panel.projects.map(\.name) == ["harbor"] && panel.chosen == "harbor")
+        model.chooseThisMac()
+        guard case let .shown(local, .thisMac) = model.screen else {
+            Issue.record("This Mac not shown: \(model.screen)")
+            return
+        }
+        #expect(local.chosen == WorkspacesModel.thisMac && local.controlPlane == "main.acme.dev:8443" && local.projects.map(\.name) == ["harbor"])
+    }
+
+    /// Choosing This Mac asks the control plane nothing and sends no name of it anywhere: the
+    /// project chosen there stays the one its requests name, and listing the projects again lists
+    /// that project, never This Mac. Chosen last, This Mac opens again; choosing a project leaves it.
+    @Test func thisMacIsChosenWithoutAskingTheControlPlane() throws {
+        var model = Self.listed(Self.uday)
+        model.chooseThisMac()
+        #expect(model.chosen == "harbor", "This Mac took the control plane's project: \(model.chosen ?? "none")")
+        let again = model.projectsListed(Self.answer(.projects, "projects"))
+        #expect(again != nil && model.chosen == "harbor")
+        guard case .shown(_, .thisMac) = model.screen else {
+            Issue.record("listing the projects left This Mac: \(model.screen)")
+            return
+        }
+        var reopened = WorkspacesModel(person: Self.uday, chosen: WorkspacesModel.thisMac)
+        reopened.projectsListed(Self.answer(.projects, "projects"))
+        guard case let .shown(panel, .thisMac) = reopened.screen else {
+            Issue.record("This Mac chosen last did not open: \(reopened.screen)")
+            return
+        }
+        #expect(panel.chosen == WorkspacesModel.thisMac && reopened.chosen == "harbor")
+        _ = reopened.choose("harbor")
+        guard case .shown(_, .project) = reopened.screen else {
+            Issue.record("harbor chosen, still \(reopened.screen)")
+            return
+        }
+    }
+
+    /// This Mac needs nothing from the control plane: chosen last it opens before any project is
+    /// listed, chosen while they load it shows at once, and it stays when their first listing fails,
+    /// the control plane's group then counting nothing and saying why under its head. Not chosen,
+    /// the section waits or says why as before, the same panel beside it.
+    @Test func thisMacIsShownWhileNoProjectIsListed() {
+        var reopened = WorkspacesModel(person: Self.uday, chosen: WorkspacesModel.thisMac)
+        guard case let .shown(loading, .thisMac) = reopened.screen else {
+            Issue.record("This Mac chosen last waited for the control plane: \(reopened.screen)")
+            return
+        }
+        #expect(!loading.listed && loading.projects.isEmpty && loading.emptyLine == nil && loading.chosen == WorkspacesModel.thisMac)
+        reopened.projectsListed(.failure(.unreachable("The network connection was lost.")))
+        guard case let .shown(failed, .thisMac) = reopened.screen else {
+            Issue.record("a failed listing took This Mac away: \(reopened.screen)")
+            return
+        }
+        #expect(!failed.listed && !failed.stale && failed.emptyLine == "Can’t reach the control plane.")
+        reopened.projectsListed(.failure(.unexpected(route: "GET /v1/projects", status: 502)))
+        #expect(reopened.panel.emptyLine == "Couldn’t list your projects.")
+        reopened.projectsListed(Self.answer(.projects, "projects"))
+        #expect(reopened.panel.listed && reopened.panel.emptyLine == nil && reopened.panel.projects.map(\.name) == ["harbor"])
+
+        var clicked = WorkspacesModel(person: Self.uday)
+        #expect(clicked.screen == .loading && !clicked.panel.listed && clicked.panel.emptyLine == nil)
+        clicked.chooseThisMac()
+        guard case .shown(_, .thisMac) = clicked.screen else {
+            Issue.record("This Mac chosen while the projects load is not shown: \(clicked.screen)")
+            return
+        }
+        clicked.projectsListed(.failure(.unreachable("lost")))
+        guard case .shown(_, .thisMac) = clicked.screen else {
+            Issue.record("the listing then failed and took This Mac away: \(clicked.screen)")
+            return
+        }
+
+        var away = WorkspacesModel(person: Self.uday)
+        away.projectsListed(.failure(.unreachable("lost")))
+        guard case .unreachable = away.screen else {
+            Issue.record("no card while nothing could be listed: \(away.screen)")
+            return
+        }
+        #expect(!away.panel.listed && away.panel.emptyLine == "Can’t reach the control plane.")
+    }
+
+    /// This Mac's page names the Mac and the control plane it is kept from, and says what it is not.
+    @Test func thisMacsPageSaysItIsKeptHere() {
+        #expect(WorkspacesModel.thisMacLede(host: "mara-mbp", controlPlane: "sail.example.com") == "Shells on mara-mbp. Only this Mac sees them; nothing here is sent to sail.example.com.")
+        #expect(WorkspacesModel.thisMacNote == "This Mac has no repositories, agents, size or template, and cannot be renamed or deleted. Agents run in workspaces on the runner.")
+    }
+
     static func answer<Response>(_ endpoint: Endpoint<Response>, _ golden: String) -> Result<Response, SailError> {
         do {
             return .success(try endpoint.decode(response(try Exchange(golden))))

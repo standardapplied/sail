@@ -88,7 +88,7 @@ public struct RowPaint: Equatable, Sendable {
 /// and a quiet letter, and `wellChosen` for the chosen project's. No project has a hue of its own
 /// (the owner, 19 Nov 2026).
 public struct TilePaint: Equatable, Sendable {
-    public static let side = 20.0, points = 11.0, radius = Look.innerRadius
+    public static let side = 20.0, points = 11.0, icon = 12.0, radius = Look.innerRadius
 
     public let ink: Tint
     public let fill: Tint?

@@ -198,6 +198,8 @@ public enum PillState: CaseIterable, Sendable {
     case error
     /// A state this app does not know.
     case unknown
+    /// A terminal of This Mac whose session ended, its pane kept: hollow, as stopped.
+    case ended
 
     public var label: String {
         switch self {
@@ -215,6 +217,7 @@ public enum PillState: CaseIterable, Sendable {
         case .notCreated: "Not created"
         case .error: "Error"
         case .unknown: "Unknown"
+        case .ended: "Ended"
         }
     }
 
@@ -258,13 +261,13 @@ public struct PillPaint: Equatable, Sendable {
         text = failed ? Tint(look.error) : look.textSecondary
         edge = failed ? Tint(look.error, alpha: 0.45) : look.separatorStrong
         dashed = state == .noTemplate
-        hollow = state == .stopped || state == .notCreated
+        hollow = state == .stopped || state == .notCreated || state == .ended
         dot = switch state {
         case .running: Tint(look.success)
         case .starting, .stopping, .deleting, .creating, .building: Tint(look.info)
         case .paused, .noTemplate: Tint(look.warning)
         case .incomplete, .buildFailed, .error: Tint(look.error)
-        case .stopped, .notCreated, .unknown: look.textTertiary
+        case .stopped, .notCreated, .unknown, .ended: look.textTertiary
         }
     }
 }

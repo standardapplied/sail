@@ -31,6 +31,11 @@ public final class WorkbenchView: NSView {
     var onSignIn: @MainActor () -> Void = {}
     /// A runner tab in a workspace attached or went, so what counts its sessions counts again.
     var onRunnerTabs: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
+    /// This Mac's terminals changed (one opened, went, was titled, moved folder or ended) or could
+    /// not be listed, which This Mac's page says (``terminals``).
+    var onSessions: @MainActor () -> Void = {}
+    /// How each of this Mac's panes whose session ended, the pane kept, ended ("exited 3 · 11:02").
+    private var endings: [PaneID: String] = [:]
     /// The window is closed or in the Dock: no workspace's files are followed.
     var filesAway = false
     /// Starts a workspace for its files panel's Start, answering nil once started or what refused it.
@@ -50,12 +55,18 @@ public final class WorkbenchView: NSView {
     private let banner: Card
     private let emptyLabel = NSTextField(labelWithString: "No terminal is open")
     private let newTerminal: SailButton
-    private var started = false
+    /// The first restore is under way or done.
+    package private(set) var started = false
+    /// The terminals were shown, or asked to show for a tab about to open in them: a restore that
+    /// leaves no tab then opens one, and a later first showing opens none.
+    private var shownOnce = false
     private var pendingKeep: DispatchWorkItem?
     private var kept: Data?
     static let keepDelay = 0.3
     /// The arrangement is the person's from here on: restored, so worth keeping.
     private(set) var restored = false
+    /// The last restore could not list what lives: This Mac's page says so.
+    private(set) var unlisted = false
     /// Workspaces asked to open, and sessions asked to start, before the first restore, done in turn
     /// once it has replaced the model; a session only for the person who asked for it there.
     private var pending: [@MainActor () -> Void] = []
@@ -116,12 +127,43 @@ public final class WorkbenchView: NSView {
         model.focusedPane.flatMap { panes[$0.id] }
     }
 
-    /// The first showing restores what lives; every showing gives the focused pane the keys.
+    /// The first showing restores what lives, or, This Mac's page having restored none, opens a
+    /// shell as a first showing always did; every showing gives the focused pane the keys.
     func shown() {
         if let focused { window?.makeFirstResponder(focused.terminal) }
+        if !shownOnce, restored, model.tabs.isEmpty, held.isEmpty { openTab() }
+        shownOnce = true
+        restoreOnce()
+    }
+
+    /// The terminals shown for a tab about to open in them, so their first showing opens no other.
+    func showForATab() {
+        shownOnce = true
+        onShow()
+    }
+
+    /// What lives restored, once, whether or not the terminals are shown: This Mac's page lists
+    /// them. A restore that finds none opens a tab only for the terminals shown, never for the page.
+    func restoreOnce() {
         guard !started else { return }
         started = true
         Task { await restore() }
+    }
+
+    /// This Mac's terminals as its page knows them: being listed until the first restore lists
+    /// them, unlisted while it could not.
+    var terminals: LocalProjectView.Terminals {
+        restored ? .listed(localSessions) : unlisted ? .unlisted : .listing
+    }
+
+    /// This Mac's terminals as its page lists them, a row each.
+    var localSessions: [LocalSession] {
+        model.localSessions(ended: endings, hostNames: [Self.hostName], home: NSHomeDirectory())
+    }
+
+    /// Pane `id` focused and its tab chosen: Open on This Mac's row.
+    func focus(_ id: PaneID) {
+        change { $0.focus(id) }
     }
 
     private func restore() async {
@@ -131,11 +173,14 @@ public final class WorkbenchView: NSView {
             try await host.ensureServing { [weak self] sentence in await self?.tell(sentence) }
             listed = try await SessionListing.sessions(at: host.address)
         } catch {
+            unlisted = true
+            onSessions()
             banner.show(Said.sentence("\(error)"), tone: .error, button: "Try Again") { [weak self] in
                 Task { await self?.restore() }
             }
             return
         }
+        unlisted = false
         if banner.shown != told { banner.hide() }
         let kept = defaults.data(forKey: Self.arrangementKey).flatMap { try? JSONDecoder().decode(Arrangement.self, from: $0) }
         let person = signedIn()?.handle
@@ -151,7 +196,7 @@ public final class WorkbenchView: NSView {
         model.fit(in: room, minimum: minimum(of: Array(panes.values)), scale: scale)
         let waiting = pending
         pending = []
-        if model.tabs.isEmpty, waiting.isEmpty, held.isEmpty { openTab() } else { apply() }
+        if shownOnce, model.tabs.isEmpty, waiting.isEmpty, held.isEmpty { openTab() } else { apply() }
         waiting.forEach { $0() }
     }
 
@@ -242,6 +287,7 @@ public final class WorkbenchView: NSView {
         }
         strip.show(items, selected: model.selected)
         onTitle(model.selectedTab.map { model.title(of: $0.id) } ?? ShellApp.title)
+        onSessions()
     }
 
     /// The selected tab laid out again, the rest as it was: a divider moved by drag or key.
@@ -362,6 +408,7 @@ public final class WorkbenchView: NSView {
     }
 
     private func remove(_ view: TerminalPane) {
+        endings[view.id] = nil
         model.close(view.id)
         view.removeFromSuperview()
         panes[view.id] = nil
@@ -382,10 +429,14 @@ public final class WorkbenchView: NSView {
             showTitles()
         case let .screen(.workingDirectory(folder)):
             model.setFolder(folder, of: view.id)
+            onSessions()
         case let .phase(.ended(.ended(reason))) where Ending.closesPane(reason: reason, lived: ContinuousClock.now - view.opened):
             view.detach()
             remove(view)
             apply()
+        case let .phase(.ended(end)) where !view.place.onRunner && end != .closed:
+            endings[view.id] = Self.said(end, at: Date())
+            onSessions()
         default:
             break
         }
@@ -436,10 +487,21 @@ public final class WorkbenchView: NSView {
         .thisMac(folder: model.folderForNewPane(hostNames: [Self.hostName], isFolder: Self.isFolder) ?? NSHomeDirectory())
     }
 
+    /// How a session of this Mac ended, its pane kept, and when, as `locale` tells the time:
+    /// "exited 3 · 11:02", or "exited 3 · 11:02 AM".
+    static func said(_ end: SessionEnd, at date: Date, locale: Locale = .autoupdatingCurrent) -> String {
+        let how = if case let .ended(reason) = end, reason.hasPrefix("exited("), reason.hasSuffix(")") {
+            "exited " + reason.dropFirst("exited(".count).dropLast()
+        } else {
+            end.description
+        }
+        return "\(how) · \(date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale)))"
+    }
+
     /// This Mac's name as `hostname` says it, read from the kernel: `ProcessInfo.hostName` asks
     /// the network, which can hold the main thread for seconds and has macOS ask the person for
-    /// local network access.
-    private static let hostName: String = {
+    /// local network access. It is said on This Mac's page and sent nowhere.
+    package static let hostName: String = {
         var name = [CChar](repeating: 0, count: 256)
         gethostname(&name, name.count)
         return String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
@@ -492,12 +554,17 @@ public final class WorkbenchView: NSView {
         openTab(in: newPlace())
     }
 
-    /// Workspace `name` of `project` beside this Mac's terminals: a tab attached to each of the
-    /// person's live sessions there that no tab holds, newest first, or a tab with a new one when
-    /// there are none (or they cannot be listed); before the first restore, once it is done.
+    /// Workspace `name` of `project` beside this Mac's terminals, shown for it: a tab attached to
+    /// each of the person's live sessions there that no tab holds, newest first, or a tab with a new
+    /// one when there are none (or they cannot be listed); before the first restore, once it is done.
     func openWorkspace(project: String, name: String) {
+        showForATab()
+        openInWorkspace(project: project, name: name)
+    }
+
+    private func openInWorkspace(project: String, name: String) {
         let place = Place.workspace(project: project, name: name)
-        guard restored else { return pending.append({ [weak self] in self?.openWorkspace(project: project, name: name) }) }
+        guard restored else { return pending.append({ [weak self] in self?.openInWorkspace(project: project, name: name) }) }
         guard let reached = signedIn() else { return openTab(in: place) }
         Task { [weak self] in
             let listed = try? await reached.tickets.sessions(in: project, workspace: name)
@@ -530,22 +597,28 @@ public final class WorkbenchView: NSView {
 
     /// A new runner tab with a new session in workspace `name` of `project`, whatever its tabs
     /// hold already: `agent`, whose command the host composes and signs in, the tab titled by its
-    /// harness and workspace, or a shell when it is nil. Asked before the first restore (the section
-    /// never shown yet), it opens once that is done, for the person who asked alone.
+    /// harness and workspace, or a shell when it is nil, shown for it. Asked before the first restore
+    /// (the section never shown yet), it opens once that is done, for the person who asked alone.
     func startSession(_ agent: AgentStart?, project: String, name: String) {
+        showForATab()
+        startInWorkspace(agent, project: project, name: name)
+    }
+
+    private func startInWorkspace(_ agent: AgentStart?, project: String, name: String) {
         guard restored else {
             let askedBy = asker
             return pending.append({ [weak self] in
                 guard let self, askedBy == asker else { return }
-                startSession(agent, project: project, name: name)
+                startInWorkspace(agent, project: project, name: name)
             })
         }
         openTab(in: .workspace(project: project, name: name), agent: agent)
     }
 
+    /// A shell in a new tab, shown; asked before the first restore, once it is done, beside what it restores.
     @objc public func newTab(_: Any?) {
-        onShow()
-        guard restored else { return }
+        showForATab()
+        guard restored else { return pending.append({ [weak self] in self?.openTab() }) }
         openTab()
     }
 
@@ -568,8 +641,25 @@ public final class WorkbenchView: NSView {
 
     @objc public func closePane(_: Any?) {
         if let file = filePaneHoldingKeys { return file.closePressed() }
-        guard let pane = focused, !leaving(elsewhere: [pane]).isEmpty else { return }
-        confirm(ending: [pane], question: "Close this terminal?", detail: "The program running in it will end.")
+        guard let pane = focused else { return }
+        end(pane, asking: "Close this terminal?")
+    }
+
+    /// End Session on This Mac's row: pane `id`'s session ended as Close ends it, its question
+    /// naming the terminal, which is not on screen there.
+    func endSession(_ id: PaneID) {
+        guard let pane = panes[id] else { return }
+        end(pane, asking: endQuestion(id))
+    }
+
+    /// What End Session asks: "Close This Mac 2?", the terminal's tab as the strip names it.
+    func endQuestion(_ id: PaneID) -> String {
+        "Close \(model.tab(holding: id).map { model.title(of: $0.id) } ?? "this terminal")?"
+    }
+
+    private func end(_ pane: TerminalPane, asking question: String) {
+        guard !leaving(elsewhere: [pane]).isEmpty else { return }
+        confirm(ending: [pane], question: question, detail: "The program running in it will end.")
     }
 
     /// Closes those of `views` whose keyboard is elsewhere by detaching them only: each session goes

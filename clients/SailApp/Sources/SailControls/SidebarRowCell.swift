@@ -1,8 +1,8 @@
 import AppKit
 import SailLook
 
-/// A project's tile (`TilePaint`): its lower-case initial in mono in an outlined well, 20 pt square;
-/// the chosen project's in full ink.
+/// A project's tile (`TilePaint`): its lower-case initial in mono, or its icon, in an outlined well,
+/// 20 pt square; the chosen project's in full ink.
 @MainActor
 public final class Tile: NSView {
     public var look: Look {
@@ -10,14 +10,16 @@ public final class Tile: NSView {
     }
 
     private let name: String
+    private let icon: LineIcon?
     private let mono: LabelFont
     /// The chosen project's: outlined and lettered in full ink.
     package var chosen = false {
         didSet { if chosen != oldValue { needsDisplay = true } }
     }
 
-    public init(_ name: String, look: Look, mono: LabelFont) {
+    public init(_ name: String, icon: LineIcon? = nil, look: Look, mono: LabelFont) {
         self.name = name
+        self.icon = icon
         self.look = look
         self.mono = mono
         super.init(frame: NSRect(x: 0, y: 0, width: TilePaint.side, height: TilePaint.side))
@@ -40,6 +42,10 @@ public final class Tile: NSView {
     override public func draw(_: NSRect) {
         let paint = TilePaint(look: look, chosen: chosen), points = TilePaint.points
         Draw.box(bounds, radius: TilePaint.radius, fill: paint.fill, edge: paint.ring)
+        if let icon {
+            let inset = (TilePaint.side - TilePaint.icon) / 2
+            return Draw.icon(icon, in: NSRect(x: inset, y: inset, width: TilePaint.icon, height: TilePaint.icon), ink: paint.ink)
+        }
         let initial = Draw.text(String(name.prefix(1)).lowercased(), mono.font(points, .semibold) as NSFont, paint.ink)
         let top = (TilePaint.side - points) / 2
         Draw.line(initial, x: (TilePaint.side - Double(initial.size().width)) / 2, baseline: TextLine.baseline(top: top, points: points, lineHeight: points))
@@ -47,9 +53,10 @@ public final class Tile: NSView {
 }
 
 /// A sidebar row's content, as the left panel draws a project: the disclosure's 12 pt slot, the
-/// tile, the name in medium ink (the secondary ink while what the panel shows is stale, as the
-/// design's stale frame draws it) and, when the template is not ready, its small pill at the
-/// trailing edge, 7 pt apart.
+/// tile (its icon in place of the initial when it has one), the name in medium ink (the secondary
+/// ink while what the panel shows is stale, as the design's stale frame draws it) and, when the
+/// template is not ready, its small pill at the trailing edge, 7 pt apart; a `tag` is a plain small
+/// pill there (This Mac's "Local").
 @MainActor
 public final class SidebarRowCell: NSView {
     public var look: Look {
@@ -66,11 +73,11 @@ public final class SidebarRowCell: NSView {
     let pill: Pill?
     private let name: String
 
-    public init(_ name: String, template: PillState?, look: Look, mono: LabelFont) {
+    public init(_ name: String, icon: LineIcon? = nil, template: PillState?, tag: String? = nil, look: Look, mono: LabelFont) {
         self.name = name
         self.look = look
-        tile = Tile(name, look: look, mono: mono)
-        pill = template.map { Pill($0, size: .small, look: look, mono: mono) }
+        tile = Tile(name, icon: icon, look: look, mono: mono)
+        pill = template.map { Pill($0, size: .small, look: look, mono: mono) } ?? tag.map { Pill(plain: $0, size: .small, look: look, mono: mono) }
         super.init(frame: .zero)
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 1

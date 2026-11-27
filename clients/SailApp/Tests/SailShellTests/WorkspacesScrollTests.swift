@@ -203,7 +203,7 @@ import Testing
     }
 
     /// The narrow rows' actions column is the widest actions a row shows (a person's own stopped
-    /// row: Start and Open, + and ⋯), measured and said; the reach sweep, with the list holding the
+    /// row: Start and Open, + and ⋯) and the design system's 8 pt before them, measured and said; the reach sweep, with the list holding the
     /// keys, checks a chosen row's actions fit it.
     @Test func theNarrowActionsColumnIsTheWidestActions() throws {
         let page = try #require(WorkspacesViewTests.page([WorkspaceRow(name: "pier", instance: "harbor-pier", state: .known(.stopped), owner: "uday")]))
@@ -219,7 +219,7 @@ import Testing
         let boxes = buttons.map { row.convert($0.alignmentRect(forFrame: $0.frame), from: $0.superview) }
         let shown = (boxes.map(\.maxX).max() ?? 0) - (boxes.map(\.minX).min() ?? 0)
         print("workspaces: the narrow actions column is \(project.narrowActionsColumn) pt; a chosen stopped row's actions take \(shown) pt")
-        #expect(buttons.map(\.title) == ["Start and Open", "New Session", "More"] && abs(Double(shown) - project.narrowActionsColumn) < 0.5, "the column is \(project.narrowActionsColumn) pt, the widest actions take \(shown) pt")
+        #expect(buttons.map(\.title) == ["Start and Open", "New Session", "More"] && abs(Double(shown) + Look.Space.s - project.narrowActionsColumn) < 0.5, "the column is \(project.narrowActionsColumn) pt, the widest actions take \(shown) pt")
     }
 
     /// Twenty projects scroll between the panel's header and its bottom edge: the panel has no foot,
@@ -292,18 +292,21 @@ import Testing
         #expect(near(panel.list.barInset, Look.hairline), "back in dark: the bar starts \(panel.list.barInset) pt in")
     }
 
-    /// The loading panel keeps its PROJECTS head, with no count, over its skeleton rows.
+    /// The loading panel lists This Mac, then keeps the control plane's head, with no count, over
+    /// its skeleton rows; each head starts 14 pt in, its icon first, as the design's panel draws it.
     @Test(arguments: [Look.light, .dark])
     func theLoadingPanelHasItsHead(_ look: Look) throws {
         let panel = LeftPanel(look: look, mono: try LabelFont(directory: LookTests.fonts))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: LeftPanel.width.standard, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
         defer { window.orderOut(nil) }
         window.contentView = panel
-        panel.renderLoading()
+        panel.render(WorkspacesModel(person: WorkspacesViewTests.uday).panel)
         panel.layoutSubtreeIfNeeded()
-        #expect(!panel.scroll.isHidden && panel.list.numberOfRows == 1, "the loading panel shows \(panel.list.numberOfRows) rows")
-        let head = try #require(panel.list.view(atColumn: 0, row: 0, makeIfNecessary: true))
-        #expect(head.accessibilityLabel() == "Projects", "the head says \(head.accessibilityLabel() ?? "nothing")")
+        #expect(!panel.scroll.isHidden && panel.list.numberOfRows == 3, "the loading panel shows \(panel.list.numberOfRows) rows")
+        let heads = try [0, 2].map { try #require(panel.list.view(atColumn: 0, row: $0, makeIfNecessary: true) as? HeadCell) }
+        #expect(heads.map { $0.accessibilityLabel() } == ["This Mac", "127.0.0.1"], "the heads say \(heads.map { $0.accessibilityLabel() })")
+        #expect(heads.map(\.leading) == [14, 14], "the heads start \(heads.map(\.leading)) pt in")
+        #expect(panel.tryAgain.isHidden && panel.emptyLine.isHidden, "the loading panel says it failed")
     }
 
     /// r3-2: the longest taken name at the narrowest card: "Show …" is cut at its end yet reads as a
