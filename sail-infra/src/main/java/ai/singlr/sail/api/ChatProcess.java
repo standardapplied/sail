@@ -342,7 +342,8 @@ final class ChatProcess {
 
   /**
    * Writes {@code line} on the process's stdin; returns whether it took it. A process that no
-   * longer reads is ended, on a thread of its own, the turn it cuts saying {@code why}.
+   * longer reads begins its end at once, so the turn it cuts says {@code why} however soon its
+   * output ends, and is ended on a thread of its own. Called under the monitor.
    */
   private boolean write(String line, String why) {
     try {
@@ -350,6 +351,9 @@ final class ChatProcess {
       lastActivity = timing.clock().get();
       return true;
     } catch (IOException refused) {
+      if (!end.ending()) {
+        end.begin(why);
+      }
       Thread.ofVirtual()
           .name("sail-chat-broken-" + session)
           .start(() -> end.end(timing.grace().afterInt(), why));
