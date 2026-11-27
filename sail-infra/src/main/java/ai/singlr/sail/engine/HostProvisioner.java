@@ -409,7 +409,9 @@ public final class HostProvisioner {
   /**
    * Converges the base profile: its root disk on {@code pool} and its NIC on {@code bridge} when it
    * has none, an existing root disk kept wherever it is. Returns the pool its root disk names,
-   * refused unless Incus has that pool, so what {@code host.yaml} states is what Incus has.
+   * refused unless Incus has that pool, so what {@code host.yaml} states is what Incus has. The
+   * devices are read from {@code incus profile show}, whose YAML holds across Incus releases:
+   * {@code incus profile device list} printed one name a line until 7.7, a table since.
    */
   private IncusStorage.Pool ensureBaseProfile(String pool, PoolSource source, String bridge)
       throws IOException, InterruptedException, TimeoutException {
@@ -424,7 +426,10 @@ public final class HostProvisioner {
         throw new IOException("Failed to create Incus profile: " + create.stderr());
       }
     }
-    var held = existed ? devices(shown.stdout()) : Map.of();
+    var held =
+        existed && YamlUtil.parseMap(shown.stdout()).get("devices") instanceof Map<?, ?> devices
+            ? devices
+            : Map.of();
     if (!held.containsKey("root")) {
       addDevice(profile, List.of("root", "disk", "path=/", "pool=" + pool), "root disk");
     }
@@ -432,7 +437,8 @@ public final class HostProvisioner {
       addDevice(
           profile, List.of("eth0", "nic", "name=eth0", "network=" + bridge, "type=nic"), "NIC");
     }
-    var named = held.containsKey("root") ? poolOf(held.get("root")) : pool;
+    var named =
+        held.get("root") instanceof Map<?, ?> root ? Objects.toString(root.get("pool"), "") : pool;
     var found =
         shell.isDryRun() && named.equals(pool)
             ? Optional.of(planned(pool, source))
@@ -457,21 +463,6 @@ public final class HostProvisioner {
             + root.driver()
             + ")");
     return root;
-  }
-
-  /**
-   * The devices a profile holds, read from {@code incus profile show}, whose form holds across
-   * Incus releases: {@code incus profile device list} printed one name a line until 7.7, a table
-   * since.
-   */
-  private static Map<?, ?> devices(String shown) {
-    return YamlUtil.parseMap(shown).get("devices") instanceof Map<?, ?> devices
-        ? devices
-        : Map.of();
-  }
-
-  private static String poolOf(Object device) {
-    return device instanceof Map<?, ?> disk ? Objects.toString(disk.get("pool"), "") : "";
   }
 
   /** How a dry run's step says what a real run would make: before the name of what is made. */
