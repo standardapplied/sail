@@ -12,9 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.engine.AgentProcess;
+import ai.singlr.sail.engine.LiveChat;
 import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.engine.Recorded;
 import ai.singlr.sail.engine.SessionLogin;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.HarnessChat;
@@ -145,15 +148,10 @@ class ChatHostTest {
 
     assertEquals("Codex CLI has no chat form; start it in a terminal.", codex.getMessage());
     assertEquals(
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                    Harnesses.of("claude-code")
-                        .chat()
-                        .orElseThrow()
-                        .argv(new HarnessChat.Launch("bypassPermissions", null, null)))
-            .getMessage(),
+        "Claude Code takes no mode 'bypassPermissions' in a workspace; it takes default,"
+            + " acceptEdits, plan.",
         risky.getMessage());
+    assertEquals(0, bench.chats());
   }
 
   /** I2, I10: one process, signed in through the login file, its argv a list, never a shell. */
@@ -213,7 +211,9 @@ class ChatHostTest {
             "text",
             "done",
             "new_paragraph",
-            true),
+            true,
+            "clipped",
+            false),
         longs(items.get(2)));
     assertEquals(
         Map.of(
@@ -498,12 +498,15 @@ class ChatHostTest {
     assertTrue(bench.store.find(session).isEmpty());
   }
 
-  /** I8: a restart cut the open turn: it is told so, and the next message resumes by id. */
+  /**
+   * I8: a restart cut the open turn: it is told so, its open row closed and the request it held
+   * withdrawn, since they died with its process, and the next message resumes it by id.
+   */
   @Test
   void aRestartClosesTheTurnsItCutAndTheNextMessageResumesThem() {
     var session = bench.samsChat();
     bench.send(session, "hi");
-    bench.says(INIT);
+    bench.says(INIT, CALLS, ASKS);
     var restarted = bench.restarted();
 
     var cut = restarted.reclaim();
@@ -511,7 +514,24 @@ class ChatHostTest {
     as("sam", () -> restarted.send(session, "again", List.of()));
 
     assertEquals(1, cut);
-    assertEquals(List.of("message", "session", "interrupted", "message"), bench.kinds(session));
+    assertEquals(
+        List.of(
+            "message",
+            "session",
+            "tool",
+            "permission",
+            "told",
+            "tool_done",
+            "withdrawn",
+            "interrupted",
+            "message"),
+        bench.kinds(session));
+    var items = bench.items(session);
+    assertEquals(ChatHost.RESTARTED, items.get(4).get("words"));
+    assertEquals(
+        List.of(CALL, ChatProcess.UNREAD),
+        List.of(items.get(5).get("id"), items.get(5).get("output")));
+    assertEquals(REQUEST, items.get(6).get("id"));
     assertEquals(
         Harnesses.of("claude-code")
             .chat()
@@ -638,6 +658,100 @@ class ChatHostTest {
     bench.host.close();
 
     assertEquals(List.of(AgentProcess.Signal.INT, AgentProcess.Signal.TERM), fake.signals);
+  }
+
+  /** I7: a request that cannot be read whole is refused at once, by its id; the turn goes on. */
+  @Test
+  void aRequestThatCannotBeReadWholeIsRefusedAtOnceAndSaidSo() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+
+    var fake = bench.says(INIT, ASKS.replace("\"tool_name\":\"Bash\",", ""));
+
+    assertEquals(
+        List.of(LiveStream.userMessage("hi"), LiveChat.refuseUnreadable(REQUEST)), fake.written);
+    assertEquals(List.of("message", "session", "unreadable"), bench.kinds(session));
+    assertTrue(bench.store.find(session).orElseThrow().turnOpen(), "its turn goes on");
+  }
+
+  /** I7: one naming no request to answer stops the turn, which would otherwise wait on it. */
+  @Test
+  void aRequestThatNamesNoIdToAnswerStopsTheTurn() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+
+    var fake =
+        bench.says(INIT, ASKS.replace(REQUEST, "../x").replace("\"tool_name\":\"Bash\",", ""));
+
+    var stop = Recorded.parsed(fake.written.getLast());
+    assertEquals(
+        List.of("control_request", Map.of("subtype", "interrupt")),
+        List.of(stop.get("type"), stop.get("request")));
+    assertEquals(
+        stop.get("request_id"),
+        Ids.requireUuid((String) stop.get("request_id")),
+        "its own id, one Claude Code hands back");
+    assertEquals(List.of("message", "session", "unreadable"), bench.kinds(session));
+  }
+
+  /**
+   * I2: a mode the harness said that a launch may not pass on (cut short, or an option) resumes in
+   * the chat's first mode.
+   */
+  @Test
+  void aModeSaidThatALaunchMayNotPassOnResumesInTheFirstChatMode() {
+    var session =
+        as("sam", () -> bench.host.open("acme", "try", "claude-code", "acceptEdits", false))
+            .session();
+    bench.send(session, "hi");
+    var fake =
+        bench.says(
+            INIT.replace("\"permissionMode\":\"default\"", "\"permissionMode\":\"-p\""), ENDS);
+    fake.exits(0);
+    fake.settle();
+
+    bench.send(session, "again");
+
+    assertEquals(
+        Harnesses.of("claude-code")
+            .chat()
+            .orElseThrow()
+            .argv(new HarnessChat.Launch("default", null, CONVERSATION)),
+        bench.processes.starts.getLast().command());
+  }
+
+  /** I6: a chat ended while its message started a process takes no message, and ends it. */
+  @Test
+  void aChatEndedWhileItsProcessStartsTakesNoMessageAndEndsTheProcess() {
+    var session = bench.samsChat();
+    bench.processes.onStart(
+        fake -> {
+          fake.onClose(fake::exitsIfRunning);
+          bench.store.ended(session, ChatBench.START);
+        });
+
+    var refused = assertThrows(ApiException.class, () -> bench.send(session, "hi"));
+    bench.processes.latest().awaitStdinClosed();
+
+    assertEquals(
+        List.of("conflict", "This chat has ended, so it takes no message."),
+        List.of(refused.code(), refused.reason()));
+    assertEquals(List.of(), bench.kinds(session), "nothing of it is logged");
+  }
+
+  /** Sail stopping cuts a turn open, saying so; the chat stays open, to resume. */
+  @Test
+  void sailStoppingMidTurnSaysItCutTheTurn() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var fake = bench.says(INIT);
+
+    bench.host.close();
+    fake.settle();
+
+    assertEquals(List.of("message", "session", "told", "interrupted"), bench.kinds(session));
+    assertEquals(ChatHost.STOPPED, bench.items(session).get(2).get("words"));
+    assertFalse(bench.store.find(session).orElseThrow().turnOpen());
   }
 
   private static List<Long> seqs(ChatHost.Read read) {
