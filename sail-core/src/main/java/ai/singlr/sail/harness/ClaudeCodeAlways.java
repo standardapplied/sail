@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * What allowing a call always would change, in words a person reads correctly, from Claude Code's
@@ -46,14 +47,22 @@ final class ClaudeCodeAlways {
           + " workspace's .claude/settings.local.json).";
 
   /**
-   * What a Bash rule also covers: Claude Code strips wrappers such as {@code xargs}, {@code
-   * timeout}, {@code nohup}, {@code nice}, {@code time} and {@code stdbuf}, and a leading setting
-   * of a variable it deems safe, before it matches a rule (its permissions documentation, not a
-   * recording). Said for every rule, so it may say more than a given rule allows, never less.
+   * What an exact Bash rule also covered in probe 2 (01): the command behind {@code timeout},
+   * {@code nice} or {@code nohup}, and inside a longer line whose other commands asked nothing
+   * ({@code && echo done}). "Such as" stays true of the wrappers its documentation names and no
+   * probe ran ({@code time}, {@code stdbuf}).
    */
-  private static final String RUN_BY =
-      "also when another command such as xargs or timeout runs it, with anything that command"
-          + " adds, or after a setting such as LANG=C";
+  private static final String EXACT_ALSO =
+      "also when another command such as timeout, nice or nohup starts it, and as part of a longer"
+          + " line whose other commands need no asking";
+
+  /**
+   * What a prefix Bash rule also covered in probe 2 (01b): the exact rule's reach, and the command
+   * behind {@code xargs}, with whatever {@code xargs} is fed added to it.
+   */
+  private static final String PREFIX_ALSO =
+      "also when another command such as xargs, timeout, nice or nohup starts it, xargs adding"
+          + " whatever it is fed, and as part of a longer line whose other commands need no asking";
 
   /**
    * What a folder kept for the session reaches: the process's life, which ends sooner than the
@@ -66,6 +75,9 @@ final class ClaudeCodeAlways {
    * a line break, which {@link #quoted} refuses: Claude Code matches each command of one alone.
    */
   private static final List<String> COMPOUND = List.of("&&", ";", "|");
+
+  /** A rule {@code xargs} starts. */
+  private static final Pattern XARGS = Pattern.compile("\\s*xargs(\\s|$)");
 
   private ClaudeCodeAlways() {}
 
@@ -105,10 +117,7 @@ final class ClaudeCodeAlways {
           case "addRules" ->
               "allow".equals(said.get("behavior"))
                   ? listOf(said.get("rules")).stream()
-                      .map(
-                          rule ->
-                              command(rule)
-                                  .map(allowed -> "Allow " + allowed + ", " + RUN_BY + ", " + KEPT))
+                      .map(rule -> command(rule).map(allowed -> "Allow " + allowed + ", " + KEPT))
                       .toList()
                   : List.<Optional<String>>of();
           case "addDirectories" ->
@@ -132,27 +141,31 @@ final class ClaudeCodeAlways {
   }
 
   /**
-   * A Bash rule in plain words, as Claude Code's permission rules read: one with no {@code *}
-   * allows that exact command; one whose only {@code *} ends it (written {@code " *"}, {@code ":*"}
-   * or {@code "*"}) allows every command that starts with what comes before. A compound command is
-   * not said: Claude Code matches each of its commands alone, so it may never match again.
+   * A Bash rule in plain words, as Claude Code's permission rules read, with what else probe 2
+   * recorded it covering: one with no {@code *} allows that exact command; one whose only {@code *}
+   * ends it (written {@code " *"}, {@code ":*"} or {@code "*"}) allows every command that starts
+   * with what comes before. A compound command is not said: Claude Code matches each of its
+   * commands alone, so it may never match again. Nor is a rule {@code xargs} starts, which Claude
+   * Code suggests for a pipeline into it (01:108, 01:260): what such a kept rule covers, with
+   * whatever it is fed, was never recorded.
    */
   private static Optional<String> command(Object rule) {
     var said = rule instanceof Map<?, ?> map ? map : Map.of();
     if (!said.keySet().equals(RULE_FIELDS)
         || !"Bash".equals(said.get("toolName"))
         || !(said.get("ruleContent") instanceof String content)
-        || COMPOUND.stream().anyMatch(content::contains)) {
+        || COMPOUND.stream().anyMatch(content::contains)
+        || XARGS.matcher(content).lookingAt()) {
       return Optional.empty();
     }
     var star = content.indexOf('*');
     if (star < 0) {
-      return quoted(content).map(exact -> "this exact command: " + exact);
+      return quoted(content).map(exact -> "this exact command: " + exact + ", " + EXACT_ALSO);
     }
     var prefix = content.substring(0, star);
     var stem = (prefix.endsWith(":") ? prefix.substring(0, star - 1) : prefix).stripTrailing();
     return star == content.length() - 1
-        ? quoted(stem).map(start -> "any command that starts with " + start)
+        ? quoted(stem).map(start -> "any command that starts with " + start + ", " + PREFIX_ALSO)
         : Optional.empty();
   }
 

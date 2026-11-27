@@ -227,16 +227,19 @@ public sealed interface ChatItem {
   }
 
   /**
-   * The agent asks to make a call. Its {@code words} are the agent's own description of the call
-   * (for a command, the model wrote them) and need not say what the call does: a card always shows
-   * the {@code detail} beside them. With why when the harness says ({@code reason}, else null), and
-   * the ways to allow it always the harness offers ({@code always}): none when it offers none, or
-   * when any part of one is a shape that cannot be said in plain words, so a person is never
-   * offered more than they read.
+   * The agent asks to make a call, or a subagent of it does: the {@code agent} asking, null for the
+   * agent itself, is the id a subagent's lines name ({@code LiveStream.Step.Subagent#agentId})
+   * beside the call that started it, under whose row the request is drawn. Its {@code words} are
+   * the agent's own description of the call (for a command, the model wrote them) and need not say
+   * what the call does: a card always shows the {@code detail} beside them. With why when the
+   * harness says ({@code reason}, else null), and the ways to allow it always the harness offers
+   * ({@code always}): none when it offers none, or when any part of one is a shape that cannot be
+   * said in plain words, so a person is never offered more than they read.
    */
   record Permission(
       String id,
       String call,
+      String agent,
       ToolKind kind,
       String words,
       String reason,

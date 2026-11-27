@@ -127,13 +127,16 @@ public final class LiveStream {
         implements Step {}
 
     /**
-     * Claude Code asks before the call {@code callId} of {@code tool}: with the call's {@code
-     * input}, its own {@code description} of it and why it asks ({@code reason}), when it says, and
-     * the rules it would add to allow it always ({@code suggestions}, to hand back as they are).
+     * Claude Code asks before the call {@code callId} of {@code tool}, made by the subagent {@code
+     * agentId} (null for the agent itself; probe 2 recorded a subagent's request as any other, with
+     * no {@code parent_tool_use_id}): with the call's {@code input}, its own {@code description} of
+     * it and why it asks ({@code reason}), when it says, and the rules it would add to allow it
+     * always ({@code suggestions}, to hand back as they are).
      */
     record Permission(
         String requestId,
         String callId,
+        String agentId,
         String tool,
         String displayName,
         Map<String, Object> input,
@@ -481,6 +484,7 @@ public final class LiveStream {
           new Step.Permission(
               id,
               call,
+              request.containsKey("agent_id") ? id(request, "agent_id") : null,
               tool,
               Objects.toString(text(request, "display_name"), ""),
               input,

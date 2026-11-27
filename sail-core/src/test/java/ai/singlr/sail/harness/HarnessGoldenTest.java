@@ -408,6 +408,31 @@ class HarnessGoldenTest {
     assertTrue(
         denies.stream().allMatch(rule -> rule.startsWith("Read(//") || rule.startsWith("Read(~/")),
         denies.toString());
+    assertEquals(
+        Map.of(
+            "03a-read-deny-abs",
+            List.of("Read(/home/dev/probe-secret.txt)", "control_request"),
+            "03b-read-deny-double-slash",
+            List.of("Read(//home/dev/probe-secret.txt)", "user"),
+            "03c-read-deny-tilde",
+            List.of("Read(~/probe-secret.txt)", "user")),
+        Map.of(
+            "03a-read-deny-abs",
+            ruleAndAnswer("03a-read-deny-abs", 13),
+            "03b-read-deny-double-slash",
+            ruleAndAnswer("03b-read-deny-double-slash", 14),
+            "03c-read-deny-tilde",
+            ruleAndAnswer("03c-read-deny-tilde", 14)),
+        "probe 2: a single / in a --settings file denies nothing (a request came), // and ~/"
+            + " deny (a refused result came)");
+  }
+
+  private static List<String> ruleAndAnswer(String recording, int line) {
+    var rule =
+        Pattern.compile("Read\\([^)]*\\)")
+            .matcher((String) Recorded.parsed(recording, 1).get("note"));
+    assertTrue(rule.find(), recording);
+    return List.of(rule.group(), (String) Recorded.parsed(recording, line).get("type"));
   }
 
   @Test
@@ -667,19 +692,26 @@ class HarnessGoldenTest {
 
   @Test
   void aRuleSaysWhatItAllowsAsClaudeCodeReadsIt() {
-    var here =
-        ", also when another command such as xargs or timeout runs it, with anything that command"
-            + " adds, or after a setting such as LANG=C, from now on, for every Claude Code chat"
-            + " and terminal in this workspace (kept in the workspace's"
-            + " .claude/settings.local.json).";
+    var kept =
+        ", from now on, for every Claude Code chat and terminal in this workspace (kept in the"
+            + " workspace's .claude/settings.local.json).";
+    var exact =
+        ", also when another command such as timeout, nice or nohup starts it, and as part of a"
+            + " longer line whose other commands need no asking"
+            + kept;
+    var prefix =
+        ", also when another command such as xargs, timeout, nice or nohup starts it, xargs adding"
+            + " whatever it is fed, and as part of a longer line whose other commands need no"
+            + " asking"
+            + kept;
     assertEquals(
         List.of(
             new ChatItem.Always(
                 List.of(
-                    "Allow this exact command: `npm test`" + here,
-                    "Allow any command that starts with `npm run`" + here,
-                    "Allow any command that starts with `git log`" + here,
-                    "Allow any command that starts with `ls`" + here))),
+                    "Allow this exact command: `npm test`" + exact,
+                    "Allow any command that starts with `npm run`" + prefix,
+                    "Allow any command that starts with `git log`" + prefix,
+                    "Allow any command that starts with `ls`" + prefix))),
         always(
             rule(
                 "allow",
@@ -689,7 +721,8 @@ class HarnessGoldenTest {
                 bash("git log:*"),
                 bash("ls*"))),
         "one sentence a rule: exact, or every command a trailing * lets start the same way, each"
-            + " also as another command runs it, as Claude Code strips such wrappers first");
+            + " with what probe 2 recorded it covering besides: timeout, nice and nohup, a longer"
+            + " line, and for a prefix xargs (01, 01b)");
     assertEquals(
         List.of(
             new ChatItem.Always(List.of("Let it work in the folder `/w`, for this session only."))),
@@ -708,10 +741,11 @@ class HarnessGoldenTest {
   void aModeSwitchSaysWhatTheModeAllowsAndThatItStaysForTheChat() {
     var edits = Harness.Mode.named(CLAUDE_CODE_CHAT.modes(), "acceptEdits", "claude-code");
     assertEquals(
-        "Edits files and runs common file commands such as mkdir, touch, rm, rmdir, mv, cp and sed"
-            + " in the folders it works in, without asking, and asks before anything else.",
+        "Edits, moves and deletes files inside this workspace, and in any folder you let it work"
+            + " in, without asking, with file edits and file commands such as rm, mv, cp, sed,"
+            + " mkdir and touch; it asks before anything else.",
         edits.about(),
-        "the mode's own words name the commands it runs without asking");
+        "the mode's own words say what probe 2 recorded it running without asking (04b)");
     assertEquals(
         List.of(
             new ChatItem.Always(
@@ -874,6 +908,15 @@ class HarnessGoldenTest {
             Map.entry(
                 "a rule that climbs out",
                 (Object) rule("allow", "localSettings", bash("cat ../secrets"))),
+            Map.entry(
+                "a rule xargs runs, whose reach is not recorded",
+                (Object) rule("allow", "localSettings", bash("xargs touch"))),
+            Map.entry(
+                "a rule xargs runs, with its own arguments",
+                (Object) rule("allow", "localSettings", bash("xargs  touch probe-a.txt"))),
+            Map.entry(
+                "a prefix rule xargs runs",
+                (Object) rule("allow", "localSettings", bash("xargs rm *"))),
             Map.entry(
                 "a compound rule with &&",
                 (Object) rule("allow", "localSettings", bash("make && make install"))),

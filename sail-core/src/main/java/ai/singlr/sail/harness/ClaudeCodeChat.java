@@ -65,8 +65,10 @@ final class ClaudeCodeChat implements HarnessChat {
    * a chat is in is the one Claude Code says ({@code init}, {@code status}). In plan mode the
    * recorded turns ran on a model other than the one {@code --model} named, until the plan was
    * approved. Never asks ({@code bypassPermissions}) is not offered: it was never recorded at a
-   * chat's start or as a switch. What Edits freely runs without asking is from Claude Code's
-   * permission-modes documentation, not a recording.
+   * chat's start or as a switch. What Edits freely runs without asking is what probe 2 recorded
+   * (04b): {@code rm}, {@code mv}, {@code cp}, {@code sed -i} and {@code nice rm} inside the
+   * workspace, and a request for {@code rm} outside it; {@code mkdir} and {@code touch} are from
+   * its documentation.
    */
   @Override
   public List<Harness.Mode> modes() {
@@ -80,8 +82,9 @@ final class ClaudeCodeChat implements HarnessChat {
         ClaudeCode.permissionMode(
             "acceptEdits",
             "Edits freely",
-            "Edits files and runs common file commands such as mkdir, touch, rm, rmdir, mv, cp and"
-                + " sed in the folders it works in, without asking, and asks before anything else.",
+            "Edits, moves and deletes files inside this workspace, and in any folder you let it"
+                + " work in, without asking, with file edits and file commands such as rm, mv, cp,"
+                + " sed, mkdir and touch; it asks before anything else.",
             false),
         ClaudeCode.permissionMode(
             "plan",

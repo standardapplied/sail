@@ -124,7 +124,8 @@ class ChatItemTest {
   }
 
   private static ChatItem.Permission permission(String words, String reason, boolean cut) {
-    return new ChatItem.Permission("r", "t", ToolKind.COMMAND, words, reason, null, List.of(), cut);
+    return new ChatItem.Permission(
+        "r", "t", null, ToolKind.COMMAND, words, reason, null, List.of(), cut);
   }
 
   @Test
@@ -161,7 +162,8 @@ class ChatItemTest {
             new Detail.Edit(changes).changes(),
             new Asked("q", null, choices, false, false).choices(),
             new ChatItem.Question("r", "t", asked).questions(),
-            new ChatItem.Permission("r", "t", ToolKind.COMMAND, "w", null, null, always, false)
+            new ChatItem.Permission(
+                    "r", "t", null, ToolKind.COMMAND, "w", null, null, always, false)
                 .always(),
             new ChatItem.Session("m", "d", commands, commands, false).commands());
     words.clear();

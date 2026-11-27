@@ -92,6 +92,7 @@ public final class LiveChat {
     return new ChatItem.Permission(
         asked.requestId(),
         asked.callId(),
+        asked.agentId(),
         chat.kind(asked.tool()),
         Strings.isNotBlank(asked.description()) ? asked.description() : asked.displayName(),
         asked.reason(),

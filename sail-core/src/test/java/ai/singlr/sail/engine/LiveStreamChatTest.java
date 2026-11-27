@@ -71,6 +71,7 @@ class LiveStreamChatTest {
         new Step.Permission(
             "a871f652-0656-42bf-8cc8-860ad0a34b79",
             "toolu_01C2VMe9ubaU1aFMnnUS5nxC",
+            null,
             "Bash",
             "Bash",
             Map.of(
@@ -83,6 +84,7 @@ class LiveStreamChatTest {
         new Step.Permission(
             "79327ade-fc36-4737-926f-eb6dde76e6df",
             "toolu_01GQbMEZJcBzatfHNojTS8E8",
+            null,
             "Write",
             "Write",
             Map.of("file_path", "/home/dev/workspace/notes.txt", "content", "hi\n"),
@@ -94,6 +96,7 @@ class LiveStreamChatTest {
         new Step.Permission(
             "2b22c465-b2fe-4e9f-81f2-dab652d13cd5",
             "toolu_01J7oi1RVgyfg9PQ4pYFbPqJ",
+            null,
             "Bash",
             "Bash",
             inputOf("04d-interrupt-while-tool-runs", 20),
@@ -145,6 +148,17 @@ class LiveStreamChatTest {
     assertEquals(
         new Step.Other("control_response"),
         read("04b-set-permission-mode-and-background-task", 78));
+    assertEquals(
+        new Step.Shown(
+            new ChatItem.Refused(
+                "mode-bypass",
+                "Cannot set permission mode to bypassPermissions because the session was not"
+                    + " launched with --dangerously-skip-permissions",
+                false)),
+        read("02c-set-mode-bypass-from-default", 15),
+        "a switch Claude Code refuses, with its code and no response (probe 2)");
+    assertEquals(
+        new Step.Other("control_response"), read("02d-set-mode-bypass-with-allow-dangerously", 15));
     assertEquals(new Step.Other("control_response"), read("04a-cancel-request-by-interrupt", 21));
     assertEquals(
         new Step.Shown(new ChatItem.Refused("mode-2", "Cannot set permission mode", false)),
@@ -162,6 +176,40 @@ class LiveStreamChatTest {
             "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\","
                 + "\"error\":\"Cannot set permission mode\"}}"),
         "a refusal that names no request is still shown");
+  }
+
+  /**
+   * A subagent's request comes as any other, with no {@code parent_tool_use_id}, naming the agent
+   * that asks ({@code agent_id}, probe 2's 04a:45), which the subagent's own lines name beside the
+   * call that started it (04a:44): so a host draws the request under that call's row.
+   */
+  @Test
+  void aSubagentsRequestNamesTheAgentWhoseLinesNameItsRow() {
+    var asked = (Step.Permission) read("04a-subagent-permission-request", 45);
+    var subagent = (Step.Subagent) read("04a-subagent-permission-request", 44);
+
+    assertEquals(
+        new Step.Permission(
+            "c6fa258b-074f-4da0-b642-7376329312cd",
+            "toolu_01GTWGhnCaioZBJJDGHfJr9T",
+            "af6598c6aac9ae006",
+            "Bash",
+            "Bash",
+            inputOf("04a-subagent-permission-request", 45),
+            "Create empty file sub-probe.txt",
+            null,
+            suggestionsOf("04a-subagent-permission-request", 45)),
+        asked);
+    assertEquals(
+        List.of("toolu_01DKiF1gdiVDM1aLBmAN68qz", "af6598c6aac9ae006"),
+        List.of(subagent.callId(), subagent.agentId()));
+    assertEquals(
+        new Step.Unreadable("r1", false),
+        LiveStream.read(
+            "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
+                + "\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":{},\"tool_use_id\":\"t1\","
+                + "\"agent_id\":\"../x\"}}"),
+        "an agent that is not safe to name: never shown as the agent's own request");
   }
 
   @Test
@@ -389,7 +437,7 @@ class LiveStreamChatTest {
   void aRequestWithNoSuggestionOffersNothingToKeep() {
     assertEquals(
         new Step.Permission(
-            "r1", "t1", "Bash", "Bash", Map.of("command", "ls"), null, null, List.of()),
+            "r1", "t1", null, "Bash", "Bash", Map.of("command", "ls"), null, null, List.of()),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
                 + "\"can_use_tool\",\"tool_name\":\"Bash\",\"display_name\":\"Bash\","
@@ -526,7 +574,7 @@ class LiveStreamChatTest {
   @Test
   void noLineIsFatalWhateverItHolds() {
     assertEquals(
-        new Step.Permission("r1", "t1", "Bash", "", Map.of(), null, null, List.of()),
+        new Step.Permission("r1", "t1", null, "Bash", "", Map.of(), null, null, List.of()),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
                 + "\"can_use_tool\",\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\",\"input\":{},"
