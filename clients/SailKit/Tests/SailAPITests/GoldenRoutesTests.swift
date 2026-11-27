@@ -12,6 +12,14 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "project-definition": { _ = try await $0.send(.projectDefinition("marina")) },
     "template-2f-joined": { _ = try await $0.send(.buildTemplate(project: "lighthouse")) },
     "template-2g-current": { _ = try await $0.send(.buildTemplate(project: "lighthouse")) },
+    "template-2c-missing": { _ = try await $0.send(.template(project: "lighthouse")) },
+    "template-2d-missing": { _ = try await $0.send(.template(project: "lighthouse")) },
+    "template-2e-building": { _ = try await $0.send(.template(project: "lighthouse")) },
+    "template-2f-building": { _ = try await $0.send(.template(project: "lighthouse")) },
+    "template-2g-built": { _ = try await $0.send(.template(project: "harbor")) },
+    "template-2h-failed": { _ = try await $0.send(.template(project: "lighthouse")) },
+    "template-2h-interrupted": { _ = try await $0.send(.template(project: "lighthouse")) },
+    "template-2h-cut-pending": { _ = try await $0.send(.template(project: "lighthouse")) },
     "rooms": { _ = try await $0.send(.rooms(project: "harbor")) },
     "room": { _ = try await $0.send(.room("harbor-design")) },
     "room-bare": { _ = try await $0.send(.room("harbor-quay")) },
@@ -595,8 +603,6 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
 /// The answers of routes this client does not call yet, recorded for the apps that will.
 let answersOfRoutesNotYetCalled: Set<String> = [
     "spec-measures", "specs-measures",
-    "template-2c-missing", "template-2d-missing", "template-2e-building", "template-2f-building",
-    "template-2g-built", "template-2h-failed", "template-2h-interrupted", "template-2h-cut-pending",
 ]
 
 /// The member the golden writer seats in the room.

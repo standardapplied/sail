@@ -224,9 +224,9 @@ import Testing
     }
 
     /// The created project is chosen once the projects listed show it, in This Mac's place too, and
-    /// stays chosen once the person chooses another; a build refused is said over its page in words,
-    /// never a command; a build that got no answer is said with Try Again, which asks it again,
-    /// until the build is asked.
+    /// stays chosen once the person chooses another; a build refused, or that got no answer and whose
+    /// template reads as none started, is said on its card in words, never a command, until a build
+    /// is asked (`BuildCardTests`).
     @Test func theCreatedProjectIsChosenOnceListed() throws {
         var model = Self.none(try Self.person(.admin, [.read, .write, .admin, .build]))
         model.chooseThisMac()
@@ -236,22 +236,18 @@ import Testing
         #expect(model.chosen == "lighthouse" && !model.thisMacChosen && request != nil)
         model.listed(WorkspacesModelTests.answer(.workspaces(project: "lighthouse"), "workspaces-none"), request: try #require(request), at: WorkspacesModelTests.at)
         model.built("lighthouse", .failure(.unreachable("The request timed out.")))
-        #expect(WorkspacesModelTests.page(model)?.banner == WorkspacesModel.Notice(
-            tone: .error, title: "Couldn’t start building lighthouse’s template", line: "Sail cannot reach the control plane at https://sail.example.com.", tryAgain: .build
-        ))
+        model.templateRead("lighthouse", .success(try BuildCardTests.status("template-2c-missing")))
+        #expect(BuildCardTests.card(model)?.refusal == ["Sail cannot reach the control plane at https://sail.example.com."] && WorkspacesModelTests.page(model)?.banner == nil)
         model.listed(WorkspacesModelTests.answer(.workspaces(project: "lighthouse"), "workspaces-none"), request: model.listAgain(), at: WorkspacesModelTests.at)
-        #expect(WorkspacesModelTests.page(model)?.banner?.tryAgain == .build, "a later list took away the build still owed")
+        #expect(BuildCardTests.card(model)?.refusal.isEmpty == false, "a later list took away the build still owed")
         model.built("lighthouse", WorkspacesModelTests.answer(.buildTemplate(project: "lighthouse"), "refusal-template-2d-login-not-stored"))
-        #expect(WorkspacesModelTests.page(model)?.banner == WorkspacesModel.Notice(
-            tone: .error, title: "github.com asks for credentials to fetch lighthouse's repo lamp, and dana keeps no token for it.", line: "An admin stores it on the runner for now.",
-            tryAgain: nil
-        ))
+        #expect(BuildCardTests.card(model)?.refusal == ["github.com asks for credentials to fetch lighthouse's repo lamp, and dana keeps no token for it.", "An admin stores it on the runner for now."])
         model.built("lighthouse", WorkspacesModelTests.answer(.buildTemplate(project: "lighthouse"), "template-2f-joined"))
-        #expect(WorkspacesModelTests.page(model)?.banner == nil, "a build asked left the refusal standing")
+        #expect(BuildCardTests.card(model)?.refusal == [], "a build asked left the refusal standing")
         model.built("lighthouse", .failure(.unexpected(route: "POST /v1/projects/lighthouse/template:build", status: 502)))
         let building = ProjectList(projects: [ProjectSummary(name: "lighthouse", containerStatus: .known(.notCreated), template: .known(.building))], total: 1)
         model.projectsListed(.success(building))
-        #expect(WorkspacesModelTests.page(model)?.banner == nil, "the build owed stayed once the list showed it building")
+        #expect(BuildCardTests.card(model)?.refusal == [], "the build owed stayed once the list showed it building")
         model.projectsListed(.success(listed))
         #expect(model.chosen == "lighthouse", "a later list chose again")
         _ = model.choose("harbor")

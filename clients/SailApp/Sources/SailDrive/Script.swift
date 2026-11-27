@@ -210,6 +210,9 @@ struct Step: Decodable {
     var rows: Int?
     /// This project's workspaces listed from now on as none.
     var noRows: String?
+    /// `[project, golden, step, by]`: this project's template read from now on as that golden, its
+    /// build at that step, started by that person 4:18 ago (and stopped 13 s ago, when it stopped).
+    var templateRead: [String]?
     /// harbor's three workspaces listed from now on with one more, the person's, of this name.
     var takenName: String?
     /// A scroll-wheel turn over `["list" | "panel", fraction]`: the Workspaces list or the left

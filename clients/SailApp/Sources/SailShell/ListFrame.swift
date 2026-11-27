@@ -23,24 +23,39 @@ final class ListFrame: NSView {
 
     let scroll: QuietScrollView?
     private var tallest: NSLayoutConstraint?
+    /// Holding a view whose height follows its width alone (the build card, whose lines wrap): that
+    /// height at a width, which the frame's own follows by its intrinsic size at each new width,
+    /// never by a constraint changed in a layout pass (#502); nil, ``height`` holds.
+    private let following: (@MainActor (Double) -> Double)?
 
     init(look: Look) {
         self.look = look
         scroll = nil
+        following = nil
         super.init(frame: .zero)
     }
 
-    init(scrolling list: NSView, look: Look) {
+    init(scrolling list: NSView, look: Look, following: (@MainActor (Double) -> Double)? = nil) {
         self.look = look
         let scroll = QuietScrollView(look: look)
         self.scroll = scroll
+        self.following = following
         super.init(frame: .zero)
         scroll.documentView = list
         addSubview(scroll)
-        let tallest = heightAnchor.constraint(lessThanOrEqualToConstant: 2)
-        tallest.isActive = true
-        self.tallest = tallest
+        if following == nil {
+            let tallest = heightAnchor.constraint(lessThanOrEqualToConstant: 2)
+            tallest.isActive = true
+            self.tallest = tallest
+        } else {
+            setContentHuggingPriority(.required, for: .vertical)
+        }
         setContentCompressionResistancePriority(Self.givesWay, for: .vertical)
+    }
+
+    /// The height of what it holds: as it follows the width inside the frame, or as set.
+    private var held: Double? {
+        following.map { $0(max(Double(bounds.width) - 2, 0)) } ?? height
     }
 
     @available(*, unavailable)
@@ -49,7 +64,13 @@ final class ListFrame: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: height.map { $0 + 2 } ?? NSView.noIntrinsicMetric)
+        NSSize(width: NSView.noIntrinsicMetric, height: held.map { $0 + 2 } ?? NSView.noIntrinsicMetric)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let widened = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        if widened, following != nil { invalidateIntrinsicContentSize() }
     }
 
     var look: Look {
@@ -65,7 +86,7 @@ final class ListFrame: NSView {
 
     override func layout() {
         super.layout()
-        guard let height else { return }
+        guard let height = held else { return }
         let inside = NSRect(x: 1, y: 1, width: Double(bounds.width) - 2, height: Double(bounds.height) - 2)
         guard let scroll else {
             subviews.first?.frame = NSRect(x: 1, y: 1, width: inside.width, height: height)
