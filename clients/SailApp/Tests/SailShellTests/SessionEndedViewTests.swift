@@ -58,6 +58,7 @@ final class Told: Sendable {
         await view.projectsAsked?.value
         #expect(Self.sailsOwn(view.text) && view.text.contains("Your sign-in ended."), "\(view.text)")
         #expect(told.times == 1)
+        if listedBefore { #expect(Driverless.button("Try Again", in: view) == nil, "an ended sign-in's banner offers Try Again") }
     }
 
     @Test func aProjectsWorkspacesListingSaysTheEndInSailsWords() async throws {
@@ -153,11 +154,9 @@ final class Told: Sendable {
     /// welcome says the sign-in ended, in front. A call made with that sign-in afterwards asks
     /// nothing more.
     @Test func callsFindingTheSessionEndedTogetherShowTheWelcomeOnce() async throws {
-        let desk = try Desk(["whoami", "projects", "workspaces-three"])
-        let shell = try WelcomeViewTests.shell(desk, defaults: WelcomeViewTests.reached(), vault: OneSession(fde: "uday", lasts: AccountPaneTests.month))
+        let desk = try Desk(Self.signingIn)
+        let shell = try await Self.signedIn(desk)
         defer { shell.window.orderOut(nil) }
-        await shell.checking?.value
-        try #require(await RunnerTabTests.until { shell.flow.standing != nil && !shell.workspaces.busy && shell.workspaces.text.contains("dock") }, "\(shell.workspaces.text)")
         let client = try #require(shell.workspaces.client)
         shell.select(.terminals)
         for route in ["GET /v1/projects", "POST /v1/projects/harbor/workspaces/dock/start"] {
@@ -178,7 +177,127 @@ final class Told: Sendable {
         #expect(shell.flow.standing == nil && shell.rail.selected == .workspaces && !shell.welcome.isHidden, "the window shows \(shell.rail.selected?.rawValue ?? "nothing")")
         #expect(shell.welcome.text.contains("Your sign-in ended on ") && Self.sailsOwn(shell.welcome.text), "\(shell.welcome.text)")
         _ = try? await client.send(.projects)
-        let checks = await desk.asked.filter { $0 == "GET /v1/whoami" }.count
+        let checks = await Self.checks(desk)
         #expect(shell.flow.ending == nil && checks == 2, "a call after the check asked again: \(checks) checks")
+        #expect(shell.welcome.text.contains("Your sign-in ended on "), "a call after the check said otherwise: \(shell.welcome.text)")
+    }
+
+    static let signingIn = ["whoami", "projects", "workspaces-three", "passkey-login-start", "passkey-login-finish"]
+
+    /// A shell at `desk` signed in as uday, its projects listed: the launch's check answered.
+    static func signedIn(_ desk: Desk) async throws -> ShellApp {
+        let shell = try WelcomeViewTests.shell(desk, defaults: WelcomeViewTests.reached(), vault: OneSession(fde: "uday", lasts: AccountPaneTests.month))
+        await shell.checking?.value
+        try #require(await RunnerTabTests.until { shell.flow.standing != nil && !shell.workspaces.busy && shell.workspaces.text.contains("dock") }, "\(shell.workspaces.text)")
+        return shell
+    }
+
+    /// How many times who is signed in was asked.
+    static func checks(_ desk: Desk) async -> Int {
+        await desk.asked.filter { $0 == "GET /v1/whoami" }.count
+    }
+
+    /// From now on Store a Key's keys and who is signed in find the session ended.
+    static func ended(_ desk: Desk) async throws {
+        await desk.answer(try Self.ending("GET /v1/logins", "refusal-invalid-bearer-token"))
+        await desk.answer(try Self.ending("GET /v1/whoami", "refusal-invalid-bearer-token"))
+    }
+
+    /// The welcome is in front, saying the sign-in ended.
+    static func welcomed(_ shell: ShellApp) -> Bool {
+        shell.flow.standing == nil && shell.rail.selected == .workspaces && !shell.welcome.isHidden && shell.welcome.text.contains("Your sign-in ended on ")
+    }
+
+    /// A call made before the app was activated (a Store a Key sheet held open while the key is
+    /// copied from elsewhere) that finds the session ended still takes the person to the welcome:
+    /// the check an activation asks leaves the sign-in it was made under standing.
+    @Test func aCallFromBeforeAnActivationStillHandsOver() async throws {
+        let desk = try Desk(Self.signingIn)
+        let shell = try await Self.signedIn(desk)
+        defer { shell.window.orderOut(nil) }
+        let client = try #require(shell.workspaces.client)
+        shell.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        await shell.checking?.value
+        try #require(await Self.checks(desk) == 2 && shell.flow.standing != nil, "the activation's check did not answer signed in")
+        try await Self.ended(desk)
+        _ = try? await client.send(.logins)
+        let ending = try #require(shell.flow.ending, "a call from before the activation asked nothing")
+        await ending.value
+        #expect(await Self.checks(desk) == 3 && Self.welcomed(shell), "\(shell.welcome.text)")
+    }
+
+    /// A call that finds the session ended while a check is under way that asked before the end, and
+    /// answers signed in, has who is signed in asked once more once that check is shown.
+    @Test func aCheckUnderWayThatAnsweredBeforeTheEndIsFollowedByOne() async throws {
+        let desk = try Desk(Self.signingIn)
+        let shell = try await Self.signedIn(desk)
+        defer { shell.window.orderOut(nil) }
+        let client = try #require(shell.workspaces.client)
+        await desk.hold("GET /v1/whoami", answering: try Exchange("whoami"))
+        try await Self.ended(desk)
+        shell.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        await desk.arrived(during: shell.checking)
+        _ = try? await client.send(.logins)
+        await desk.release()
+        await shell.checking?.value
+        let ending = try #require(shell.flow.ending, "the check under way answered signed in, and nothing asked again")
+        await ending.value
+        #expect(await Self.checks(desk) == 3 && Self.welcomed(shell), "\(shell.welcome.text)")
+    }
+
+    /// A check under way that finds the session ended serves the call that found it meanwhile: the
+    /// welcome, and nothing asked again.
+    @Test func aCheckUnderWayThatFindsTheEndServes() async throws {
+        let desk = try Desk(Self.signingIn)
+        let shell = try await Self.signedIn(desk)
+        defer { shell.window.orderOut(nil) }
+        let client = try #require(shell.workspaces.client)
+        await desk.hold("GET /v1/whoami")
+        try await Self.ended(desk)
+        shell.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        await desk.arrived(during: shell.checking)
+        _ = try? await client.send(.logins)
+        await desk.release()
+        await shell.checking?.value
+        await shell.flow.ending?.value
+        #expect(await Self.checks(desk) == 2 && shell.flow.ending == nil && Self.welcomed(shell), "\(shell.welcome.text)")
+    }
+
+    /// A call made with a sign-in since replaced (Sign In Again) that finds that session ended asks
+    /// nothing: the new sign-in stands.
+    @Test func aCallOfASignInSinceReplacedAsksNothing() async throws {
+        let desk = try Desk(Self.signingIn)
+        let shell = try await Self.signedIn(desk)
+        defer { shell.window.orderOut(nil) }
+        let old = try #require(shell.workspaces.client)
+        try #require(shell.flow.signInAgain { _ in })
+        await shell.flow.underWay?.value
+        try #require(shell.flow.standing != nil, "Sign In Again did not sign in")
+        let checks = await Self.checks(desk)
+        try await Self.ended(desk)
+        _ = try? await old.send(.logins)
+        #expect(shell.flow.ending == nil && shell.flow.standing != nil, "the old sign-in's call asked who is signed in")
+        #expect(await Self.checks(desk) == checks)
+    }
+
+    /// Signed in again after the welcome, a call that finds the new session ended takes the person
+    /// to the welcome again.
+    @Test func aSecondEndAfterSigningInAgainIsHandedOverAgain() async throws {
+        let desk = try Desk(Self.signingIn)
+        let shell = try await Self.signedIn(desk)
+        defer { shell.window.orderOut(nil) }
+        try await Self.ended(desk)
+        for end in 1 ... 2 {
+            let client = try #require(shell.flow.client(), "no one is signed in before end \(end)")
+            _ = try? await client.send(.logins)
+            let ending = try #require(shell.flow.ending, "end \(end) asked nothing")
+            await ending.value
+            #expect(Self.welcomed(shell), "end \(end): \(shell.welcome.text)")
+            await desk.answer(try Exchange("whoami"))
+            try #require(shell.flow.signIn(at: WelcomeViewTests.plane) { _ in })
+            await shell.flow.underWay?.value
+            await desk.answer(try Self.ending("GET /v1/whoami", "refusal-invalid-bearer-token"))
+        }
+        #expect(await Self.checks(desk) == 5, "\(await desk.asked)")
     }
 }

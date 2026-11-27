@@ -366,11 +366,13 @@ final class MemoryVaultOf: TokenVault, Sendable {
 
 
 /// A control plane answering each route as the server recorded it, the answers changed as a test
-/// goes; a route held answers once released, or fails as out of reach once the task waiting on it
-/// is cancelled, as URLSession's does. Each hold is a hold of its own.
+/// goes; a route held answers once released, as it was asked to or else as the route is answered
+/// then, or fails as out of reach once the task waiting on it is cancelled, as URLSession's does.
+/// Each hold is a hold of its own.
 actor Desk: Transport {
     private var answers: [String: HTTPResponse] = [:]
     private var holding: String?
+    private var heldAnswer: HTTPResponse?
     private var gate = Gate(), arrival = Gate()
     private(set) var asked: [String] = []
 
@@ -401,9 +403,11 @@ actor Desk: Transport {
         answers[route] = nil
     }
 
-    /// The next request of `route` is held until ``release()``.
-    func hold(_ route: String) {
+    /// The next request of `route` is held until ``release()``, then answered as `answering` was,
+    /// when given.
+    func hold(_ route: String, answering: Exchange? = nil) {
         holding = route
+        heldAnswer = answering.map { HTTPResponse(status: $0.status, headers: $0.headers, body: $0.body) }
         gate = Gate()
         arrival = Gate()
     }
@@ -421,10 +425,11 @@ actor Desk: Transport {
         asked.append(request.route)
         if request.route == holding {
             holding = nil
-            let gate = gate
+            let gate = gate, held = heldAnswer
             arrival.open()
             await gate.wait()
             if Task.isCancelled { throw .unreachable("cancelled") }
+            if let held { return held }
         }
         guard let answer = answers[request.route] else { throw .unreachable("The network connection was lost.") }
         return answer
