@@ -1,0 +1,20 @@
+{
+  "request": {
+    "body": {
+      "session_form": "tab"
+    },
+    "method": "PUT",
+    "path": "/v1/me/preferences"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "session_form is chat, terminal or both."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

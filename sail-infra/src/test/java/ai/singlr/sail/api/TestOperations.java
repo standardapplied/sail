@@ -41,6 +41,11 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public ChatListing chatListing() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
   public List<SyncConflicts.Conflict> conflicts() {
     throw new UnsupportedOperationException();
   }
@@ -82,6 +87,11 @@ class TestOperations implements Operations {
 
   @Override
   public PasskeyOperations passkeys() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public PreferenceOperations preferences() {
     throw new UnsupportedOperationException();
   }
 

@@ -42,7 +42,8 @@ class CreateNotMakeTest {
           "make the skills directory for",
           "Make it ready with ",
           ". Once incus answers, make them: '",
-          "Switch to a project (start it, make it current), warning if resources overcommit.");
+          "Switch to a project (start it, make it current), warning if resources overcommit.",
+          "'s chat takes your stored API key here, not the sign-in made in the workspace.");
 
   @Test
   void aWorkspaceOrAProjectIsCreatedNeverMade() throws IOException {

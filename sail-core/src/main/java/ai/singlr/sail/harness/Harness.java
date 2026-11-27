@@ -167,6 +167,13 @@ public interface Harness {
     return Optional.empty();
   }
 
+  /** The forms a session of this harness takes: a terminal, and a chat when it has one. */
+  default List<SessionForm> forms() {
+    return chat().isPresent()
+        ? List.of(SessionForm.TERMINAL, SessionForm.CHAT)
+        : List.of(SessionForm.TERMINAL);
+  }
+
   /** The command for an interactive (TTY) session. */
   String interactive(boolean fullPermissions);
 

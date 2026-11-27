@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/me/preferences"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "session_form": "chat"
+    },
+    "status": 200
+  }
+}

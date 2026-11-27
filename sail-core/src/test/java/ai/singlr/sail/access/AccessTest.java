@@ -27,10 +27,12 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -353,6 +355,15 @@ class AccessTest {
               PEOPLE,
               PEOPLE,
               "keep passkeys",
+              List.of(ALLOWED, ALLOWED, ALLOWED, LANE, LANE, LANE, LANE, LANE),
+              null,
+              null,
+              "Do it from outside the container: with sail on the host, or in Mast."),
+          new Expected(
+              Action.KEEP_PREFERENCES,
+              PEOPLE,
+              PEOPLE,
+              "keep preferences",
               List.of(ALLOWED, ALLOWED, ALLOWED, LANE, LANE, LANE, LANE, LANE),
               null,
               null,
@@ -1069,6 +1080,33 @@ class AccessTest {
                 "The credential in a project container cannot keep passkeys.",
                 Remedy.of("Do it from outside the container: with sail on the host, or in Mast."))),
         Access.atAll(Actors.ADMIN_IN_CONTAINER, Action.KEEP_PASSKEYS, Resource.Kind.PEOPLE));
+  }
+
+  /**
+   * I5: every person keeps their own preferences, a viewer too, writing no synced row, so a viewer
+   * stays read-only; no agent and no credential in a container keeps any.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void everyPersonKeepsTheirOwnPreferencesAndNoAgentOrContainerCredentialDoes() {
+    for (var person : List.of(Actors.VIEWER, Actors.OWNER_API, Actors.OWNER_CLI, Actors.ADMIN)) {
+      assertEquals(
+          Optional.empty(), Access.atAll(person, Action.KEEP_PREFERENCES, Resource.Kind.PEOPLE));
+    }
+    assertFalse(Access.mayWrite(Actors.VIEWER), "keeping preferences writes no synced row");
+    for (var agent : List.of(Actors.AGENT, Actors.ROOM)) {
+      assertEquals(
+          refusedAtAll(
+              Refusal.Kind.LANE_FORBIDDEN, "Agent principals cannot keep preferences.", LANE_FIX),
+          Access.atAll(agent, Action.KEEP_PREFERENCES, Resource.Kind.PEOPLE));
+    }
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot keep preferences.",
+                Remedy.of("Do it from outside the container: with sail on the host, or in Mast."))),
+        Access.atAll(Actors.ADMIN_IN_CONTAINER, Action.KEEP_PREFERENCES, Resource.Kind.PEOPLE));
   }
 
   private static Decision refused(Refusal.Kind kind, String message, Remedy fix) {

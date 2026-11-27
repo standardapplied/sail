@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -67,11 +68,13 @@ final class ChatLaunch {
   private final AgentProcess processes;
   private final ShellExec shell;
   private final RoleRule roles;
+  private final Function<String, Harness> harnesses;
 
   /**
    * Admits through {@code doors}, as the FDEs {@code fdes} holds, chats of the projects {@code
-   * definitions} reads, started as {@code processes}; a process left over is asked after through
-   * {@code shell}, and an opener acted as whom {@code roles} says they are.
+   * definitions} reads, with the harness {@code harnesses} names ({@link Harnesses#of}), started as
+   * {@code processes}; a process left over is asked after through {@code shell}, and an opener
+   * acted as whom {@code roles} says they are.
    */
   ChatLaunch(
       HostPty doors,
@@ -79,24 +82,27 @@ final class ChatLaunch {
       ProjectReader definitions,
       AgentProcess processes,
       ShellExec shell,
-      RoleRule roles) {
+      RoleRule roles,
+      Function<String, Harness> harnesses) {
     this.doors = Objects.requireNonNull(doors, "doors");
     this.fdes = Objects.requireNonNull(fdes, "fdes");
     this.definitions = Objects.requireNonNull(definitions, "definitions");
     this.processes = Objects.requireNonNull(processes, "processes");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.roles = Objects.requireNonNull(roles, "roles");
+    this.harnesses = Objects.requireNonNull(harnesses, "harnesses");
   }
 
   /**
    * Admits the caller's chat with {@code harness} in {@code mode} in their workspace {@code
    * workspace} of {@code project}, signed in with their stored login or, {@code inside}, the
-   * harness's own there: only a harness with a chat form, in one of its chat modes, and as a pty
-   * agent start of it is admitted. Returns the caller's FDE id, the chat's opener.
+   * harness's own there: only a harness with a chat form, in one of its chat modes, inside only
+   * where its chat signs in inside, and as a pty agent start of it is admitted. Returns the
+   * caller's FDE id, the chat's opener.
    */
   String admit(String project, String workspace, String harness, String mode, boolean inside) {
-    var agent = Harnesses.of(Strings.requireNonBlank(harness, "harness"));
-    Harness.Mode.named(form(agent).modes(), mode, agent.displayName());
+    var agent = harnesses.apply(Strings.requireNonBlank(harness, "harness"));
+    Harness.Mode.named(form(agent, inside).modes(), mode, agent.displayName());
     var person = person();
     act(() -> doors.admitWorkspace(project, workspace, person));
     ask(
@@ -140,15 +146,16 @@ final class ChatLaunch {
   /**
    * Starts the process for {@code chat}, as its opener: admitted and signed in as a pty agent start
    * is, its workspace entered (started when stopped), resuming the conversation the harness last
-   * named, in the mode it last said. Whatever process its pid file names is halted first ({@link
-   * #halted}), however the last one's client ended, and the start refused while it is not proved
-   * gone: one conversation, one process. {@code launched} is told {@code true} as the process is
-   * about to start, and {@code false} when it then did not, or that {@code true} failed; nothing
-   * after the start can fail it, so a process that started is always held.
+   * named, in the mode it last said, and signed in inside only while its chat form still signs in
+   * inside, as at its open. Whatever process its pid file names is halted first ({@link #halted}),
+   * however the last one's client ended, and the start refused while it is not proved gone: one
+   * conversation, one process. {@code launched} is told {@code true} as the process is about to
+   * start, and {@code false} when it then did not, or that {@code true} failed; nothing after the
+   * start can fail it, so a process that started is always held.
    */
   Started start(ChatStore.Chat chat, Consumer<Boolean> launched) {
-    var harness = Harnesses.of(chat.harness());
-    var form = form(harness);
+    var harness = harnesses.apply(chat.harness());
+    var form = form(harness, chat.inside());
     var person = person();
     var project = chat.project();
     var workspace = chat.workspace();
@@ -254,6 +261,23 @@ final class ChatLaunch {
                     harness.displayName() + " has no chat form; start it in a terminal."));
   }
 
+  /**
+   * {@code harness}'s chat form, for a chat signed in {@code inside} the workspace only when that
+   * form signs in inside ({@link HarnessChat#signsInInside}).
+   *
+   * @throws IllegalArgumentException for a harness with no chat form, or an inside sign-in its chat
+   *     does not take
+   */
+  static HarnessChat form(Harness harness, boolean inside) {
+    var form = form(harness);
+    if (inside && !form.signsInInside()) {
+      throw new IllegalArgumentException(
+          harness.displayName()
+              + "'s chat takes your stored API key here, not the sign-in made in the workspace.");
+    }
+    return form;
+  }
+
   private static PtyIdentity.Person person() {
     return new PtyIdentity.Person(Actor.current());
   }
@@ -270,11 +294,22 @@ final class ChatLaunch {
     void run() throws IOException;
   }
 
+  /**
+   * What {@code door} answers, or its refusal as the API says it: its own code when it names one,
+   * its words as they are.
+   */
   private static <T> T ask(Door<T> door) {
     try {
       return door.ask();
     } catch (IOException refused) {
-      throw refusal(refused);
+      throw switch (refused) {
+        case PtyAdmission.Absent absent -> ApiException.of(ErrorCode.NOT_FOUND, absent);
+        case PtyAdmission.Unavailable unavailable ->
+            ApiException.of(ErrorCode.CONTAINER_ERROR, unavailable);
+        case Remedied remedied when Strings.isNotBlank(remedied.code()) ->
+            ApiException.of(ErrorCode.valueOf(remedied.code().toUpperCase(Locale.ROOT)), refused);
+        default -> ApiException.of(ErrorCode.FORBIDDEN, refused);
+      };
     }
   }
 
@@ -284,17 +319,5 @@ final class ChatLaunch {
           act.run();
           return null;
         });
-  }
-
-  /** {@code refused} as the API says it: its own code when it names one, its words as they are. */
-  private static ApiException refusal(IOException refused) {
-    return switch (refused) {
-      case PtyAdmission.Absent absent -> ApiException.of(ErrorCode.NOT_FOUND, absent);
-      case PtyAdmission.Unavailable unavailable ->
-          ApiException.of(ErrorCode.CONTAINER_ERROR, unavailable);
-      case Remedied remedied when Strings.isNotBlank(remedied.code()) ->
-          ApiException.of(ErrorCode.valueOf(remedied.code().toUpperCase(Locale.ROOT)), refused);
-      default -> ApiException.of(ErrorCode.FORBIDDEN, refused);
-    };
   }
 }

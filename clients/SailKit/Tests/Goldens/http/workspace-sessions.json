@@ -19,6 +19,7 @@
             "claude"
           ],
           "created_at": "2025-11-18T10:00:00.000Z",
+          "form": "terminal",
           "live": true,
           "name": "app-1f2e3d4c",
           "opener": "uday",
@@ -29,6 +30,7 @@
           "command": [],
           "created_at": "2025-11-18T09:00:00.000Z",
           "ended_reason": "Workspace dock of harbor was stopped by ana.",
+          "form": "terminal",
           "live": false,
           "name": "app-5a6b7c8d",
           "opener": "uday",
