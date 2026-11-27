@@ -62,6 +62,29 @@ final class Told: Sendable {
         #expect(offered.isEmpty, "an ended sign-in's \(listedBefore ? "banner" : "card") offers Try Again")
     }
 
+    /// This Mac's page shown while the first listing finds the session ended: the panel says it
+    /// under the control plane's head with no Try Again.
+    @Test func thePanelOffersNoTryAgainForAnEndedFirstListing() async throws {
+        let desk = try Desk([])
+        await desk.answer(try Self.ending("GET /v1/projects"))
+        let (view, window) = try WorkspacesViewTests.view(desk, chosenLast: WorkspacesModel.thisMac)
+        defer { window.orderOut(nil) }
+        view.shown()
+        await view.projectsAsked?.value
+        try #require(!view.local.isHidden && !view.panel.emptyLine.isHidden, "\(view.text)")
+        #expect(view.panel.emptyLine.stringValue == "Couldn’t list your projects." && view.panel.tryAgain.isHidden, "an ended sign-in's panel offers Try Again")
+    }
+
+    /// Create Project's agents found the session ended: AGENTS says so with no Try Again.
+    @Test func createProjectsAgentsOfferNoTryAgainForAnEndedSignIn() throws {
+        var unlisted = NewProject(agents: [])
+        unlisted.agentsListed(.failure(.signIn(.ended)), at: "sail.example.com")
+        let sheet = try CreateProjectSheetTests.sheet(unlisted)
+        defer { sheet.orderOut(nil) }
+        #expect(Driverless.words(sheet.contentView).contains("Sail could not list the agents: Your sign-in ended."))
+        #expect(sheet.agentsAgain.superview == nil, "an ended sign-in's agents offer Try Again")
+    }
+
     @Test func aProjectsWorkspacesListingSaysTheEndInSailsWords() async throws {
         let desk = try Desk(["projects"])
         await desk.answer(try Self.ending("GET /v1/projects/harbor/workspaces"))
@@ -284,6 +307,45 @@ final class Told: Sendable {
         #expect(shell.flow.ending == nil && shell.flow.standing != nil, "the old sign-in's call asked who is signed in")
         let after = await Self.checks(desk)
         #expect(after == before, "\(after - before) checks asked")
+    }
+
+    /// A call that finds the session ended during Sign In Again's ceremony is kept until the ceremony
+    /// ends: refused, who is signed in is asked then and the welcome shows.
+    @Test func anEndDuringARefusedSignInAgainIsAskedOnceItEnds() async throws {
+        let desk = try Desk(Self.signingIn)
+        let shell = try await Self.signedIn(desk)
+        defer { shell.window.orderOut(nil) }
+        let client = try #require(shell.workspaces.client)
+        await desk.hold("POST /v1/auth/login/start", answering: try Exchange("refusal-forbidden"))
+        try #require(shell.flow.signInAgain { _ in })
+        await desk.arrived(during: shell.flow.underWay)
+        try await Self.ended(desk)
+        _ = try? await client.send(.logins)
+        let before = await Self.checks(desk)
+        await desk.release()
+        await shell.flow.underWay?.value
+        let ending = try #require(shell.flow.ending, "the end found during the ceremony was dropped")
+        await ending.value
+        let after = await Self.checks(desk)
+        #expect(after == before + 1 && Self.welcomed(shell), "\(after - before) checks: \(shell.welcome.text)")
+    }
+
+    /// The same, the ceremony signing in: the new sign-in stands and nothing more is asked.
+    @Test func anEndDuringASignInAgainThatSignsInAsksNothing() async throws {
+        let desk = try Desk(Self.signingIn)
+        let shell = try await Self.signedIn(desk)
+        defer { shell.window.orderOut(nil) }
+        let client = try #require(shell.workspaces.client)
+        await desk.hold("POST /v1/auth/login/start")
+        try #require(shell.flow.signInAgain { _ in })
+        await desk.arrived(during: shell.flow.underWay)
+        await desk.answer(try Self.ending("GET /v1/logins", "refusal-invalid-bearer-token"))
+        _ = try? await client.send(.logins)
+        let before = await Self.checks(desk)
+        await desk.release()
+        await shell.flow.underWay?.value
+        let after = await Self.checks(desk)
+        #expect(shell.flow.ending == nil && shell.flow.standing != nil && after == before + 1, "\(after - before) checks, the sign-in's own whoami one")
     }
 
     /// Signed in again after the welcome, a call that finds the new session ended takes the person
