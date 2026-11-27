@@ -4420,13 +4420,18 @@ the next process. A message is handed at least once: marked handed after the har
 **One conversation, one process.** Every process of a chat writes its pid to one place, the chat's
 own folder (`AgentUnit.chat`, `~/.sail/chats/<session>/`), and the chat is marked `launched` from
 just before its start until its exit is known. Only a send, or the delivery of a waiting message,
-starts a process, under the chat's lock; a chat still marked `launched` that no process of this
-sail holds has its process halted first through that pid file (`ProcessEnd.halted`, which a live
-member left from before a restart is halted by too: signalled, and gone only on the container's
-answer) and nothing starts until it is proved gone (`409 agent_already_running` meanwhile). A pid
-is signalled only while it names the process the wrapper started: the wrapper records the
-process's start (`/proc/<pid>/stat`) beside its pid (`AgentUnit.startPath`) before it writes the
-pid, and starts nothing when it cannot (its steps are chained with `&&`); the halt is one script
+starts a process, under the chat's lock and through one function (`ChatHost.holder`), which uses
+the process of this sail that holds the chat or starts one; every start first halts whatever
+process that pid file names (`ProcessEnd.halted`, which a live member left from before a restart
+is halted by too: signalled, and gone only on the container's answer), marked `launched` or not,
+since a client's exit does not prove its process gone, and nothing starts until it is proved gone
+(`409 agent_already_running` meanwhile); a turn left open is cut before the process starts. A pid
+is signalled only while it names the process the wrapper started: the wrapper, a plain `sh` that
+runs before any login profile, records the process's start (`/proc/<pid>/stat`) beside its pid
+(`AgentUnit.startPath`) before it writes the pid, and starts nothing when it cannot (its steps are
+chained with `&&`), then `exec`s the login shell that reads the launch file and `exec`s the agent,
+which keeps the pid and the start; a handle whose client has exited signals nothing, since the
+pid file may by then name the next process. The halt is one script
 in the container (`AgentSession.killStarted`) that compares that start with the process at the
 pid before TERM and again before KILL, and whose printed word alone is believed. A pid the box has
 since given another process, after a restart of the box or the workspace, or a live pid with no
