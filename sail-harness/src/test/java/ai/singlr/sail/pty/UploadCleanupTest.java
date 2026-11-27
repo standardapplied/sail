@@ -8,17 +8,21 @@ package ai.singlr.sail.pty;
 import static ai.singlr.sail.pty.ContainerDirectory.held;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -50,6 +54,16 @@ class UploadCleanupTest {
     cleanup = new UploadCleanup(c.copies());
     outside = Files.createDirectories(dir.resolve("home"));
     Files.writeString(outside.resolve("work"), "the person's own");
+  }
+
+  /**
+   * Ends what each test started, as the host does as it stops: a run outlives the exit of its
+   * script until it has closed the script's output, so a test that ends at the exit would leave
+   * that pipe.
+   */
+  @AfterEach
+  void closeTheCleanup() {
+    cleanup.close(UploadCleanup.CLOSING);
   }
 
   private Path root() throws Exception {
@@ -98,6 +112,41 @@ class UploadCleanupTest {
       session.unlock();
     }
     cleanup.close(UploadCleanup.CLOSING);
+  }
+
+  /**
+   * A sweep's output is still open once its script is seen to exit, until the JDK's reaper or the
+   * sweep's own run closes it, and closing waits for that run: nothing of the sweep is open once
+   * closing returns, though the run let go of its output only while closing waited.
+   */
+  @Test
+  void closingWaitsForARunStillHoldingItsScriptsOutput() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    var closer = Thread.currentThread();
+    c.outputHeld = new CountDownLatch(1);
+    try {
+      cleanup.sweep("acme", List::of);
+      c.awaitFinished(UploadCleanup.SWEEP);
+      c.outputReached.await();
+      var open =
+          assertThrows(
+              AssertionError.class, () -> ClosesWhatItOpens.assertClosed("a sweep", before));
+      assertTrue(open.getMessage().contains(" pipe:["), open.getMessage());
+
+      Thread.ofVirtual().start(() -> letGoOnceWaiting(closer));
+      cleanup.close(UploadCleanup.CLOSING);
+
+      ClosesWhatItOpens.assertClosed("a closed cleanup", before);
+    } finally {
+      c.outputHeld.countDown();
+    }
+  }
+
+  private void letGoOnceWaiting(Thread closer) {
+    while (closer.getState() != Thread.State.TIMED_WAITING && c.outputHeld.getCount() > 0) {
+      Thread.onSpinWait();
+    }
+    c.outputHeld.countDown();
   }
 
   /** Major 5: links a session's directory holds are removed as links, never followed. */

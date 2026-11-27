@@ -150,6 +150,15 @@ final class ContainerDirectory {
 
   final CountDownLatch copyReached = new CountDownLatch(1);
 
+  /**
+   * Held, when set, as a script but an open exits and until the test lets it go: both closes of the
+   * script's output, the JDK's reaper's once it has told the waiting host of the exit and the
+   * host's own after; {@link #outputReached} once the host is held.
+   */
+  volatile CountDownLatch outputHeld;
+
+  final CountDownLatch outputReached = new CountDownLatch(1);
+
   ContainerDirectory(Path dir) {
     this.dir = dir;
   }
@@ -239,6 +248,10 @@ final class ContainerDirectory {
         if (script.equals(hangs)) {
           inner = new ArrayList<>(List.of("sh", "-c", "exec tail -f /dev/null"));
         }
+        var outputKept = script.equals(UploadCopy.OPEN) ? null : outputHeld;
+        if (outputKept != null) {
+          inner = waitingForInput(inner);
+        }
         var builder = new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD);
         var meets = sizing;
         if (script.equals(UploadCopy.OPEN) && meets != null) {
@@ -248,8 +261,35 @@ final class ContainerDirectory {
         if (script.equals(UploadCopy.OPEN)) {
           copies.add(process);
         }
+        if (outputKept != null) {
+          holdFromTheReaper(process, outputKept);
+        }
         return new HeldCopy(process, script);
       };
+
+  /** {@code command}, run once its input ends, so it cannot exit before the host closes that. */
+  private static ArrayList<String> waitingForInput(List<String> command) {
+    var waiting = new ArrayList<>(List.of("sh", "-c", "cat > /dev/null; exec \"$@\"", "sh"));
+    waiting.addAll(command);
+    return waiting;
+  }
+
+  /**
+   * Holds {@code process}'s output from the JDK's reaper until {@code held} is let go: the reaper
+   * closes it under the stream's monitor, which this takes before the process can exit.
+   */
+  private static void holdFromTheReaper(Process process, CountDownLatch held) {
+    var holding = new CountDownLatch(1);
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              synchronized (process.getInputStream()) {
+                holding.countDown();
+                await(held);
+              }
+            });
+    await(holding);
+  }
 
   /** {@code builder}'s open given the {@code find} whose sizing meets {@code meets}. */
   private void sized(ProcessBuilder builder, Sizing meets) throws IOException {
@@ -330,6 +370,11 @@ final class ContainerDirectory {
 
     @Override
     public InputStream getInputStream() {
+      var held = outputHeld;
+      if (held != null && !script.equals(UploadCopy.OPEN)) {
+        outputReached.countDown();
+        await(held);
+      }
       return process.getInputStream();
     }
 
