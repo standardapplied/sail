@@ -56,15 +56,14 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     private let frameView: ListFrame
 
     /// The narrow rows' actions column: the widest actions a narrow row shows (Start and Open with
-    /// no keycap, which narrow rows drop; + and ⋯ beside it), measured, so every list's pills stand at
-    /// one x and a row's name keeps the rest; a note ("Only uday or an admin opens it") is cut within it.
-    lazy var narrowActionsColumn: Double = {
-        let start = SailButton("Start and Open", kind: .primary, size: .small, look: look, target: nil, action: nil)
-        let plus = SailButton(icon: .plus, label: NewSessionWords.newSession, size: .small, look: look, target: nil, action: nil)
-        let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
-        let boxes = [start, plus, more].map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
-        return (boxes.reduce(0, +) + 2 * Self.buttonGap).rounded(.up)
-    }()
+    /// no keycap, which narrow rows drop; + and ⋯ beside it), measured with the gap before them, so
+    /// every list's pills stand at one x, clear of the actions, and a row's name keeps the rest; a
+    /// note ("Only uday or an admin opens it") is cut within it.
+    lazy var narrowActionsColumn = WorkspaceLine.actionsColumn([
+        SailButton("Start and Open", kind: .primary, size: .small, look: look, target: nil, action: nil),
+        SailButton(icon: .plus, label: NewSessionWords.newSession, size: .small, look: look, target: nil, action: nil),
+        SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil),
+    ])
     /// The project whose rows the list last held: its rows drawn again keep the person's scroll;
     /// another project's, or anyone's after a change of person, start at the top.
     private var filled: String?
@@ -174,8 +173,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             button.why = page.createWhy
         }
         centred?.removeFromSuperview()
-        var views: [NSView] = [head, spacer(Self.listGap)]
-        if let notice = page.banner { views += [banner(notice), spacer(12)] }
+        var views: [NSView] = [head, Self.spacer(Self.listGap)]
+        if let notice = page.banner { views += [banner(notice), Self.spacer(12)] }
         switch page.body {
         case .loading: views.append(loadingList)
         case .unlisted: break
@@ -194,7 +193,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             ages = page.stale ? Timer.scheduledTimer(withTimeInterval: Self.ageTick, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.retellAge() }
             } : nil
-            views += [frameView, spacer(Self.footGap), foot]
+            views += [frameView, Self.spacer(Self.footGap), foot]
             showKeys()
         }
         show(views)
@@ -253,7 +252,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         drawn = .loading
         ages = nil
         centred?.removeFromSuperview()
-        show([loadingWords, spacer(Self.listGap + 11), loadingList])
+        show([loadingWords, Self.spacer(Self.listGap + 11), loadingList])
     }
 
     /// Bars for the name and the line under it, made once: a skeleton shows 150 ms after it enters
@@ -539,7 +538,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         NSAttributedString(string: words, attributes: [.font: mono.font(Look.Step.micro.points, .regular) as NSFont, .foregroundColor: NSColor(look.textTertiary)])
     }
 
-    private func spacer(_ height: Double) -> NSView {
+    /// A gap `height` tall down a column: this page's and This Mac's.
+    static func spacer(_ height: Double) -> NSView {
         let view = NSView()
         view.heightAnchor.constraint(equalToConstant: height).isActive = true
         return view

@@ -25,21 +25,34 @@ final class WorkspaceLine: NSStackView {
     let titleTip: Tooltip
     let placeTip: Tooltip
 
-    init(_ line: WorkspacesModel.Line, narrow: Bool, look: Look, mono: LabelFont) {
-        Self.made += 1
-        title = NSTextField(labelWithAttributedString: Self.name(line.name, strong: false, look: look))
-        let theirs = narrow ? line.owner.map { Self.whose($0) } : nil
+    convenience init(_ line: WorkspacesModel.Line, narrow: Bool, look: Look, mono: LabelFont) {
+        let theirs = narrow ? line.owner.map { WorkspaceLine.whose($0) } : nil
         let below = ([theirs ?? line.instance] + [narrow ? line.sessionsSaid : nil].compactMap { $0 }).joined(separator: " · ")
+        let owned = narrow ? nil : line.owner.map { WorkspaceLine.owner($0, look: look) }
+        let counted = narrow ? nil : line.sessionsSaid.map { WorkspaceLine.secondary($0, look: look) }
+        self.init(
+            line.name, below: below, cut: theirs == nil ? .byTruncatingMiddle : .byTruncatingTail, pill: WorkspaceLine.pill(line), whose: owned?.view ?? counted,
+            ownerTip: owned?.tip, narrow: narrow, look: look, mono: mono
+        )
+    }
+
+    /// A row of `name` over `below` in mono (cut as `cut` says), `pill`, and `whose` in the owner's
+    /// column, `whoseWidth` wide, while wide: a workspace's, or one of This Mac's terminals (its
+    /// folder, its program).
+    init(
+        _ name: String, below: String, cut: NSLineBreakMode, pill state: PillState, whose column: NSView?, whoseWidth: Double = WorkspaceLine.ownerColumn,
+        ownerTip: Tooltip?, narrow: Bool, look: Look, mono: LabelFont
+    ) {
+        Self.made += 1
+        title = NSTextField(labelWithAttributedString: Self.name(name, strong: false, look: look))
         place = NSTextField(labelWithAttributedString: NSAttributedString(string: below, attributes: [
             .font: mono.font(Look.Step.micro.points, .regular) as NSFont, .foregroundColor: NSColor(look.textTertiary),
-        ]).cut(theirs == nil ? .byTruncatingMiddle : .byTruncatingTail))
-        titleTip = Self.tip(line.name, look: look)
+        ]).cut(cut))
+        titleTip = Self.tip(name, look: look)
         placeTip = Self.tip(below, look: look)
-        pill = Pill(Self.pill(line), look: look, mono: mono)
-        let owned = narrow ? nil : line.owner.map { Self.owner($0, look: look) }
-        ownerTip = owned?.tip
-        let counted = narrow ? nil : line.sessionsSaid.map { Self.secondary($0, look: look) }
-        whose = narrow ? nil : Self.column(owned?.view ?? counted, width: Self.ownerColumn)
+        pill = Pill(state, look: look, mono: mono)
+        self.ownerTip = ownerTip
+        whose = narrow ? nil : Self.column(column, width: whoseWidth)
         super.init(frame: .zero)
         for (label, tip) in [(title, titleTip), (place, placeTip)] {
             label.lineBreakMode = .byTruncatingTail
@@ -132,8 +145,16 @@ final class WorkspaceLine: NSStackView {
         return column
     }
 
+    /// The actions column a list of these rows keeps clear at its end: `buttons`, the widest a row
+    /// shows, side by side the design's 6 pt apart, and the design system's 8 pt between the row's
+    /// words and them, as the narrow frame's row sets its columns apart.
+    static func actionsColumn(_ buttons: [SailButton]) -> Double {
+        let boxes = buttons.map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
+        return (boxes.reduce(0, +) + Double(max(buttons.count - 1, 0)) * ProjectView.buttonGap + Look.Space.s).rounded(.up)
+    }
+
     /// Words in the owner's column, as a person's handle is set there.
-    private static func secondary(_ words: String, look: Look) -> NSTextField {
+    static func secondary(_ words: String, look: Look) -> NSTextField {
         let label = NSTextField(labelWithAttributedString: NSAttributedString(string: words, attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(look.textSecondary),
         ]))

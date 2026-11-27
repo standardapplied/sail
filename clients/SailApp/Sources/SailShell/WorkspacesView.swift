@@ -4,9 +4,10 @@ import SailControls
 import SailLook
 import SailWorkbench
 
-/// The Workspaces section: the left panel with the projects and, beside it, the chosen project's
-/// Workspaces view; while a session held at launch is checked, Sail's mark drawing itself; with
-/// nothing listed, one card saying why (signed out, the welcome stands in its place). It asks
+/// The Workspaces section: the left panel with This Mac and the projects and, beside it, the
+/// chosen project's Workspaces view, or This Mac's page, which needs nothing listed; while a session
+/// held at launch is checked, Sail's mark drawing itself; with no project listed, a card beside the
+/// panel saying why (signed out, the welcome stands in their place). It asks
 /// the control plane, hands the answers to ``WorkspacesModel`` and draws what the model says. Only
 /// a person's action holds a control (#462): a refresh never does. Under a 720 pt card the panel
 /// hides, and ⌃⌘S (View ▸ Show Sidebar) shows it over the content until a project is chosen or
@@ -60,6 +61,13 @@ public final class WorkspacesView: NSView {
             render()
         }
     }
+    /// This Mac's terminals now, which its page lists while it is shown; being listed until told.
+    var sessions: LocalProjectView.Terminals = .listing {
+        didSet { if sessions != oldValue { showThisMac() } }
+    }
+
+    /// This Mac's page is shown: its terminals are to be had, restored once.
+    var onThisMacShown: @MainActor () -> Void = {}
     /// Open Account, from the card that says the control plane is out of reach.
     var onSignIn: @MainActor () -> Void = {}
     /// The clipboard a login's sheet reads and clears: the person's; a test's own.
@@ -82,6 +90,8 @@ public final class WorkspacesView: NSView {
     /// The pop shadow the panel casts while it is slid over the content; none beside it.
     let panelShadow: PopShadowView
     package let project: ProjectView
+    /// This Mac's page, in the project's place while This Mac is chosen.
+    package let local: LocalProjectView
     package let newSession: NewSessionPanel
     /// The workspace the New Session panel was last asked for.
     private var startingIn: (project: String, name: String)?
@@ -123,27 +133,32 @@ public final class WorkspacesView: NSView {
         panelShadow = PopShadowView(look: look)
         panelShadow.isHidden = true
         project = ProjectView(look: look, mono: mono, titleFont: title)
+        local = LocalProjectView(look: look, mono: mono, titleFont: title)
+        local.isHidden = true
         newSession = NewSessionPanel(look: look, mono: mono)
         tryAgain = SailButton("Try Again", kind: .primary, look: look, target: nil, action: nil)
         super.init(frame: .zero)
         let cardWidth = card.widthAnchor.constraint(equalToConstant: Self.cardWidth)
         cardWidth.priority = Self.yields
-        for view in [project, card, panelShadow, panel] as [NSView] {
+        for view in [project, local, card, panelShadow, panel] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
             panel.leadingAnchor.constraint(equalTo: leadingAnchor), panel.topAnchor.constraint(equalTo: topAnchor), panel.bottomAnchor.constraint(equalTo: bottomAnchor),
             project.topAnchor.constraint(equalTo: topAnchor), project.bottomAnchor.constraint(equalTo: bottomAnchor), project.trailingAnchor.constraint(equalTo: trailingAnchor),
-            card.centerXAnchor.constraint(equalTo: centerXAnchor), card.centerYAnchor.constraint(equalTo: centerYAnchor), cardWidth,
-            card.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -32),
+            card.centerXAnchor.constraint(equalTo: project.centerXAnchor), card.centerYAnchor.constraint(equalTo: project.centerYAnchor), cardWidth,
+            card.widthAnchor.constraint(lessThanOrEqualTo: project.widthAnchor, constant: -32),
             panelShadow.leadingAnchor.constraint(equalTo: panel.leadingAnchor), panelShadow.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
             panelShadow.topAnchor.constraint(equalTo: panel.topAnchor), panelShadow.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+            local.leadingAnchor.constraint(equalTo: project.leadingAnchor), local.trailingAnchor.constraint(equalTo: project.trailingAnchor),
+            local.topAnchor.constraint(equalTo: project.topAnchor), local.bottomAnchor.constraint(equalTo: project.bottomAnchor),
         ])
         contentLeading = project.leadingAnchor.constraint(equalTo: panel.trailingAnchor)
         contentFull = project.leadingAnchor.constraint(equalTo: leadingAnchor)
         contentLeading.isActive = true
         panel.onChoose = { [weak self] name in self?.choose(name) }
+        panel.onTryAgain = { [weak self] in self?.askAgain(nil) }
         project.on = { [weak self] act in self?.act(act) }
         newSession.onStart = { [weak self] start, memory in self?.started(start, memory) }
         newSession.onStoreKey = { [weak self] offer in self?.storeKey(offer) }
@@ -170,6 +185,7 @@ public final class WorkspacesView: NSView {
         panelShadow.look = look
         question?.sheet.look = look
         project.look = look
+        local.look = look
         newSession.look = look
         paint()
         render(typing: typing)
@@ -210,6 +226,9 @@ public final class WorkspacesView: NSView {
         case .loading: return "Workspaces"
         case .unreachable: return (["Workspaces"] + cardSaid).joined(separator: "\n")
         case let .shown(_, .noProjects(empty)): return (["Workspaces", empty.title, empty.body] + (empty.line.map { [$0] } ?? [])).joined(separator: "\n")
+        case let .shown(panel, .thisMac):
+            let lede = WorkspacesModel.thisMacLede(host: local.macName, controlPlane: panel.controlPlane)
+            return (["Workspaces", WorkspacesModel.thisMac, lede] + (LocalProjectView.instead(sessions).map { [$0] } ?? sessions.rows.map(LocalProjectView.said))).joined(separator: "\n")
         case let .shown(_, .project(page)):
             var lines = ["Workspaces", page.name, page.lede] + (page.banner.map { [$0.title, $0.line] } ?? [])
             switch page.body {
@@ -334,12 +353,19 @@ public final class WorkspacesView: NSView {
         count([name], in: project, by: client)
     }
 
+    /// Chooses `name` in the panel: This Mac, its page asking the control plane nothing, or a project.
     private func choose(_ name: String) {
-        guard name != model.chosen else { return }
+        let thisMac = name == WorkspacesModel.thisMac
+        guard thisMac ? !model.thisMacChosen : name != model.chosen || model.thisMacChosen else { return }
         newSession.close()
         if overlaid {
             overlaid = false
             arrange()
+        }
+        if thisMac {
+            model.chooseThisMac()
+            keepChosen(name, person)
+            return render()
         }
         let request = model.choose(name)
         keepChosen(name, person)
@@ -691,6 +717,7 @@ public final class WorkspacesView: NSView {
             card.isHidden = true
             panel.render(panelModel)
             setPanel(shown: true)
+            local.isHidden = content != .thisMac
             switch content {
             case let .project(page):
                 project.isHidden = false
@@ -698,19 +725,33 @@ public final class WorkspacesView: NSView {
             case let .noProjects(empty):
                 project.isHidden = false
                 project.renderEmpty(empty)
+            case .thisMac:
+                project.isHidden = true
+                showThisMac()
             }
         case (_, .loading?):
             card.isHidden = true
-            panel.renderLoading()
+            local.isHidden = true
+            panel.render(model.panel)
             setPanel(shown: true)
             project.isHidden = false
             project.renderLoading()
         default:
             project.isHidden = true
-            setPanel(shown: false)
+            local.isHidden = true
+            if door == .signedIn { panel.render(model.panel) }
+            setPanel(shown: door == .signedIn)
             card.isHidden = false
             showCard(screen)
         }
+    }
+
+    /// This Mac's page drawn with its terminals now, while it is the one shown; its terminals asked
+    /// for first, restored once.
+    private func showThisMac() {
+        guard door == .signedIn, case let .shown(panel, .thisMac) = model.screen else { return }
+        onThisMacShown()
+        local.render(sessions, controlPlane: panel.controlPlane)
     }
 
     /// The card while a session held at launch is checked: that wait, Sail's mark drawing itself

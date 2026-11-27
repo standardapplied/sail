@@ -521,6 +521,37 @@ extension Driver {
             let named = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.hasPrefix("Workspaces\n\(wanted)\n") }
             return (named, "chosen: \(pane.panel.list.chosen ?? "none"); the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
         }
+        if let wanted = step.panelHeads {
+            let heads = {
+                pane.panel.list.entries.compactMap { entry -> String? in
+                    guard case let .head(title, count, _) = entry else { return nil }
+                    return count.map { "\(title) \($0)" } ?? title
+                }
+            }
+            let found = await waitUntil(step.seconds ?? 10) { !pane.panel.isHidden && heads() == wanted }
+            return (found, "the panel's heads: \(heads())")
+        }
+        if let title = step.chooseSession {
+            let list = pane.local.list, chosen = await chooseSession(title)
+            return (chosen, "chosen: \(list.chosen ?? "none"), the list \(list.window?.firstResponder === list ? "holding" : "not holding") the keys; the pane says: "
+                + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let title = step.openSession {
+            guard await chooseSession(title), let enter = Keys.named("enter", modifiers: []) else { return (false, "This Mac lists no session \(title) to open") }
+            send(enter)
+            let bench = shell.thisMac
+            let opened = await waitUntil(step.seconds ?? 5) { self.shell.rail.selected == .terminals && bench.model.selectedTab.map { bench.model.title(of: $0.id) } == title }
+            return (opened, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"); \(arrangementSaid)")
+        }
+        if step.nothingNamesThisMac == true {
+            let names = [WorkbenchView.hostName, pane.local.macName].filter { !$0.isEmpty }, asked = await GoldenDesk.shared.asked
+            let named = asked.filter { request in
+                [request.path, String(decoding: request.body ?? Data(), as: UTF8.self)].contains { sent in
+                    (["This Mac", "This%20Mac", "This+Mac"] + names).contains { sent.contains($0) }
+                }
+            }
+            return (named.isEmpty, "of \(asked.count) requests, these name This Mac or this Mac's host or name: \(named.map(\.route))")
+        }
         if let wanted = step.chooseRow {
             guard await clickRow(wanted, in: pane.project.list) else { return (false, "no row \(wanted) to click") }
             let chosen = await waitUntil(step.seconds ?? 5) { pane.project.list.chosen == wanted }
@@ -749,7 +780,7 @@ extension Driver {
                 view.needsLayout = true
                 view.needsDisplay = true
             }
-            list.reloadData()
+            [list, pane.panel.list, pane.local.list].forEach { $0.reloadData() }
             pane.layoutSubtreeIfNeeded()
             return (true, "the section is laid out \(rightToLeft ? "right to left" : "left to right")")
         }
@@ -1129,6 +1160,17 @@ extension Driver {
               await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY))
         else { return (false, "no \(title) shown") }
         return (true, "clicked \(title)")
+    }
+
+    /// This Mac's session row of `title` clicked: true once it is chosen with the list holding the keys.
+    private func chooseSession(_ title: String) async -> Bool {
+        let list = shell.workspaces.local.list
+        let id = list.entries.lazy.compactMap { entry -> String? in
+            guard case let .item(item) = entry, item.name == title else { return nil }
+            return item.id
+        }.first
+        guard let id, await clickRow(id, in: list) else { return false }
+        return await waitUntil(5) { list.chosen == id && list.window?.firstResponder === list }
     }
 
     /// Clicks the row of `id` in `list` 24 pt in from its leading edge in the list's direction,
