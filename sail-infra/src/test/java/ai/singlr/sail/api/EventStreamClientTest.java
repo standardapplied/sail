@@ -16,8 +16,13 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ClosesWhatItOpens;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -304,6 +309,52 @@ class EventStreamClientTest {
         }
       }
     }
+  }
+
+  @Test
+  void aStreamTheApiDropsIsReadAndStoppedOnItsClientsWorkAndStopsOnlyOnceThatHasEnded()
+      throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    var said = new LinkedBlockingQueue<String>();
+    var readBy = new LinkedBlockingQueue<Thread>();
+    var queue =
+        new LinkedBlockingQueue<Event>() {
+          @Override
+          public void put(Event event) throws InterruptedException {
+            readBy.add(Thread.currentThread());
+            super.put(event);
+          }
+        };
+    var event = Event.of("any", null, Event.WellKnownTypes.AGENT_SESSION_STOPPED, "a", "h");
+    var err = System.err;
+    System.setErr(
+        new PrintStream(OutputStream.nullOutputStream()) {
+          @Override
+          public void println(String line) {
+            said.add(line);
+          }
+        });
+    try (var work = new HeldUntilShutdown();
+        var server = StreamServer.dropping(": subscribed\n\ndata: " + event.toJsonLine() + "\n\n");
+        var stream =
+            EventStreamClient.subscribed(
+                FollowingClient.on(work, HttpClient.newBuilder()),
+                HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + server.port() + "/v1/events/stream"))
+                    .build(),
+                queue)) {
+      assertTrue(work.owns(readBy.poll(10, TimeUnit.SECONDS)), "the stream is read on its work");
+      assertEquals(
+          "  [event-stream] Stream ended: java.io.IOException: closed",
+          said.poll(10, TimeUnit.SECONDS));
+      stream.close();
+
+      assertEquals(event.toJsonLine(), queue.poll().toJsonLine());
+      assertTrue(work.isTerminated(), "the stream stopped while a task of its client ran");
+    } finally {
+      System.setErr(err);
+    }
+    ClosesWhatItOpens.assertClosed("a subscriber whose stream the API dropped", before);
   }
 
   /** However a subscription ends, refused or closed once it was on, its client is closed. */

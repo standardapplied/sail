@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.FollowingClient;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.common.Remedy;
@@ -22,9 +23,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.function.Supplier;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import picocli.CommandLine.Command;
@@ -62,14 +61,14 @@ public final class EventsCommand implements Runnable {
   @Option(names = "--json", description = "Print one JSON event per line (raw bus payload).")
   private boolean json;
 
-  private final Supplier<ExecutorService> executors;
+  private final Function<HttpClient.Builder, FollowingClient> clients;
 
   public EventsCommand() {
-    this(Executors::newCachedThreadPool);
+    this(FollowingClient::of);
   }
 
-  EventsCommand(Supplier<ExecutorService> executors) {
-    this.executors = executors;
+  EventsCommand(Function<HttpClient.Builder, FollowingClient> clients) {
+    this.clients = clients;
   }
 
   @Override
@@ -77,17 +76,11 @@ public final class EventsCommand implements Runnable {
     CliCommand.run(this::execute);
   }
 
-  /**
-   * Follows the stream on a client whose work runs on an executor closed after it: a client's close
-   * waits for its selector thread only, and when the API drops the stream, a task of the client's
-   * still closes the connection after that.
-   */
   private void execute() throws Exception {
     var token = ServerConnectionConfig.resolve().token();
-    try (var work = executors.get();
-        var client =
-            HttpClient.newBuilder().executor(work).connectTimeout(Duration.ofSeconds(5)).build()) {
-      streamEvents(client, token, System.out);
+    try (var client =
+        clients.apply(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)))) {
+      streamEvents(client.http(), token, System.out);
     }
   }
 
