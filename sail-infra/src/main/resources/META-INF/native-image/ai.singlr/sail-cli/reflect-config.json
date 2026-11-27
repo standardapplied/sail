@@ -210,6 +210,11 @@
     "allRecordComponents": true
   },
   {
+    "name": "ai.singlr.sail.engine.ChatWire$Answered",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
     "name": "ai.singlr.sail.engine.ChatWire$Delivered",
     "allDeclaredMethods": true,
     "allRecordComponents": true
@@ -220,7 +225,17 @@
     "allRecordComponents": true
   },
   {
+    "name": "ai.singlr.sail.engine.ChatWire$ModeSet",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
     "name": "ai.singlr.sail.engine.ChatWire$Told",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.LiveChat$Answer",
     "allDeclaredMethods": true,
     "allRecordComponents": true
   },

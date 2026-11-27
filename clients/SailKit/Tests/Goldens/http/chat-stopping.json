@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat:interrupt"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "stopping": true
+    },
+    "status": 200
+  }
+}

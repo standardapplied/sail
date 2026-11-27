@@ -604,6 +604,11 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-chat-inside-invalid", "refusal-chat-not-found", "refusal-chat-invalid-id",
     "refusal-chat-after-invalid", "refusal-chat-ended", "refusal-chat-login-not-stored",
     "refusal-chat-launch-failed", "refusal-chat-message-not-found", "refusal-chat-end-not-found",
+    "refusal-chat-mode-turn-open", "refusal-chat-mode-not-a-chat-mode", "refusal-chat-request-not-yours",
+    "refusal-chat-interrupt-not-yours", "refusal-chat-mode-not-yours", "refusal-chat-request-not-found",
+    "refusal-chat-answer-invalid", "refusal-chat-answer-not-taken", "refusal-chat-request-answered",
+    "refusal-chat-always-not-offered", "refusal-chat-answer-not-a-choice",
+    "refusal-chat-request-withdrawn", "refusal-chat-answer-ended",
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.
@@ -611,6 +616,9 @@ let answersOfRoutesNotYetCalled: Set<String> = [
     "spec-measures", "specs-measures",
     "chat-opened", "chat-message-sent", "chat-items", "chat-message-again", "chat-message-queued",
     "chat-items-after", "chat-ended", "chat-items-ended",
+    "chat-mode-kept", "chat-request-denied", "chat-request-allowed-always", "chat-request-allowed",
+    "chat-question-answered", "chat-plan-approved", "chat-stopping", "chat-not-stopping", "chat-mode-set",
+    "chat-items-answered",
 ]
 
 /// The member the golden writer seats in the room.

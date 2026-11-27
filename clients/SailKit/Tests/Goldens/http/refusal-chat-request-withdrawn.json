@@ -1,0 +1,21 @@
+{
+  "request": {
+    "body": {
+      "decision": "allow"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/requests/00000000-0000-7000-8000-000000000013"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Answer what it asks next, or send a message.",
+        "code": "request_withdrawn",
+        "field_errors": [],
+        "message": "Claude Code no longer waits for this answer, so it was not sent."
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

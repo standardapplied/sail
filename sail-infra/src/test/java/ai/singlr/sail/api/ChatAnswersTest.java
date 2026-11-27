@@ -589,6 +589,19 @@ class ChatAnswersTest {
         argv.subList(argv.indexOf("--permission-mode"), argv.indexOf("--permission-mode") + 2));
   }
 
+  /** I11: a change of mode its process did not take is kept for the next process. */
+  @Test
+  void aModeItsProcessDidNotTakeIsKeptForTheNext() {
+    var session = bench.samsChat();
+    var fake = asked(session, ENDS);
+    fake.breaksStdin();
+
+    mode(session, "plan");
+    over(fake);
+
+    assertEquals("plan", bench.store.find(session).orElseThrow().mode());
+  }
+
   /** I11: a process that is ending no longer sets the mode in force; the person's choice stays. */
   @Test
   void anEndingProcessNoLongerSetsTheModeInForce() {

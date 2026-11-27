@@ -1,0 +1,21 @@
+{
+  "request": {
+    "body": {
+      "decision": "allow"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/requests/00000000-0000-7000-8000-000000000007"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Open a new chat in workspace berth.",
+        "code": "conflict",
+        "field_errors": [],
+        "message": "This chat has ended, so it takes no answer."
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "body": {
+      "decision": "deny",
+      "message": "use the existing spinner instead"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/requests/00000000-0000-7000-8000-000000000007"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "seq": 5
+    },
+    "status": 200
+  }
+}

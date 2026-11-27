@@ -1,0 +1,20 @@
+{
+  "request": {
+    "body": {
+      "decision": "allow"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/requests/00000000-0000-7000-8000-000000000007"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "request_answered",
+        "field_errors": [],
+        "message": "You answered this at 09:00:00: deny."
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

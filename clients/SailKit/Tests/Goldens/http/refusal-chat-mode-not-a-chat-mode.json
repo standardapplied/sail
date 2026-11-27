@@ -1,0 +1,20 @@
+{
+  "request": {
+    "body": {
+      "mode": "bypassPermissions"
+    },
+    "method": "PUT",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/mode"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "Claude Code takes no mode 'bypassPermissions' in a workspace; it takes default, acceptEdits, plan."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "request": {
+    "body": {
+      "answers": {
+        "Which colors?": {
+          "chosen": [
+            "Teal"
+          ]
+        },
+        "Which size?": {
+          "chosen": [],
+          "own": "teal, but only on weekends"
+        }
+      },
+      "decision": "answer"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/requests/00000000-0000-7000-8000-000000000011"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "Each label chosen is one of its question's own choices, once; anything else is said in own words."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}
