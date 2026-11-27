@@ -151,7 +151,7 @@ final class FakeAgentProcess implements AgentProcess {
             container.takeLaunchEnv(launchEnvFile)));
     var fake = new Fake(env.getOrDefault("SAIL_RUN_ID", Ids.newId().toString()), pidFile);
     if (!slowToName) {
-      container.started(fake.runId, pidFile);
+      container.startedUnderTheWrapper(fake.runId, pidFile);
     }
     processes.add(fake);
     onStart.accept(fake);
@@ -325,7 +325,7 @@ final class FakeAgentProcess implements AgentProcess {
 
     /** The process's wrapper writes its pid file: the container finds the process from now on. */
     void writesPid() {
-      container.started(runId, pidFile);
+      container.startedUnderTheWrapper(runId, pidFile);
     }
 
     /** What happens as the process is asked for its pid, before it answers. */

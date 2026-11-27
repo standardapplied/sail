@@ -245,9 +245,7 @@ public final class AgentSession {
    */
   public SessionInfo queryStatus(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath()));
-    var pidResult = shell.exec(pidCmd);
-    var pid = pidResult.ok() ? parsePid(pidResult.stdout()) : null;
+    var pid = pidOf(containerName, unit);
     if (pid == null && unit.systemd()) {
       pid = querySystemdPid(containerName, unit);
     }
@@ -301,6 +299,17 @@ public final class AgentSession {
   }
 
   /**
+   * Whether the process at {@code pid} in the container is the one whose start fingerprint ({@link
+   * #readProcessStartTicks}) was recorded as {@code ticks}: one recorded as nothing, or whose live
+   * fingerprint cannot be read, is never taken for it, because a signal must never proceed on an
+   * identity that cannot be verified.
+   */
+  public boolean startedAt(String containerName, int pid, Long ticks)
+      throws IOException, InterruptedException, TimeoutException {
+    return ticks != null && ticks.equals(readProcessStartTicks(containerName, pid));
+  }
+
+  /**
    * Field 22 of the stat line, located after the last {@code ')'} because the comm field may itself
    * contain spaces or parentheses.
    */
@@ -340,7 +349,10 @@ public final class AgentSession {
    */
   public sealed interface Halt {
 
-    /** A signal was delivered and the container answered that the agent is gone. */
+    /**
+     * The agent is gone: a signal was delivered and the container answered so, or the pid its file
+     * names is no longer the process it was written for ({@link #killStarted}).
+     */
     record Ended() implements Halt {}
 
     /** Every signal was sent and the container answered that the agent is still running. */
@@ -471,26 +483,59 @@ public final class AgentSession {
    * a process that has ended: never one a later process wrote, and never a pid the box may give
    * another process, which a later kill by this file would then signal.
    */
-  public void forgetPid(String containerName, AgentUnit unit, int pid)
+  public boolean forgetPid(String containerName, AgentUnit unit, int pid)
       throws IOException, InterruptedException, TimeoutException {
-    shell.exec(
-        ContainerExec.asDevUser(
-            containerName,
-            List.of("bash", "-c", FORGET_PID_SCRIPT, "bash", unit.pidPath(), String.valueOf(pid))));
+    return shell
+        .exec(
+            ContainerExec.asDevUser(
+                containerName,
+                List.of(
+                    "bash", "-c", FORGET_PID_SCRIPT, "bash", unit.pidPath(), String.valueOf(pid))))
+        .ok();
   }
 
   /** Removes the file its first argument names when it holds exactly its second; exits 0. */
   static final String FORGET_PID_SCRIPT =
       "if [ \"$(cat -- \"$1\" 2>/dev/null)\" = \"$2\" ]; then rm -f -- \"$1\"; fi";
 
-  private Halt killByPidFile(String containerName, AgentUnit unit)
+  /**
+   * Halts the process {@code unit}'s pid file names, which a wrapper over pipes started and whose
+   * start it recorded beside the pid ({@link AgentUnit#startPath}), only while the process at that
+   * pid is still that one ({@link #startedAt}): a pid the box has given another process since, or
+   * one whose start cannot be read on either side, is never signalled. The process the file was
+   * written for is then gone: the pid file is removed, and the halt is {@link Halt.Ended} once the
+   * container answered the removal. Otherwise it is halted as {@link #killAgent} halts a session
+   * that is no unit.
+   */
+  public Halt killStarted(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    var pidResult =
-        shell.exec(ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath())));
-    var pid = pidResult.ok() ? parsePid(pidResult.stdout()) : null;
+    var pid = pidOf(containerName, unit);
     if (pid == null) {
       return new Halt.Unanswered();
     }
+    var recorded =
+        shell.exec(ContainerExec.asDevUser(containerName, List.of("cat", unit.startPath())));
+    if (!startedAt(containerName, pid, recorded.ok() ? parseStartTicks(recorded.stdout()) : null)) {
+      return forgetPid(containerName, unit, pid) ? new Halt.Ended() : new Halt.Unanswered();
+    }
+    return haltPid(containerName, unit, pid);
+  }
+
+  private Integer pidOf(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var pidResult =
+        shell.exec(ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath())));
+    return pidResult.ok() ? parsePid(pidResult.stdout()) : null;
+  }
+
+  private Halt killByPidFile(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var pid = pidOf(containerName, unit);
+    return pid == null ? new Halt.Unanswered() : haltPid(containerName, unit, pid);
+  }
+
+  private Halt haltPid(String containerName, AgentUnit unit, int pid)
+      throws IOException, InterruptedException, TimeoutException {
     var halted =
         shell.exec(
             ContainerExec.asDevUser(

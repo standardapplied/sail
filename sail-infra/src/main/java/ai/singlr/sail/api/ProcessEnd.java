@@ -65,13 +65,15 @@ final class ProcessEnd {
 
   /**
    * Halts the process the pid file of {@code unit} names in {@code instance}, left from before this
-   * sail started ({@link AgentSession#killAgent}), and answers whether it is then known gone: the
-   * halt's own answer, else {@code gone}'s. A container that does not answer proves nothing, so
-   * whatever the process holds stays held until one does.
+   * sail started, only while it is the process its wrapper started there ({@link
+   * AgentSession#killStarted}): a pid the box has given another of the person's processes since,
+   * after a restart of the box or the workspace, is never signalled. Answers whether the process is
+   * then known gone: the halt's own answer, else {@code gone}'s. A container that does not answer
+   * proves nothing, so whatever the process holds stays held until one does.
    */
   static boolean halted(ShellExec shell, String instance, AgentUnit unit, Gone gone) {
     try {
-      return new AgentSession(shell).killAgent(instance, unit) instanceof AgentSession.Halt.Ended
+      return new AgentSession(shell).killStarted(instance, unit) instanceof AgentSession.Halt.Ended
           || gone.gone();
     } catch (Exception unanswered) {
       return false;

@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -97,12 +98,12 @@ class ContainerAgentProcessTest {
             "-lc",
             "f=/home/dev/.sail/runs/r/launch.env; set +x; while IFS= read -r kv; do export \"$kv\";"
                 + " done <"
-                + " \"$f\" || exit 1; rm -f \"$f\"; mkdir -p -- \"${1%/*}\"; printf '%s\\n' \"$$\" > \"$1\";"
-                + " exec \"${@:3}\" 2>>"
-                + " \"$2\"",
+                + " \"$f\" || exit 1; rm -f \"$f\"; mkdir -p -- \"${1%/*}\"; cat /proc/$$/stat >"
+                + " \"$3\"; printf '%s\\n' \"$$\" > \"$1\"; exec \"${@:4}\" 2>> \"$2\"",
             "bash",
             "/home/dev/.sail/runs/r/agent.pid",
             "/home/dev/.sail/runs/r/agent.log",
+            "/home/dev/.sail/runs/r/agent.pid.start",
             "claude",
             "--print",
             "a b; c"),
@@ -151,6 +152,37 @@ class ContainerAgentProcessTest {
         "the pid file names the command itself: the wrapper exec'd into it");
     assertEquals("oops\n", Files.readString(logFile), "stderr is the log's, never stdout's");
     assertEquals(OptionalInt.of(4242), handle.pid());
+  }
+
+  /**
+   * The wrapper records, beside the pid, the start of the process the pid names: the command's own,
+   * which it exec'd into, read as a halt reads it.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void theWrapperRecordsTheStartOfTheProcessItsPidNames() throws Exception {
+    var pidFile = dir.resolve("agent.pid");
+    var handle =
+        held(
+            new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of("bash", "-c", "echo started; read -r line"),
+                    pidFile.toString(),
+                    dir.resolve("agent.log").toString(),
+                    launchEnv("SAIL_RUN_CREDENTIAL=c1")));
+
+    assertEquals("started", handle.stdout().read());
+    var pid = Files.readString(pidFile).strip();
+    var recorded =
+        AgentSession.parseStartTicks(
+            Files.readString(Path.of(AgentUnit.startPath(pidFile.toString()))));
+    var live = AgentSession.parseStartTicks(Files.readString(Path.of("/proc", pid, "stat")));
+
+    assertNotNull(recorded);
+    assertEquals(live, recorded);
   }
 
   /**

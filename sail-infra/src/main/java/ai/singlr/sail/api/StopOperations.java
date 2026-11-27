@@ -545,16 +545,16 @@ public final class StopOperations {
 
   /**
    * Whether the live process at the run's pid is a later occupant rather than the process the run
-   * launched. No fingerprint on the run means nothing to compare; an unreadable live fingerprint
-   * reads as reused, because a kill must never proceed on an identity that cannot be verified.
+   * launched ({@link AgentSession#startedAt}). No fingerprint on the run means nothing to compare;
+   * an unreadable live fingerprint reads as reused, because a kill must never proceed on an
+   * identity that cannot be verified.
    */
   private boolean pidReused(RunStore.RunRow run, int livePid) {
     if (run.pidTicks() == null) {
       return false;
     }
     try {
-      return !run.pidTicks()
-          .equals(new AgentSession(shell).readProcessStartTicks(run.place().instance(), livePid));
+      return !new AgentSession(shell).startedAt(run.place().instance(), livePid, run.pidTicks());
     } catch (Exception e) {
       return true;
     }

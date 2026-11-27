@@ -339,6 +339,7 @@ public final class ServerStartCommand implements Runnable {
                     + " chat turn(s) the restart cut; each resumes on its next message"));
       }
       server.start();
+      operations.chats().deliverWaiting();
       sweeper.start();
       eventSweeper.start();
       retentionSweeper.start();

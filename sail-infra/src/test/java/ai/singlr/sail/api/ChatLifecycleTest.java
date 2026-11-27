@@ -10,6 +10,7 @@ import static ai.singlr.sail.api.ChatBench.line;
 import static ai.singlr.sail.api.ChatBench.over;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,6 +20,7 @@ import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ChatStore;
+import ai.singlr.sail.store.ProjectStore;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -262,7 +264,10 @@ class ChatLifecycleTest {
         List.of("message", "session", "turn_ended", "message", "delivered"), bench.kinds(session));
   }
 
-  /** I5, I8: a message waiting when sail restarted is delivered as its opener's, by the next. */
+  /**
+   * I5, I8: a message waiting when sail restarted is delivered as its opener's, by the next, once
+   * the restart's cleanup is done.
+   */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aMessageWaitingWhenSailRestartedIsDelivered() {
@@ -270,8 +275,10 @@ class ChatLifecycleTest {
     bench.send(session, "hi");
     bench.says(INIT);
     bench.send(session, "second");
+    var restarted = bench.restarted();
 
-    bench.restarted().reclaim();
+    restarted.reclaim();
+    restarted.deliverWaiting();
 
     assertEquals(2, bench.processes.starts.size());
     assertEquals(List.of(LiveStream.userMessage("second")), bench.processes.latest().written);
@@ -296,6 +303,7 @@ class ChatLifecycleTest {
 
     var restarted = bench.restarted();
     restarted.reclaim();
+    restarted.deliverWaiting();
     var said = bench.items(session).getLast();
     bench.fdes.logins().store(bench.samId, claude, "work", "api-key", "fake-key-sam");
     var third = as("sam", () -> restarted.send(session, "third"));
@@ -344,8 +352,10 @@ class ChatLifecycleTest {
     bench.says(INIT);
     bench.send(session, "second");
     bench.db.execute("UPDATE fdes SET status = 'disabled' WHERE id = ?", bench.samId);
+    var restarted = bench.restarted();
 
-    bench.restarted().reclaim();
+    restarted.reclaim();
+    restarted.deliverWaiting();
 
     assertEquals(1, bench.processes.starts.size());
     assertEquals(
@@ -595,5 +605,141 @@ class ChatLifecycleTest {
     waiting.join(Duration.ofSeconds(30));
 
     assertEquals(0, bench.held.availablePermits(), "no reader of the other chat was woken");
+  }
+
+  /**
+   * I2: a restart of the box took a chat's process with it and gave its pid to another process of
+   * the person, which is never signalled: the process the pid file was written for is gone, the
+   * file is cleaned, the turn it held is cut, and the next message starts another.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aPidTheBoxGaveAnotherProcessIsNeverSignalled() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var old = bench.says(INIT);
+    var container = bench.processes.container();
+    var other = container.pidReused(old.runId);
+    var restarted = bench.restarted();
+
+    var cut = restarted.reclaim();
+    var pidFile = container.file(AgentUnit.chat(session).pidPath());
+    as("sam", () -> restarted.send(session, "again"));
+
+    assertEquals(1, cut);
+    assertTrue(container.alive(other), "the process that holds the pid now is not signalled");
+    assertEquals(List.of(), container.commandsContaining("kill \"$1\""), "nothing is signalled");
+    assertNull(pidFile, "the pid file of a process gone is cleaned");
+    assertEquals(2, bench.processes.starts.size());
+    assertEquals(
+        List.of("message", "session", "told", "interrupted", "message"), bench.kinds(session));
+  }
+
+  /**
+   * I6: an end said as a waiting message's process starts waits for that start, and then ends the
+   * process: none runs on for a chat its person ended.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void anEndSaidAsAWaitingMessagesProcessStartsEndsIt() throws Exception {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var first = bench.says(INIT);
+    bench.send(session, "second");
+    var ending = new AtomicReference<Thread>();
+    bench.processes.onStart(
+        started -> {
+          started.onClose(started::exitsIfRunning);
+          ending.set(bench.endsAsItStarts(session));
+        });
+
+    first.exits(0);
+    over(first);
+    var next = bench.processes.latest();
+    next.awaitStdinClosed();
+    over(next);
+
+    assertTrue(ending.get().join(ChatBench.PATIENCE), "the end was done");
+    assertEquals(List.of(LiveStream.userMessage("second")), next.written);
+    assertTrue(bench.read(session, 0).ended());
+    assertFalse(bench.store.find(session).orElseThrow().launched());
+  }
+
+  /**
+   * I2: once a process started, nothing is left to fail its start: it is held and marked even when
+   * its project is gone as it starts, so the next message never starts a second beside it.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aProcessThatStartedIsHeldWhateverChangesAsItStarts() {
+    var session = bench.samsChat();
+    bench.processes.onStart(
+        started -> {
+          started.onClose(started::exitsIfRunning);
+          Acting.system(() -> new ProjectStore(bench.db).delete("acme"));
+        });
+
+    var sent = bench.send(session, "hi");
+    var held = bench.processes.latest();
+    bench.host.close();
+
+    assertFalse(sent.queued());
+    assertEquals(List.of(LiveStream.userMessage("hi")), held.written);
+    assertTrue(held.stdinClosed(), "the host held it, and ended it as sail stopped");
+  }
+
+  /**
+   * I5: a message sent once the reader of its process stopped is never handed to that process,
+   * whose answer nobody would read: it waits, and the next process is handed it.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aMessageSentAsItsProcessIsNoLongerReadIsHandedToTheNext() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var fake = bench.says(INIT, ENDS);
+    var sent = new AtomicReference<ChatHost.Sent>();
+    fake.onClose(() -> {});
+    fake.onSignal(
+        signal -> {
+          if (signal == AgentProcess.Signal.INT) {
+            sent.set(bench.send(session, "second"));
+            fake.exits(130);
+          }
+        });
+
+    fake.failsItsReader(new IllegalStateException("database is locked"));
+    over(fake);
+
+    assertTrue(sent.get().queued());
+    assertEquals(List.of(LiveStream.userMessage("hi")), fake.written, "never handed to it");
+    assertEquals(2, bench.processes.starts.size());
+    assertEquals(List.of(LiveStream.userMessage("second")), bench.processes.latest().written);
+  }
+
+  /**
+   * I11: the sweep ends each process on a thread of its own: two whose ends are held are both
+   * closed, neither waiting on the other's.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void theSweepEndsEachProcessWithoutWaitingOnAnother() throws Exception {
+    var minute = Duration.ofMinutes(1);
+    var host = bench.restarted(new ProcessEnd.Grace(minute, minute, minute, minute));
+    var one = bench.samsChat();
+    var two = bench.samsChat();
+    as("sam", () -> host.send(one, "hi"));
+    var first = bench.processes.latest().holdsItsEnd();
+    as("sam", () -> host.send(two, "hi"));
+    var second = bench.processes.latest().holdsItsEnd();
+    Acting.system(() -> bench.fdes.remove(bench.samId));
+
+    var sweeping = Thread.ofVirtual().start(host::sweep);
+    first.awaitStdinClosed();
+    second.awaitStdinClosed();
+    first.releasesItsEnd();
+    second.releasesItsEnd();
+
+    assertTrue(sweeping.join(ChatBench.PATIENCE), "the sweep was done");
   }
 }

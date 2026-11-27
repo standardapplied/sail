@@ -54,6 +54,7 @@ final class ChatProcess {
   private Instant stopAsked;
   private boolean turnOpen;
   private boolean took;
+  private boolean reading = true;
 
   /**
    * The process {@code handle} of chat {@code session}, with {@code agent}, the harness's name as a
@@ -184,7 +185,8 @@ final class ChatProcess {
 
   /**
    * Logs what the person said, and hands it to the process at once unless a turn is open, the
-   * process is ending or an earlier message still waits, as each turn's end hands the next.
+   * process is ending or no longer read, or an earlier message still waits, as each turn's end
+   * hands the next; one the process is not handed waits for the turn's end or the next process.
    *
    * @throws ApiException {@code ended}, when the person ended the chat
    */
@@ -192,9 +194,9 @@ final class ChatProcess {
     if (end.chatEnded()) {
       throw ended;
     }
-    var queued = turnOpen || end.ending() || !log.unhanded().isEmpty();
+    var queued = !takes() || !log.unhanded().isEmpty();
     var seq = log.log(new ChatWire.Message(text, queued));
-    if (!turnOpen && !end.ending()) {
+    if (takes()) {
       handNext();
     }
     return new ChatHost.Sent(seq, queued);
@@ -202,9 +204,17 @@ final class ChatProcess {
 
   /** Hands the oldest message waiting, when no turn is open: what a process started for it does. */
   synchronized void resume() {
-    if (!turnOpen && !end.ending()) {
+    if (takes()) {
       handNext();
     }
+  }
+
+  /**
+   * Whether the process takes a message now: no turn is open, it is not ending, and it is still
+   * read, so nothing it answers goes unread. Called under the monitor.
+   */
+  private boolean takes() {
+    return !turnOpen && !end.ending() && reading;
   }
 
   /**
@@ -320,11 +330,15 @@ final class ChatProcess {
   }
 
   /**
-   * The reading is done, however it stopped: a process whose exit is not then known is ended as any
-   * is, its stdin closed and signalled, so none outlives its reader; a turn it left open is cut,
-   * said why; and the host is told before the process is over, so an end waited for is done.
+   * The reading is done, however it stopped: the process takes no message from then on; one whose
+   * exit is not then known is ended as any is, its stdin closed and signalled, so none outlives its
+   * reader; a turn it left open is cut, said why; and the host is told before the process is over,
+   * so an end waited for is done.
    */
   private void finished() {
+    synchronized (this) {
+      reading = false;
+    }
     var exit = end.seenOut();
     try {
       synchronized (this) {

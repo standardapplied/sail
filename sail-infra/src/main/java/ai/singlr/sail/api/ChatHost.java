@@ -111,9 +111,9 @@ public final class ChatHost implements AutoCloseable {
   }
 
   /**
-   * Takes up the chats a sail before this one left, before any request is served ({@link
-   * #reclaim}), then holds every chat to its bounds at {@code interval}. Returns how many turns the
-   * restart cut.
+   * Takes up the processes a sail before this one left ({@link #reclaim}), then holds every chat to
+   * its bounds at {@code interval}. Returns how many turns the restart cut. The messages they left
+   * waiting are delivered once sail serves ({@link #deliverWaiting}).
    */
   public int start(Duration interval) {
     var cut = reclaim();
@@ -226,13 +226,6 @@ public final class ChatHost implements AutoCloseable {
       if (process == null || process.end().over()) {
         process = startProcess(store.find(session).orElseThrow());
       }
-      if (ended(session)) {
-        var started = process;
-        Thread.ofVirtual()
-            .name("sail-chat-ended-" + session)
-            .start(() -> started.end().endChat(timing.grace().afterInt()));
-        throw ended(chat);
-      }
       return process.send(text, ended(chat));
     }
   }
@@ -251,35 +244,71 @@ public final class ChatHost implements AutoCloseable {
   /**
    * Ends the caller's chat {@code session}: it is marked ended, and its process, if one holds it,
    * ended; its log stays readable for {@link #RETENTION}, and its folder in the workspace goes once
-   * its process is known gone.
+   * its process is known gone. It is marked under the chat's lock, so a process starting for it is
+   * found and ended; the end is waited for outside it.
    */
   public void end(String session) {
-    var chat = yours(session);
-    store.ended(session, timing.clock().get());
+    yours(session);
+    var process = markEnded(session);
     arrived(session);
-    var process = live.get(session);
     if (process != null) {
       process.end().endChat(timing.grace().afterInt());
-    } else if (!chat.launched()) {
-      launch.forget(chat);
     }
   }
 
   /**
-   * Takes up what a sail before this one left: each process started for a chat that is not known
-   * gone is halted and proved gone, and a turn it held cut, said so; one its workspace does not
-   * answer for is asked again by the sweep, and before the chat's next start. Then each chat whose
-   * messages wait is delivered them by a process started as its opener. Returns how many turns it
-   * cut.
+   * Marks chat {@code session} ended under its lock, and returns the process that holds it; when
+   * none does, nor may, its folder goes now.
+   */
+  private ChatProcess markEnded(String session) {
+    synchronized (lock(session)) {
+      store.ended(session, timing.clock().get());
+      var process = live.get(session);
+      if (process == null) {
+        store.find(session).filter(chat -> !chat.launched()).ifPresent(launch::forget);
+      }
+      return process;
+    }
+  }
+
+  /**
+   * Takes up what a sail before this one left: each process started for a chat that no process of
+   * this host holds and that is not known gone is halted and proved gone, each chat on a thread of
+   * its own, and a turn it held cut, said so; one its workspace does not answer for is asked again
+   * by the sweep, and before the chat's next start. It is safe at any time: a chat's process is
+   * looked for under its lock. Returns how many turns it cut.
    */
   int reclaim() {
-    var cut = settleLeftovers();
-    for (var session : store.queued(MESSAGE)) {
-      synchronized (lock(session)) {
-        resumeQueued(session);
+    var cut = new AtomicInteger();
+    try (var each = Executors.newVirtualThreadPerTaskExecutor()) {
+      for (var session : store.launched()) {
+        each.execute(
+            () -> {
+              if (settled(session)) {
+                cut.incrementAndGet();
+              }
+            });
       }
     }
-    return cut;
+    return cut.get();
+  }
+
+  /**
+   * Delivers each chat's messages that a sail before this one left waiting, by a process started as
+   * its opener, each chat on a thread of its own, so one that waits on its workspace holds up no
+   * other.
+   */
+  public void deliverWaiting() {
+    try (var each = Executors.newVirtualThreadPerTaskExecutor()) {
+      for (var session : store.queued(MESSAGE)) {
+        each.execute(
+            () -> {
+              synchronized (lock(session)) {
+                resumeQueued(session);
+              }
+            });
+      }
+    }
   }
 
   /** Erases the chats of workspace {@code workspace} of {@code project}, which was deleted. */
@@ -302,7 +331,7 @@ public final class ChatHost implements AutoCloseable {
   void sweep() {
     var now = timing.clock().get();
     store.expire(now.minus(RETENTION));
-    settleLeftovers();
+    reclaim();
     try (var each = Executors.newVirtualThreadPerTaskExecutor()) {
       for (var process : List.copyOf(live.values())) {
         each.execute(() -> holdToBounds(process, now));
@@ -338,22 +367,6 @@ public final class ChatHost implements AutoCloseable {
           .forEach(
               process -> ending.execute(() -> process.end().end(timing.grace().result(), STOPPED)));
     }
-  }
-
-  /** Settles each chat's process left over that no process of this host holds; turns cut. */
-  private int settleLeftovers() {
-    var cut = new AtomicInteger();
-    try (var each = Executors.newVirtualThreadPerTaskExecutor()) {
-      for (var session : store.launched()) {
-        each.execute(
-            () -> {
-              if (settled(session)) {
-                cut.incrementAndGet();
-              }
-            });
-      }
-    }
-    return cut.get();
   }
 
   /**

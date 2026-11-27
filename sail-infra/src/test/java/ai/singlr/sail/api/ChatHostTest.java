@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static ai.singlr.sail.api.ChatBench.as;
 import static ai.singlr.sail.api.ChatBench.line;
+import static ai.singlr.sail.api.ChatBench.over;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -33,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -706,24 +708,34 @@ class ChatHostTest {
         bench.processes.starts.getLast().command());
   }
 
-  /** I6: a chat ended while its message started a process takes no message, and ends it. */
+  /**
+   * I6: an end said as a message starts the chat's process waits for that send, which was said
+   * first, and then ends the process; the chat takes no message after.
+   */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
-  void aChatEndedWhileItsProcessStartsTakesNoMessageAndEndsTheProcess() {
+  void anEndSaidAsAMessageStartsTheProcessEndsItOnceTheMessageIsSent() throws Exception {
     var session = bench.samsChat();
+    var ending = new AtomicReference<Thread>();
     bench.processes.onStart(
         fake -> {
           fake.onClose(fake::exitsIfRunning);
-          bench.store.ended(session, bench.clock.instant());
+          ending.set(bench.endsAsItStarts(session));
         });
 
-    var refused = assertThrows(ApiException.class, () -> bench.send(session, "hi"));
-    bench.processes.latest().awaitStdinClosed();
+    var sent = bench.send(session, "hi");
+    var fake = bench.processes.latest();
+    fake.awaitStdinClosed();
+    over(fake);
+    var refused = assertThrows(ApiException.class, () -> bench.send(session, "late"));
 
+    assertTrue(ending.get().join(ChatBench.PATIENCE), "the end was done");
+    assertFalse(sent.queued());
+    assertEquals(List.of(LiveStream.userMessage("hi")), fake.written);
     assertEquals(
         List.of("conflict", "This chat has ended, so it takes no message."),
         List.of(refused.code(), refused.reason()));
-    assertEquals(List.of(), bench.kinds(session), "nothing of it is logged");
+    assertEquals(1, bench.processes.starts.size());
   }
 
   /** Sail stopping cuts a turn open, saying so; the chat stays open, to resume. */

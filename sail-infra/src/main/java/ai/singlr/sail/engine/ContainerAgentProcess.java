@@ -25,21 +25,25 @@ import java.util.function.UnaryOperator;
 /**
  * {@link AgentProcess} over {@code incus exec}: one host-side client process whose pipes are the
  * container process's. The wrapper first reads the run's {@code launch.env} into its environment
- * and removes it ({@link LaunchEnv#read}), then makes the pid file's folder, writes its own pid to
- * the run's pid file and {@code exec}s into the command, so the pid file names the agent itself and
- * the run probes alive exactly as a unit's does; the agent's stderr is appended to the run's log,
- * which leaves stdout to carry nothing but its lines. A Java {@code Process} can only signal the
- * host-side client, so a signal is a {@code kill} run in the container against the pid the file
- * names, as an argument.
+ * and removes it ({@link LaunchEnv#read}), then makes the pid file's folder, records its own start
+ * beside it ({@link AgentUnit#startPath}), writes its own pid to the run's pid file and {@code
+ * exec}s into the command, so the pid file names the agent itself, the run probes alive exactly as
+ * a unit's does, and a halt can tell the agent from a later process given its pid; the agent's
+ * stderr is appended to the run's log, which leaves stdout to carry nothing but its lines. A Java
+ * {@code Process} can only signal the host-side client, so a signal is a {@code kill} run in the
+ * container against the pid the file names, as an argument.
  */
 public final class ContainerAgentProcess implements AgentProcess {
 
   /**
-   * {@code $1} the pid file, {@code $2} the log file beside it, the rest the command: the folder
-   * that holds them is made first, for a process that has no run's folder made for it (a chat's).
+   * {@code $1} the pid file, {@code $2} the log file beside it, {@code $3} the start record beside
+   * it, the rest the command: the folder that holds them is made first, for a process that has no
+   * run's folder made for it (a chat's), and the start is recorded before the pid, so a pid file
+   * never names a process whose start is not beside it.
    */
   private static final String WRAP =
-      "; mkdir -p -- \"${1%/*}\"; printf '%s\\n' \"$$\" > \"$1\"; exec \"${@:3}\" 2>> \"$2\"";
+      "; mkdir -p -- \"${1%/*}\"; cat /proc/$$/stat > \"$3\"; printf '%s\\n' \"$$\" > \"$1\";"
+          + " exec \"${@:4}\" 2>> \"$2\"";
 
   private final ShellExec shell;
   private final UnaryOperator<List<String>> transport;
@@ -65,7 +69,14 @@ public final class ContainerAgentProcess implements AgentProcess {
       String launchEnvFile) {
     var args =
         new ArrayList<>(
-            List.of("bash", "-lc", LaunchEnv.read(launchEnvFile) + WRAP, "bash", pidFile, logFile));
+            List.of(
+                "bash",
+                "-lc",
+                LaunchEnv.read(launchEnvFile) + WRAP,
+                "bash",
+                pidFile,
+                logFile,
+                AgentUnit.startPath(pidFile)));
     args.addAll(command);
     return ContainerExec.asDevUser(container, workDir, env, args);
   }

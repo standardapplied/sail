@@ -47,6 +47,9 @@ final class ChatBench implements AutoCloseable {
    */
   static final Duration GRACE = Duration.ofMillis(200);
 
+  /** The longest a test waits for what the host does on a thread of its own. */
+  static final Duration PATIENCE = Duration.ofSeconds(20);
+
   final Sqlite db;
   final FdeStore fdes;
   final ChatStore store;
@@ -224,6 +227,40 @@ final class ChatBench implements AutoCloseable {
     fake.says(lines);
     fake.settle();
     return fake;
+  }
+
+  /**
+   * Sam ends chat {@code session} on a thread of its own as a process starts for it, and returns
+   * once that end is held up in the host or is done; past {@link #PATIENCE}, the test fails.
+   */
+  Thread endsAsItStarts(String session) {
+    var ending =
+        Thread.ofPlatform()
+            .name("sail-test-end-" + session)
+            .start(
+                () ->
+                    as(
+                        "sam",
+                        () -> {
+                          host.end(session);
+                          return null;
+                        }));
+    var deadline = System.nanoTime() + PATIENCE.toNanos();
+    while (ending.isAlive() && !heldInTheHost(ending)) {
+      if (System.nanoTime() > deadline) {
+        throw new AssertionError("the end of chat " + session + " was neither held nor done");
+      }
+      Thread.onSpinWait();
+    }
+    return ending;
+  }
+
+  /** Whether {@code thread} waits to enter a lock of the host's own. */
+  private static boolean heldInTheHost(Thread thread) {
+    var stack = thread.getStackTrace();
+    return thread.getState() == Thread.State.BLOCKED
+        && stack.length > 0
+        && stack[0].getClassName().equals(ChatHost.class.getName());
   }
 
   /** Line {@code number} of recording {@code recording}. */

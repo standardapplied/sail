@@ -145,6 +145,19 @@ public record AgentUnit(
     return logPath.substring(0, logPath.lastIndexOf('/')) + "/launch.env";
   }
 
+  /**
+   * Where the wrapper of a process over pipes records the start of the process its pid names,
+   * beside the pid file: what tells that process from a later one the box gives the same pid.
+   */
+  public String startPath() {
+    return startPath(pidPath);
+  }
+
+  /** The start record beside the pid file at {@code pidPath} ({@link #startPath()}). */
+  public static String startPath(String pidPath) {
+    return pidPath + ".start";
+  }
+
   /** Where the watcher records the guardrail that ended this run, beside the run's own files. */
   public String guardrailTriggerPath() {
     return logPath.substring(0, logPath.lastIndexOf('/')) + "/guardrail-triggered.yaml";

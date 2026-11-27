@@ -543,6 +543,94 @@ class AgentSessionTest {
   private static final String READ_PID = "cat " + FOREGROUND.pidPath();
   private static final String HALT_PID = "bash 9999";
 
+  private static final AgentUnit CHAT = AgentUnit.chat(RUN_ID);
+  private static final String READ_START = "cat " + CHAT.startPath();
+  private static final String READ_CHAT_PID = "cat " + CHAT.pidPath();
+  private static final String READ_LIVE_START = "cat /proc/9999/stat";
+  private static final String FORGET_CHAT_PID = "bash " + CHAT.pidPath() + " 9999";
+
+  private static String stat(long ticks) {
+    return "9999 (claude) S 1 9999 9999 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 " + ticks + " 0 0";
+  }
+
+  /** The process a wrapper started, still at its pid, is halted by that pid. */
+  @Test
+  void aProcessStillAtThePidItsWrapperRecordedIsHalted() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(READ_START, stat(555))
+            .onOk(READ_CHAT_PID, "9999\n")
+            .onOk(READ_LIVE_START, stat(555))
+            .onOk(HALT_PID, "gone")
+            .onOk("rm -f");
+
+    var halt = new AgentSession(shell).killStarted("acme-try", CHAT);
+
+    assertInstanceOf(AgentSession.Halt.Ended.class, halt);
+    assertEquals(1, count(shell, HALT_PID));
+  }
+
+  /**
+   * A pid the box gave another process since its wrapper recorded it, or whose start cannot be read
+   * on either side, is never signalled: the process the file was written for is gone, and its pid
+   * file is cleaned.
+   */
+  @Test
+  void aPidWhoseProcessIsNotTheOneItsWrapperRecordedIsNeverSignalled() throws Exception {
+    var reused =
+        new ScriptedShellExecutor()
+            .onOk(READ_START, stat(555))
+            .onOk(READ_CHAT_PID, "9999\n")
+            .onOk(READ_LIVE_START, stat(777))
+            .onOk(FORGET_CHAT_PID);
+    var unrecorded =
+        new ScriptedShellExecutor()
+            .onOk(READ_CHAT_PID, "9999\n")
+            .onOk(READ_LIVE_START, stat(555))
+            .onOk(FORGET_CHAT_PID);
+    var gone =
+        new ScriptedShellExecutor()
+            .onOk(READ_START, stat(555))
+            .onOk(READ_CHAT_PID, "9999\n")
+            .onOk(FORGET_CHAT_PID);
+
+    for (var shell : List.of(reused, unrecorded, gone)) {
+      var halt = new AgentSession(shell).killStarted("acme-try", CHAT);
+
+      assertInstanceOf(AgentSession.Halt.Ended.class, halt);
+      assertEquals(0, count(shell, HALT_PID), "nothing is signalled");
+      assertEquals(1, count(shell, FORGET_CHAT_PID), "the pid file is cleaned");
+    }
+  }
+
+  /** A container that does not answer the cleaning proves nothing gone. */
+  @Test
+  void aPidNotProvedTheProcessItsWrapperRecordedInAContainerThatStopsAnsweringIsUnanswered()
+      throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(READ_START, stat(555))
+            .onOk(READ_CHAT_PID, "9999\n")
+            .onOk(READ_LIVE_START, stat(777));
+
+    var halt = new AgentSession(shell).killStarted("acme-try", CHAT);
+
+    assertInstanceOf(AgentSession.Halt.Unanswered.class, halt);
+    assertEquals(0, count(shell, HALT_PID));
+  }
+
+  /** With no pid file to read, nothing is asked further and nothing is known. */
+  @Test
+  void aProcessWithNoPidFileToReadIsUnansweredByItsWrapperHalt() throws Exception {
+    var shell = new ScriptedShellExecutor();
+
+    var halt = new AgentSession(shell).killStarted("acme-try", CHAT);
+
+    assertInstanceOf(AgentSession.Halt.Unanswered.class, halt);
+    assertEquals(1, shell.invocations().size(), "only the pid file was read");
+    assertEquals(1, count(shell, READ_CHAT_PID));
+  }
+
   @Test
   void aUnitlessSessionIsHaltedByItsPidInOneScriptAndNeverThroughAUnit() throws Exception {
     var shell =

@@ -143,7 +143,8 @@ final class ChatLaunch {
    * named, in the mode it last said. A process started for it before that is not known gone is
    * halted first ({@link #halted}), and refused while it is not proved gone: one conversation, one
    * process. {@code launched} is told {@code true} as the process is about to start, and {@code
-   * false} when it then did not.
+   * false} when it then did not; nothing after the start can fail it, so a process that started is
+   * always held.
    */
   Started start(ChatStore.Chat chat, Consumer<Boolean> launched) {
     var harness = Harnesses.of(chat.harness());
@@ -169,6 +170,7 @@ final class ChatLaunch {
               + " has not ended yet, so the message was not sent.",
           "Send it again in a minute: Sail ends that process first.");
     }
+    var idle = maxIdle(project);
     var file = SessionLogin.file(Ids.newId().toString());
     var instance = instance(chat);
     var unit = AgentUnit.chat(chat.id());
@@ -189,7 +191,7 @@ final class ChatLaunch {
               file),
           form,
           harness.displayName(),
-          maxIdle(project),
+          idle,
           () -> doors.withdraw(instance, file));
     } catch (IOException | RuntimeException failed) {
       launched.accept(false);
