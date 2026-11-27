@@ -363,7 +363,7 @@ public final class ChatHost implements AutoCloseable {
    */
   private ChatProcess startProcess(ChatStore.Chat chat) {
     var session = chat.id();
-    var started = launch.start(chat, () -> store.launched(session, true));
+    var started = launch.start(chat, launched -> store.launched(session, launched));
     var log = log(session);
     log.cut(RESTARTED);
     var process =

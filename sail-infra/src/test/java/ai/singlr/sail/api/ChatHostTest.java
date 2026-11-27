@@ -586,6 +586,8 @@ class ChatHostTest {
     assertEquals(
         List.of("agent_launch_failed", "Claude Code did not start in workspace try."),
         List.of(refused.code(), refused.reason()));
+    assertFalse(
+        bench.store.find(session).orElseThrow().launched(), "nothing started, so none is left");
     assertTrue(
         bench.incus.invocations().stream()
             .anyMatch(

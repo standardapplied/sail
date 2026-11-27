@@ -1485,7 +1485,33 @@ class ClientGoldensTest {
         String token,
         Map<String, Object> body)
         throws Exception {
-      var response = send(method, path, token, body);
+      return golden(goldens, name, method, path, body, send(method, path, token, body));
+    }
+
+    /**
+     * Records the server's own failure, {@code code}, as golden {@code name}: the one 5xx a golden
+     * may hold is the one it was written to show.
+     */
+    void recordFailure(
+        Map<String, String> goldens,
+        String name,
+        String code,
+        String method,
+        String path,
+        String token,
+        Map<String, Object> body)
+        throws Exception {
+      var parsed = golden(goldens, name, method, path, body, exchange(method, path, token, body));
+      assertEquals(code, ((Map<?, ?>) parsed.get("error")).get("code"), name);
+    }
+
+    private Map<String, Object> golden(
+        Map<String, String> goldens,
+        String name,
+        String method,
+        String path,
+        Map<String, Object> body,
+        HttpResponse<String> response) {
       var parsed =
           response.body().isEmpty() ? Map.<String, Object>of() : YamlUtil.parseMap(response.body());
       var request = new LinkedHashMap<String, Object>();
@@ -1702,8 +1728,9 @@ class ClientGoldensTest {
      * Records a chat's every answer and refusal as the app meets them: dana opens one in berth, her
      * running workspace, sends a message, reads the turn Claude Code took (a call and its result),
      * sends again, and while that turn is open sends once more, held; then ends it, and it takes no
-     * message. A chat in another person's workspace, of a harness with no chat form, read by
-     * another person, or named by no id, is refused.
+     * message. A chat in another person's workspace, of a harness with no chat form, by a person
+     * with no login stored, read, sent to or ended by another person, or named by no id, is
+     * refused, and a message whose process will not start is refused as such.
      */
     void recordChats(Map<String, String> goldens, String ana, String dana) throws Exception {
       Acting.system(
@@ -1747,8 +1774,20 @@ class ClientGoldensTest {
           chats.formatted("berth"),
           dana,
           Map.of("harness", "claude-code", "mode", "default", "inside", "yes"));
+      record(
+          goldens, "refusal-chat-login-not-stored", "POST", chats.formatted("quay"), ana, claude);
       var session = "/v1/sessions/" + opened.get("session");
       var messages = session + "/chat/messages";
+      this.chats.refusing(new IOException("incus is not running"));
+      recordFailure(
+          goldens,
+          "refusal-chat-launch-failed",
+          "agent_launch_failed",
+          "POST",
+          messages,
+          dana,
+          Map.of("text", "hi"));
+      this.chats.refusing(null);
       record(goldens, "chat-message-sent", "POST", messages, dana, Map.of("text", "hi"));
       said(
           Recorded.line("04b-set-permission-mode-and-background-task", 148),
@@ -1762,6 +1801,14 @@ class ClientGoldensTest {
       said(Recorded.line("02b-relay-stdio", 138));
       record(goldens, "chat-items-after", "GET", session + "/chat?after=5", dana, null);
       record(goldens, "refusal-chat-not-found", "GET", session + "/chat", ana, null);
+      record(
+          goldens,
+          "refusal-chat-message-not-found",
+          "POST",
+          messages,
+          ana,
+          Map.of("text", "mine now"));
+      record(goldens, "refusal-chat-end-not-found", "POST", session + ":end", ana, null);
       record(goldens, "refusal-chat-invalid-id", "GET", "/v1/sessions/nobody/chat", dana, null);
       record(
           goldens, "refusal-chat-after-invalid", "GET", session + "/chat?after=last", dana, null);
@@ -1956,6 +2003,15 @@ class ClientGoldensTest {
 
     HttpResponse<String> send(String method, String path, String token, Map<String, Object> body)
         throws Exception {
+      var response = exchange(method, path, token, body);
+      if (response.statusCode() >= 500) {
+        fail(method + " " + path + " answered " + response.body());
+      }
+      return response;
+    }
+
+    private HttpResponse<String> exchange(
+        String method, String path, String token, Map<String, Object> body) throws Exception {
       var builder =
           HttpRequest.newBuilder(URI.create(base() + path))
               .method(
@@ -1967,11 +2023,7 @@ class ClientGoldensTest {
         builder.header("Authorization", "Bearer " + token);
       }
       try (var client = HttpClient.newHttpClient()) {
-        var response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() >= 500) {
-          fail(method + " " + path + " answered " + response.body());
-        }
-        return response;
+        return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
       }
     }
 

@@ -34,6 +34,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -131,9 +132,10 @@ final class ChatLaunch {
    * is, its workspace entered (started when stopped), resuming the conversation the harness last
    * named, in the mode it last said. A process started for it before that is not known gone is
    * halted first ({@link #halted}), and refused while it is not proved gone: one conversation, one
-   * process. {@code launching} runs as the process is about to start.
+   * process. {@code launched} is told {@code true} as the process is about to start, and {@code
+   * false} when it then did not.
    */
-  Started start(ChatStore.Chat chat, Runnable launching) {
+  Started start(ChatStore.Chat chat, Consumer<Boolean> launched) {
     var harness = Harnesses.of(chat.harness());
     var form = form(harness);
     var person = person();
@@ -165,7 +167,7 @@ final class ChatLaunch {
             doors.handOver(
                 project, workspace, file, login.map(LaunchEnv::loginLines).orElse(""), person));
     try {
-      launching.run();
+      launched.accept(true);
       return new Started(
           processes.start(
               instance,
@@ -180,6 +182,7 @@ final class ChatLaunch {
           maxIdle(project),
           () -> doors.withdraw(instance, file));
     } catch (IOException | RuntimeException failed) {
+      launched.accept(false);
       doors.withdraw(instance, file);
       throw new ApiException(
           ErrorCode.AGENT_LAUNCH_FAILED,
