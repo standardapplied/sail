@@ -604,6 +604,7 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-chat-inside-invalid", "refusal-chat-not-found", "refusal-chat-invalid-id",
     "refusal-chat-after-invalid", "refusal-chat-ended", "refusal-chat-login-not-stored",
     "refusal-chat-launch-failed", "refusal-chat-message-not-found", "refusal-chat-end-not-found",
+    "refusal-invalid-request-preferences-value", "refusal-invalid-request-preferences-field",
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.
@@ -611,6 +612,7 @@ let answersOfRoutesNotYetCalled: Set<String> = [
     "spec-measures", "specs-measures",
     "chat-opened", "chat-message-sent", "chat-items", "chat-message-again", "chat-message-queued",
     "chat-items-after", "chat-ended", "chat-items-ended",
+    "workspace-sessions-chats", "preferences", "preferences-set",
 ]
 
 /// The member the golden writer seats in the room.

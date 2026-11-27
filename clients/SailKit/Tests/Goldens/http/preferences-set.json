@@ -1,0 +1,16 @@
+{
+  "request": {
+    "body": {
+      "session_form": "both"
+    },
+    "method": "PUT",
+    "path": "/v1/me/preferences"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "session_form": "both"
+    },
+    "status": 200
+  }
+}

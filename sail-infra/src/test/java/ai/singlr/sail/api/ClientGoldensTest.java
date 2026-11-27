@@ -438,7 +438,9 @@ class ClientGoldensTest {
       box.record(http, "workspaces-made", "GET", workspaces, dana, null);
       box.recordAgents(http, ana, dana);
       box.recordChats(http, ana, dana);
+      box.recordPreferences(http, dana);
       box.recordDriveAgents(http);
+      box.recordChatList(http);
       box.recordLogins(http);
       box.recordTemplates(
           http, dana, box.session("ike", "Ike", "ike@example.com", Role.ADMIN), ana, vik);
@@ -1817,6 +1819,84 @@ class ClientGoldensTest {
       record(goldens, "chat-items-ended", "GET", session + "/chat?after=10", dana, null);
       record(goldens, "refusal-chat-ended", "POST", messages, dana, Map.of("text", "more"));
       Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
+    }
+
+    /**
+     * Records uday's sessions in dock as the listing says them: his terminals, and a chat of his in
+     * each state, the newest first: one ended; one whose turn failed (the key refused); one whose
+     * turn ended; one that asks him; one working; one he has said nothing in.
+     */
+    void recordChatList(Map<String, String> goldens) throws Exception {
+      var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
+      holders.put(uday, "uday");
+      installs("claude-code");
+      lists(workspace("dock", "Running", "uday", idOf("uday")));
+      var logins = new FdeStore(db).logins();
+      var claude = Harnesses.of("claude-code");
+      logins.store(idOf("uday"), claude, "work", "api-key", "sk-ant-api03-golden-uday-work");
+      var init = Recorded.line("04b-set-permission-mode-and-background-task", 148);
+      chatIn(uday, 1);
+      sentIn(uday, chatIn(uday, 2));
+      said(init);
+      sentIn(uday, chatIn(uday, 3));
+      said(init, Recorded.line("02b-relay-stdio", 16));
+      sentIn(uday, chatIn(uday, 4));
+      said(init, Recorded.line("02b-relay-stdio", 138));
+      sentIn(uday, chatIn(uday, 5));
+      said(init, Recorded.line("06a-invalid-key", 5), Recorded.line("06a-invalid-key", 6));
+      seed("POST", "/v1/sessions/" + chatIn(uday, 6) + ":end", uday, null);
+      record(
+          goldens,
+          "workspace-sessions-chats",
+          "GET",
+          "/v1/projects/" + PROJECT + "/workspaces/dock/sessions",
+          uday,
+          null);
+      DateTimeUtils.clock = Clock.fixed(AT, ZoneOffset.UTC);
+      logins.remove(idOf("uday"), claude, "work");
+      Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
+    }
+
+    /** A chat of uday's with Claude Code in dock, opened {@code second}s after the pin; its id. */
+    private String chatIn(String uday, int second) throws Exception {
+      DateTimeUtils.clock = Clock.fixed(AT.plusSeconds(second), ZoneOffset.UTC);
+      var opened =
+          send(
+              "POST",
+              "/v1/projects/" + PROJECT + "/workspaces/dock/chats",
+              uday,
+              Map.of("harness", "claude-code", "mode", "default", "inside", false));
+      assertEquals(201, opened.statusCode(), opened.body());
+      return YamlUtil.parseMap(opened.body()).get("session").toString();
+    }
+
+    /** Uday says hi in his chat {@code session}. */
+    private void sentIn(String uday, String session) throws Exception {
+      seed("POST", "/v1/sessions/" + session + "/chat/messages", uday, Map.of("text", "hi"));
+    }
+
+    /**
+     * Records a person's preference as the app reads and sets it: dana's, never set, then set to
+     * both; a word and a field no preference takes refused.
+     */
+    void recordPreferences(Map<String, String> goldens, String dana) throws Exception {
+      var preferences = "/v1/me/preferences";
+      record(goldens, "preferences", "GET", preferences, dana, null);
+      record(goldens, "preferences-set", "PUT", preferences, dana, Map.of("session_form", "both"));
+      record(
+          goldens,
+          "refusal-invalid-request-preferences-value",
+          "PUT",
+          preferences,
+          dana,
+          Map.of("session_form", "tab"));
+      record(
+          goldens,
+          "refusal-invalid-request-preferences-field",
+          "PUT",
+          preferences,
+          dana,
+          Map.of("session_form", "chat", "theme", "dark"));
     }
 
     /** The chat process started last says {@code lines}, and its reader has taken them. */

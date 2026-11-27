@@ -12,8 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.harness.Harness.Launch;
 import java.util.List;
+import java.util.OptionalInt;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullSource;
@@ -28,6 +31,34 @@ class HarnessContractTest {
 
   static Stream<Harness> harnesses() {
     return Harnesses.all().stream();
+  }
+
+  /** I6: a harness's forms are read from its chat form alone, never from which harness it is. */
+  @ParameterizedTest
+  @MethodSource("harnesses")
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aHarnessChatsExactlyWhenItHasAChatForm(Harness harness) {
+    assertEquals(
+        harness.chat().isPresent()
+            ? List.of(SessionForm.TERMINAL, SessionForm.CHAT)
+            : List.of(SessionForm.TERMINAL),
+        harness.forms(),
+        harness.yamlName());
+  }
+
+  /** I6, I7: Claude Code chats, signing in inside at the owner's default; Codex not until S4. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void claudeCodeChatsAndSignsInInsideAndCodexOnlyRunsInATerminal() {
+    var claude = Harnesses.of("claude-code");
+
+    assertEquals(List.of(SessionForm.TERMINAL, SessionForm.CHAT), claude.forms());
+    assertTrue(claude.chat().orElseThrow().signsInInside());
+    assertEquals(List.of(SessionForm.TERMINAL), Harnesses.of("codex").forms());
+    assertEquals(
+        List.of(SessionForm.TERMINAL),
+        StubHarness.loggingInThrough("claude-code", OptionalInt.empty()).forms(),
+        "a harness named claude-code with no chat form takes no chat");
   }
 
   @ParameterizedTest

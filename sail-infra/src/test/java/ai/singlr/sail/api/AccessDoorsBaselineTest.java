@@ -322,7 +322,20 @@ class AccessDoorsBaselineTest {
     events(world, doors);
     logins(doors);
     passkeys(doors);
+    preferences(doors);
     return doors;
+  }
+
+  /**
+   * The preference doors: one's own, which every person keeps and no agent or container credential
+   * does, nor a credential that acts for no person.
+   */
+  private static void preferences(List<Door> doors) {
+    doors.add(new Door("read my preferences", ops -> ops.preferences().read()));
+    doors.add(
+        new Door(
+            "set my preferences",
+            ops -> ops.preferences().keep(Map.of("session_form", "terminal"))));
   }
 
   /**
