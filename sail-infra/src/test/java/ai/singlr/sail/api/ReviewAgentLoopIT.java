@@ -23,6 +23,7 @@ import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
@@ -551,11 +552,16 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                 unit.logPath(),
                 unit.launchEnvPath());
     try {
-      assertEquals(new LiveStream.Step.Init("it-session"), nextStep(handle));
+      assertEquals(
+          new LiveStream.Step.Init("it-session", null, null, List.of(), List.of(), List.of()),
+          nextStep(handle));
       var prompt =
           LiveStream.userMessage("what does \"auth\" do?\nsecond line; $(touch /tmp/pwned) `id`");
       handle.stdin().write(prompt);
-      assertEquals(new LiveStream.Step.Result(false, null, "heard"), nextStep(handle));
+      assertEquals(
+          new LiveStream.Step.Result(
+              false, null, "heard", false, false, null, new ChatItem.TurnEnded(0, 0, 0, 0)),
+          nextStep(handle));
 
       assertEquals(
           String.join("\n", command.subList(1, command.size())) + "\n",

@@ -9,9 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.engine.LiveStream.ToolCall;
+import ai.singlr.sail.engine.LiveStream.ToolResult;
+import ai.singlr.sail.harness.LoginOutcome;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -33,7 +36,7 @@ class LiveStreamTest {
   @Test
   void initNamesTheSession() {
     assertEquals(
-        new Step.Init("sess-1"),
+        new Step.Init("sess-1", null, null, List.of(), List.of(), List.of()),
         LiveStream.read("{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"sess-1\"}"));
   }
 
@@ -42,23 +45,36 @@ class LiveStreamTest {
       strings = {
         "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"-p; rm -rf /\"}",
         "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":7}",
-        "{\"type\":\"system\",\"subtype\":\"init\"}",
-        "{\"type\":\"system\",\"subtype\":\"status\",\"session_id\":\"sess-1\"}",
-        "{\"type\":\"rate_limit_event\"}",
-        "{\"no_type\":true}",
-        "[1,2]",
-        "not json {",
-        ""
+        "{\"type\":\"system\",\"subtype\":\"init\"}"
       })
-  void aLineThatSaysNothingIsIgnored(String line) {
-    assertEquals(new Step.Other(), LiveStream.read(line));
+  void anInitWithNoSafeSessionSaysNothing(String line) {
+    assertEquals(new Step.Other("system/init"), LiveStream.read(line));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"{\"no_type\":true}", "[1,2]", "not json {", ""})
+  void aLineThatIsNoTypedObjectSaysNothing(String line) {
+    assertEquals(new Step.Other(""), LiveStream.read(line));
+  }
+
+  @Test
+  void aLineOfATypeTheReaderDoesNotKnowIsKeptNamingItsType() {
+    assertEquals(
+        new Step.Other("rate_limit_event"), LiveStream.read("{\"type\":\"rate_limit_event\"}"));
+    assertEquals(
+        new Step.Other("x".repeat(64)),
+        LiveStream.read("{\"type\":\"" + "x".repeat(80) + "\"}"),
+        "a type is the agent's, and clipped where it is read");
+    assertEquals(
+        new Step.Other("system/" + "y".repeat(64)),
+        LiveStream.read("{\"type\":\"system\",\"subtype\":\"" + "y".repeat(80) + "\"}"));
   }
 
   @Test
   void aLinePastTheFrameCeilingIsSkippedUnparsed() {
     var huge = "{\"type\":\"result\",\"result\":\"" + "x".repeat(LiveStream.MAX_LINE_CHARS) + "\"}";
 
-    assertEquals(new Step.Other(), LiveStream.read(huge));
+    assertEquals(new Step.Other(""), LiveStream.read(huge));
   }
 
   @Test
@@ -110,9 +126,13 @@ class LiveStreamTest {
     assertEquals(
         new Step.ToolCalls(
             List.of(
-                new ToolCall("toolu_1", "Bash", "x".repeat(119) + "\uD83D\uDE00"),
-                new ToolCall("toolu_2", "T".repeat(64), ""),
-                new ToolCall("", "", ""))),
+                new ToolCall(
+                    "toolu_1",
+                    "Bash",
+                    "x".repeat(119) + "\uD83D\uDE00",
+                    Map.of("timeout", 5, "command", command, "description", "second")),
+                new ToolCall("toolu_2", "T".repeat(64), "", Map.of("limit", 3)),
+                new ToolCall("", "", "", Map.of()))),
         LiveStream.read(
             "{\"type\":\"assistant\",\"message\":{\"content\":["
                 + "{\"type\":\"text\",\"text\":\"checking\"},"
@@ -129,7 +149,8 @@ class LiveStreamTest {
   @Test
   void toolResultsNameTheCallsThatCameBack() {
     assertEquals(
-        new Step.ToolResults(List.of("toolu_1", "")),
+        new Step.ToolResults(
+            List.of(new ToolResult("toolu_1", "ok", false), new ToolResult("", "", false))),
         LiveStream.read(
             "{\"type\":\"user\",\"message\":{\"content\":["
                 + "{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\",\"content\":\"ok\"},"
@@ -139,39 +160,51 @@ class LiveStreamTest {
   @Test
   void aUserLineWithNoToolResultSaysNothing() {
     assertEquals(
-        new Step.Other(),
+        new Step.Other("user"),
         LiveStream.read(
             "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}"));
   }
 
   @Test
-  void aSubagentsLinesAreNotTheMembers() {
-    for (var type : List.of("stream_event", "assistant", "user")) {
-      assertEquals(
-          new Step.Other(),
-          LiveStream.read(
-              "{\"type\":\""
-                  + type
-                  + "\",\"parent_tool_use_id\":\"toolu_9\",\"event\":{\"type\":"
-                  + "\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"sub\"}},"
-                  + "\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"t\"},"
-                  + "{\"type\":\"tool_result\",\"tool_use_id\":\"t\"}]}}"),
-          type);
-    }
+  void aSubagentsLinesAreItsOwnNeverTheMembers() {
+    var inner =
+        Map.of(
+            "stream_event",
+            new Step.Other("stream_event"),
+            "assistant",
+            new Step.ToolCalls(List.of(new ToolCall("t", "", "", Map.of()))),
+            "user",
+            new Step.ToolResults(List.of(new ToolResult("t", "", false))));
+    inner.forEach(
+        (type, step) ->
+            assertEquals(
+                new Step.Subagent("toolu_9", null, null, null, step),
+                LiveStream.read(
+                    "{\"type\":\""
+                        + type
+                        + "\",\"parent_tool_use_id\":\"toolu_9\",\"event\":{\"type\":"
+                        + "\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"sub\"}},"
+                        + "\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"t\"},"
+                        + "{\"type\":\"tool_result\",\"tool_use_id\":\"t\"}]}}"),
+                type));
+    assertEquals(
+        new Step.Other("assistant"),
+        LiveStream.read("{\"type\":\"assistant\",\"parent_tool_use_id\":7}"),
+        "a line naming its parent as no call's id is no one's");
   }
 
   @Test
   void aResultEndsTheTurnWithItsTextAndWhyItFailed() {
     assertEquals(
-        new Step.Result(false, null, "Done."),
+        ended(false, null, "Done.", null),
         LiveStream.read(
             "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,"
                 + "\"result\":\"Done.\"}"));
     assertEquals(
-        new Step.Result(true, "error_max_turns", ""),
+        ended(true, "error_max_turns", "", null),
         LiveStream.read("{\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":true}"));
     assertEquals(
-        new Step.Result(true, null, ""),
+        ended(true, null, "", null),
         LiveStream.read("{\"type\":\"result\",\"is_error\":true,\"result\":7}"),
         "a failure that names no reason is told with none");
   }
@@ -179,14 +212,19 @@ class LiveStreamTest {
   @Test
   void aResultTheHarnessFlagsAnErrorFailedWhateverItsSubtypeSays() {
     assertEquals(
-        new Step.Result(true, null, "Not logged in · Please run /login"),
+        ended(true, null, "Not logged in · Please run /login", new LoginOutcome.Undelivered()),
         LiveStream.read(
             "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,"
                 + "\"result\":\"Not logged in · Please run /login\"}"),
         "failed, in its own words, and never for the reason 'success'");
     assertEquals(
-        new Step.Result(true, null, ""),
+        ended(true, null, "", null),
         LiveStream.read("{\"type\":\"result\",\"subtype\":\" \",\"is_error\":true}"));
+  }
+
+  private static Step.Result ended(boolean error, String reason, String text, LoginOutcome login) {
+    return new Step.Result(
+        error, reason, text, false, false, login, new ChatItem.TurnEnded(0, 0, 0, 0));
   }
 
   /**

@@ -1179,7 +1179,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         case LiveStream.Step.ToolResults returned -> {
           open();
           flush();
-          returned.callIds().forEach(this::returned);
+          returned.results().forEach(result -> returned(result.callId()));
         }
         case LiveStream.Step.Working working -> open();
         case LiveStream.Step.Result result -> {
@@ -1187,7 +1187,16 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
           spent(line);
           answered(result);
         }
-        case LiveStream.Step.Other other -> {}
+        case LiveStream.Step.Said _,
+            LiveStream.Step.Subagent _,
+            LiveStream.Step.Permission _,
+            LiveStream.Step.Question _,
+            LiveStream.Step.Plan _,
+            LiveStream.Step.Withdrawn _,
+            LiveStream.Step.Retry _,
+            LiveStream.Step.Compaction _,
+            LiveStream.Step.Status _,
+            LiveStream.Step.Other _ -> {}
       }
     }
 

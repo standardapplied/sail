@@ -1,0 +1,383 @@
+/*
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
+ * SPDX-License-Identifier: MIT
+ */
+
+package ai.singlr.sail.engine;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import ai.singlr.sail.engine.ChatItem.Asked;
+import ai.singlr.sail.engine.ChatItem.Choice;
+import ai.singlr.sail.engine.ChatItem.TurnEnded;
+import ai.singlr.sail.engine.LiveStream.Step;
+import ai.singlr.sail.engine.LiveStream.ToolCall;
+import ai.singlr.sail.engine.LiveStream.ToolResult;
+import ai.singlr.sail.harness.LoginOutcome;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+
+/**
+ * What each line a chat needs says, read from the line Claude Code 2.1.332 wrote in the S0 probe
+ * ({@link Recorded}): every step from a recorded line, and every line the reader does not read
+ * kept, never fatal.
+ */
+class LiveStreamChatTest {
+
+  private static Step read(String recording, int line) {
+    return LiveStream.read(Recorded.line(recording, line));
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> requestOf(String recording, int line) {
+    return (Map<String, Object>) Recorded.parsed(recording, line).get("request");
+  }
+
+  @SuppressWarnings("unchecked")
+  private static List<Object> suggestionsOf(String recording, int line) {
+    return (List<Object>) requestOf(recording, line).get("permission_suggestions");
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> inputOf(String recording, int line) {
+    return (Map<String, Object>) requestOf(recording, line).get("input");
+  }
+
+  @SuppressWarnings("unchecked")
+  private static List<String> namesOf(String recording, int line, String key) {
+    return (List<String>) Recorded.parsed(recording, line).get(key);
+  }
+
+  @Test
+  void initNamesItsModelModeToolsCommandsAndSkillsAtEveryTurn() {
+    var recording = "04b-set-permission-mode-and-background-task";
+
+    assertEquals(
+        new Step.Init(
+            "32c4139c-5288-4783-b817-4f6b504f696d",
+            "claude-haiku-5-5",
+            "default",
+            List.of("Task", "AskUserQuestion", "Bash", "Edit", "ExitPlanMode", "Read", "Write"),
+            namesOf(recording, 148, "slash_commands"),
+            namesOf(recording, 148, "skills")),
+        read(recording, 148));
+  }
+
+  @Test
+  void aPermissionRequestCarriesWhatAPersonDecidesOn() {
+    assertEquals(
+        new Step.Permission(
+            "a871f652-0656-42bf-8cc8-860ad0a34b79",
+            "toolu_01C2VMe9ubaU1aFMnnUS5nxC",
+            "Bash",
+            "Bash",
+            Map.of(
+                "command", "date > stamp.txt", "description", "Write current date into stamp.txt"),
+            "Write current date into stamp.txt",
+            null,
+            suggestionsOf("02b-relay-stdio", 16)),
+        read("02b-relay-stdio", 16));
+    assertEquals(
+        new Step.Permission(
+            "79327ade-fc36-4737-926f-eb6dde76e6df",
+            "toolu_01GQbMEZJcBzatfHNojTS8E8",
+            "Write",
+            "Write",
+            Map.of("file_path", "/home/dev/workspace/notes.txt", "content", "hi\n"),
+            "notes.txt",
+            null,
+            List.of(Map.of("type", "setMode", "mode", "acceptEdits", "destination", "session"))),
+        read("02b-relay-stdio", 44));
+    assertEquals(
+        new Step.Permission(
+            "2b22c465-b2fe-4e9f-81f2-dab652d13cd5",
+            "toolu_01J7oi1RVgyfg9PQ4pYFbPqJ",
+            "Bash",
+            "Bash",
+            inputOf("04d-interrupt-while-tool-runs", 20),
+            "Run the 25-second sleep command in foreground",
+            "This command requires approval",
+            suggestionsOf("04d-interrupt-while-tool-runs", 20)),
+        read("04d-interrupt-while-tool-runs", 20));
+  }
+
+  @Test
+  void aQuestionArrivesAsARequestWithItsChoices() {
+    assertEquals(
+        new Step.Question(
+            "d4d9b320-e2f7-497b-8037-5563770aed16",
+            "toolu_01P2oh1RhKTq1npuEiNF3yrK",
+            inputOf("03a-ask-user-question", 21),
+            List.of(
+                new Asked(
+                    "Which color?",
+                    "Color",
+                    List.of(new Choice("Red", "Choose red"), new Choice("Blue", "Choose blue")),
+                    false))),
+        read("03a-ask-user-question", 21));
+  }
+
+  @Test
+  void aPlanArrivesAsARequestToApprove() {
+    assertEquals(
+        new Step.Plan(
+            "1164cc67-5e3b-4c52-9696-57d3610fcb0e",
+            "toolu_01H6Ej9TxsJDvVS7r7Zex4dC",
+            inputOf("03b-plan-exit-plan-mode", 28),
+            "Create /home/dev/workspace/hello.txt containing \"hi\".\n"),
+        read("03b-plan-exit-plan-mode", 28));
+  }
+
+  @Test
+  void aWithdrawnRequestNamesTheRequest() {
+    assertEquals(
+        new Step.Withdrawn("dc0b76a9-43c6-4484-a47b-1b7c1e5a4b10"),
+        read("04a-cancel-request-by-interrupt", 20));
+  }
+
+  @Test
+  void aSubagentsLinesNameItsCallAndAreItsOwn() {
+    var call = "toolu_01TbR5tat9n6LS2N65WNpEcZ";
+
+    assertEquals(
+        new Step.Subagent(
+            call,
+            "a6b207b9bc5fa6211",
+            "general-purpose",
+            "Run echo sub-ok",
+            new Step.ToolCalls(
+                List.of(
+                    new ToolCall(
+                        "toolu_013wKQqCQd4JL5cPCj24T27x",
+                        "Bash",
+                        "echo sub-ok",
+                        Map.of(
+                            "command", "echo sub-ok", "description", "Print sub-ok via echo"))))),
+        read("05b-subagent", 35));
+    assertEquals(
+        new Step.Subagent(
+            call,
+            "a6b207b9bc5fa6211",
+            "general-purpose",
+            "Run echo sub-ok",
+            new Step.ToolResults(
+                List.of(new ToolResult("toolu_013wKQqCQd4JL5cPCj24T27x", "sub-ok", false)))),
+        read("05b-subagent", 36));
+    assertEquals(
+        new Step.Subagent(
+            call,
+            "a6b207b9bc5fa6211",
+            "general-purpose",
+            "Run echo sub-ok",
+            new Step.Other("user")),
+        read("05b-subagent", 32),
+        "its prompt is the Agent call's input, not words it says");
+    assertEquals(
+        new Step.Subagent(
+            "toolu_011gGRQDib3ZHFWutXd9HSGT",
+            "a6386d65c13f33e33",
+            "general-purpose",
+            "Run echo sub-ok",
+            new Step.Said("The command `echo sub-ok` printed \"sub-ok\".")),
+        read("05c-subagent-forward-text", 50),
+        "a subagent's text is said whole: it streams no fragments");
+  }
+
+  @Test
+  void aRetryACompactionAndStatusAreRead() {
+    assertEquals(new Step.Retry(1, 2, 513, 529, "overloaded"), read("05e-api-retry", 5));
+    assertEquals(new Step.Compaction("manual", 18074, 3069), read("05d-compact", 17));
+    assertEquals(new Step.Status("requesting", null), read("01-baseline-live-flags", 4));
+    assertEquals(new Step.Status("compacting", null), read("05d-compact", 14));
+    assertEquals(new Step.Status(null, null), read("05d-compact", 15));
+    assertEquals(new Step.Status(null, "acceptEdits"), read("02b-relay-stdio", 103));
+  }
+
+  @Test
+  void aToolCallsWholeInputAndAResultsOutputAreRead() {
+    assertEquals(
+        new Step.ToolCalls(
+            List.of(
+                new ToolCall(
+                    "toolu_011VvCwXcvkemp321CMEyur6",
+                    "Bash",
+                    "echo probe-ok",
+                    Map.of("command", "echo probe-ok", "description", "Print probe-ok")))),
+        read("01-baseline-live-flags", 13));
+    assertEquals(
+        new Step.ToolResults(
+            List.of(new ToolResult("toolu_011VvCwXcvkemp321CMEyur6", "probe-ok", false))),
+        read("01-baseline-live-flags", 17));
+    assertEquals(
+        new Step.ToolResults(
+            List.of(
+                new ToolResult(
+                    "toolu_01GQbMEZJcBzatfHNojTS8E8", "The person declined this edit.", true))),
+        read("02b-relay-stdio", 48));
+    assertEquals(
+        new Step.ToolResults(
+            List.of(new ToolResult("toolu_01TbR5tat9n6LS2N65WNpEcZ", handBackText(), false))),
+        read("05b-subagent", 39),
+        "a result given as blocks is their text");
+  }
+
+  @SuppressWarnings("unchecked")
+  private static String handBackText() {
+    var message = (Map<String, Object>) Recorded.parsed("05b-subagent", 39).get("message");
+    var result = ((List<Map<String, Object>>) message.get("content")).getFirst();
+    var blocks = (List<Map<String, Object>>) result.get("content");
+    assertEquals(1, blocks.size());
+    return (String) blocks.getFirst().get("text");
+  }
+
+  @Test
+  void aResultIsTheTurnsOwnCostTokensAndTime() {
+    assertEquals(
+        new Step.Result(
+            false, null, "done", false, false, null, new TurnEnded(0.000301485, 23708, 86, 940)),
+        read("02b-relay-stdio", 138));
+    assertEquals(
+        new Step.Result(
+            false,
+            null,
+            "",
+            false,
+            false,
+            null,
+            new TurnEnded(0.0011170400000000001, 20069, 640, 3446)),
+        read("05d-compact", 20));
+  }
+
+  @Test
+  void anInterruptedTurnIsToldFromItsResult() {
+    assertEquals(
+        new Step.Result(
+            true,
+            "error_during_execution",
+            "",
+            true,
+            false,
+            null,
+            new TurnEnded(0.000268005, 11014, 81, 2849)),
+        read("04a-cancel-request-by-interrupt", 24));
+    assertEquals(
+        new Step.Result(
+            true,
+            "error_during_execution",
+            "",
+            true,
+            false,
+            null,
+            new TurnEnded(0.00036863, 11011, 283, 2081)),
+        read("04c-interrupt-while-streaming-text", 82));
+    assertEquals(
+        new Step.Working(),
+        read("04c-interrupt-while-streaming-text", 77),
+        "the partial text it aborted was streamed already");
+  }
+
+  @Test
+  void aTurnTheHarnessStartedItselfIsATurnNotAnError() {
+    assertEquals(
+        new Step.Result(
+            false,
+            null,
+            "The background `sleep 30` finished with exit code 0.",
+            false,
+            true,
+            null,
+            new TurnEnded(0.00017991, 12746, 20, 1147)),
+        read("04b-set-permission-mode-and-background-task", 159));
+  }
+
+  @Test
+  void aFailedTurnSaysWhatCameOfItsLogin() {
+    assertEquals(
+        new Step.Result(
+            true,
+            null,
+            "Invalid API key · Fix external API key",
+            false,
+            false,
+            new LoginOutcome.Refused(),
+            new TurnEnded(0, 0, 0, 286)),
+        read("06a-invalid-key", 6));
+    assertEquals(
+        new Step.Result(
+            true,
+            null,
+            "Not logged in · Please run /login",
+            false,
+            false,
+            new LoginOutcome.Undelivered(),
+            new TurnEnded(0, 0, 0, 182)),
+        read("06b-no-credential", 6));
+    assertEquals(
+        new Step.Result(
+            true,
+            null,
+            "API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in"
+                + " a moment. If it persists, check your inference gateway (127.0.0.1:18529).",
+            false,
+            false,
+            null,
+            new TurnEnded(0, 0, 0, 1935)),
+        read("05e-api-retry", 8));
+    assertEquals(
+        new Step.Working(),
+        read("06a-invalid-key", 5),
+        "the harness's own error line repeats what its result says");
+  }
+
+  @Test
+  void aRecordedLineTheReaderDoesNotReadIsKeptNamingItsType() {
+    assertEquals(new Step.Other("system/task_started"), read("04d-interrupt-while-tool-runs", 24));
+    assertEquals(new Step.Other("system/ui_invalidate"), read("08c-bare-no-key", 3));
+    assertEquals(new Step.Other("control_response"), read("04a-cancel-request-by-interrupt", 21));
+    assertEquals(
+        new Step.Other("user"),
+        read("04a-cancel-request-by-interrupt", 23),
+        "the interruption is told by the turn's result");
+    assertEquals(new Step.Working(), read("01-baseline-live-flags", 8));
+  }
+
+  @Test
+  void aRequestWithNoSuggestionOffersNothingToKeep() {
+    assertEquals(
+        new Step.Permission(
+            "r1", "t1", "Bash", "Bash", Map.of("command", "ls"), null, null, List.of()),
+        LiveStream.read(
+            "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
+                + "\"can_use_tool\",\"tool_name\":\"Bash\",\"display_name\":\"Bash\","
+                + "\"input\":{\"command\":\"ls\"},\"tool_use_id\":\"t1\"}}"));
+  }
+
+  @Test
+  void aModelThatNamesNoCostAddsItsTokensAndNoDollars() {
+    assertEquals(
+        new Step.Result(false, null, "ok", false, false, null, new TurnEnded(0.5, 7, 2, 0)),
+        LiveStream.read(
+            "{\"type\":\"result\",\"is_error\":false,\"result\":\"ok\","
+                + "\"model_usage_since_last_result\":{\"a\":{\"inputTokens\":3,"
+                + "\"outputTokens\":1},\"b\":{\"inputTokens\":4,\"outputTokens\":1,"
+                + "\"costUSD\":0.5}}}"));
+  }
+
+  @Test
+  void aRequestThatNamesNoRequestIsKeptNotRead() {
+    assertEquals(
+        new Step.Other("control_request"),
+        LiveStream.read(
+            "{\"type\":\"control_request\",\"request\":{\"subtype\":\"can_use_tool\","
+                + "\"tool_name\":\"Bash\"}}"));
+    assertEquals(
+        new Step.Other("control_request"),
+        LiveStream.read(
+            "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":"
+                + "{\"subtype\":\"hook_callback\"}}"));
+    assertEquals(
+        new Step.Other("control_cancel_request"),
+        LiveStream.read("{\"type\":\"control_cancel_request\",\"request_id\":7}"));
+  }
+}

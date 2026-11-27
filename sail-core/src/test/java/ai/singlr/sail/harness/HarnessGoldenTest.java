@@ -10,9 +10,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.engine.ChatItem;
+import ai.singlr.sail.engine.Recorded;
+import ai.singlr.sail.harness.Harness.ChatLaunch;
 import ai.singlr.sail.harness.Harness.Launch;
 import ai.singlr.sail.harness.Harness.LiveLaunch;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -386,6 +391,127 @@ class HarnessGoldenTest {
   void codexHasNoLiveMode() {
     assertEquals(Optional.empty(), CODEX.live(new LiveLaunch(true, null, null)));
     assertEquals(Optional.empty(), CODEX.liveSettings());
+  }
+
+  /**
+   * The argv the S0 probe ran a chat with and saw every request arrive under (02b in its default
+   * mode, 03b in plan mode), less the {@code --tools} it passed only to shorten its prompt.
+   */
+  @SuppressWarnings("unchecked")
+  private static List<String> recordedChat(String recording) {
+    var argv = new ArrayList<>((List<String>) Recorded.parsed(recording, 1).get("argv"));
+    var tools = argv.indexOf("--tools");
+    argv.subList(tools, tools + 2).clear();
+    return argv;
+  }
+
+  @Test
+  void claudeCodeChatIsTheLineItWasRecordedAskingUnder() {
+    assertEquals(
+        recordedChat("02b-relay-stdio"),
+        CLAUDE_CODE.chat(new ChatLaunch("default", "haiku", null)).orElseThrow());
+    assertEquals(
+        recordedChat("03b-plan-exit-plan-mode"),
+        CLAUDE_CODE.chat(new ChatLaunch("plan", "haiku", null)).orElseThrow());
+    assertEquals(
+        List.of(
+            "claude",
+            "--print",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--settings",
+            "/home/dev/.sail/claude-live.json",
+            "--permission-prompt-tool",
+            "stdio",
+            "--permission-mode",
+            "bypassPermissions",
+            "--resume",
+            "sess-1"),
+        CLAUDE_CODE.chat(new ChatLaunch("bypassPermissions", null, "sess-1")).orElseThrow());
+  }
+
+  @Test
+  void aChatLaunchRefusesWhatItCannotPassOn() {
+    assertEquals(
+        "Claude Code takes no mode 'manual' in a workspace; it takes default, acceptEdits, plan,"
+            + " bypassPermissions.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> CLAUDE_CODE.chat(new ChatLaunch("manual", null, null)))
+            .getMessage());
+    assertEquals(
+        MALFORMED_ID,
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ChatLaunch("default", null, "-p; rm -rf /"))
+            .getMessage());
+    assertEquals(
+        "A chat's model is a model's name, such as 'sonnet' or 'claude-sonnet-5-5'.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ChatLaunch("default", "--dangerously-skip-permissions", null))
+            .getMessage());
+    assertEquals(
+        "mode must not be blank.",
+        assertThrows(IllegalArgumentException.class, () -> new ChatLaunch(" ", null, null))
+            .getMessage());
+    assertEquals(
+        List.of("--model", "claude-opus-5-5[1m]"),
+        CLAUDE_CODE
+            .chat(new ChatLaunch("default", "claude-opus-5-5[1m]", null))
+            .orElseThrow()
+            .subList(10, 12));
+  }
+
+  @Test
+  void aChatsModesAreSaidInWordsAPersonChoosesBy() {
+    assertEquals(
+        List.of(
+            "default=Asks first",
+            "acceptEdits=Edits freely",
+            "plan=Plans first",
+            "bypassPermissions=Never asks, risky"),
+        CLAUDE_CODE.chatModes().stream()
+            .map(mode -> mode.name() + "=" + mode.label() + (mode.risky() ? ", risky" : ""))
+            .toList());
+    assertTrue(CLAUDE_CODE.chatModes().stream().noneMatch(mode -> mode.about().isBlank()));
+    assertEquals(List.of(), CODEX.chatModes());
+    assertEquals(Optional.empty(), CODEX.chat(new ChatLaunch("default", null, null)));
+  }
+
+  @Test
+  void claudeCodeNamesWhatEachOfItsToolsDoes() {
+    var kinds = new LinkedHashMap<String, ChatItem.ToolKind>();
+    for (var tool :
+        List.of(
+            "Bash",
+            "Edit",
+            "Write",
+            "NotebookEdit",
+            "Read",
+            "Grep",
+            "Glob",
+            "WebFetch",
+            "WebSearch",
+            "Agent",
+            "Task",
+            "mcp__github__create_issue",
+            "Skill",
+            "AskUserQuestion",
+            "")) {
+      kinds.put(tool, CLAUDE_CODE.toolKind(tool));
+    }
+
+    assertEquals(
+        "{Bash=COMMAND, Edit=EDIT, Write=EDIT, NotebookEdit=EDIT, Read=READ, Grep=SEARCH,"
+            + " Glob=SEARCH, WebFetch=WEB, WebSearch=WEB, Agent=AGENT, Task=AGENT,"
+            + " mcp__github__create_issue=MCP, Skill=OTHER, AskUserQuestion=OTHER, =OTHER}",
+        kinds.toString());
+    assertEquals(ChatItem.ToolKind.OTHER, CODEX.toolKind("Bash"));
   }
 
   /**

@@ -6,6 +6,7 @@
 package ai.singlr.sail.harness;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.ChatItem;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -77,6 +78,37 @@ public interface Harness {
      */
     public Optional<String> resume() {
       return Optional.ofNullable(resumeSessionId).map(Harness::requireSafeSessionId);
+    }
+  }
+
+  /**
+   * One chat's launch: the chat mode it starts in, by name ({@link #chatModes}), an optional model
+   * and the recorded conversation to resume ({@code null} for a fresh one). A person chats with it
+   * over its stdin, one message at a time, and answers what it asks there.
+   */
+  record ChatLaunch(String mode, String model, String resumeSessionId) {
+
+    private static final Pattern SAFE_MODEL = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:\\[\\]-]*");
+
+    /**
+     * @throws IllegalArgumentException for a blank mode, a model that is not a model's name (one
+     *     starting with a dash would be read as an option), or a session id that is not {@link
+     *     #requireSafeSessionId safe}
+     */
+    public ChatLaunch {
+      Strings.requireNonBlank(mode, "mode");
+      if (model != null && !SAFE_MODEL.matcher(model).matches()) {
+        throw new IllegalArgumentException(
+            "A chat's model is a model's name, such as 'sonnet' or 'claude-sonnet-5-5'.");
+      }
+      if (resumeSessionId != null) {
+        requireSafeSessionId(resumeSessionId);
+      }
+    }
+
+    /** The recorded conversation this launch resumes, or empty for a fresh one. */
+    public Optional<String> resume() {
+      return Optional.ofNullable(resumeSessionId);
     }
   }
 
@@ -162,6 +194,32 @@ public interface Harness {
     return Optional.empty();
   }
 
+  /**
+   * The argv of a chat: one process that stays up, takes each of a person's messages as a JSON line
+   * on its stdin, asks that person before what its mode does not allow, and writes what it does as
+   * JSON lines on its stdout. Empty for a harness with no chat.
+   *
+   * @throws IllegalArgumentException naming the chat modes it takes, for a mode it does not
+   */
+  default Optional<List<String>> chat(ChatLaunch launch) {
+    return Optional.empty();
+  }
+
+  /**
+   * The modes a chat of this harness runs in, each with what a person is shown for it ({@code
+   * label}) and what it does ({@code about}), the first the one a chat starts in until a person
+   * chooses; empty for a harness with no chat. A mode's {@code name} is the harness's own, as it
+   * says which mode it is in.
+   */
+  default List<Mode> chatModes() {
+    return List.of();
+  }
+
+  /** What a call of this harness's tool {@code tool} does, as a person reads its row. */
+  default ChatItem.ToolKind toolKind(String tool) {
+    return ChatItem.ToolKind.OTHER;
+  }
+
   /** The command for an interactive (TTY) session. */
   String interactive(boolean fullPermissions);
 
@@ -171,7 +229,29 @@ public interface Harness {
    * own words, the {@code args} its command takes for it, empty for none, and whether it skips the
    * harness's own permission checks entirely ({@code risky}), which a client warns of.
    */
-  record Mode(String name, String label, String about, String args, boolean risky) {}
+  record Mode(String name, String label, String about, String args, boolean risky) {
+
+    /**
+     * The one of {@code offered}, the modes of the harness {@code harness} names, called {@code
+     * name}.
+     *
+     * @throws IllegalArgumentException naming the modes it takes, for any other
+     */
+    public static Mode named(List<Mode> offered, String name, String harness) {
+      return offered.stream()
+          .filter(mode -> mode.name().equals(name))
+          .findFirst()
+          .orElseThrow(
+              () ->
+                  new IllegalArgumentException(
+                      harness
+                          + " takes no mode '"
+                          + name
+                          + "' in a workspace; it takes "
+                          + String.join(", ", offered.stream().map(Mode::name).toList())
+                          + "."));
+    }
+  }
 
   /**
    * The modes an interactive session of this harness starts in inside a workspace, each distinct
@@ -194,19 +274,7 @@ public interface Harness {
    * @throws IllegalArgumentException naming the modes it takes, for any other
    */
   default String interactive(String mode) {
-    return modes().stream()
-        .filter(offered -> offered.name().equals(mode))
-        .findFirst()
-        .map(offered -> binaryName() + offered.args())
-        .orElseThrow(
-            () ->
-                new IllegalArgumentException(
-                    displayName()
-                        + " takes no mode '"
-                        + mode
-                        + "' in a workspace; it takes "
-                        + String.join(", ", modes().stream().map(Mode::name).toList())
-                        + "."));
+    return binaryName() + Mode.named(modes(), mode, displayName()).args();
   }
 
   /**

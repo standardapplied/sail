@@ -8,7 +8,9 @@ package ai.singlr.sail.harness;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BoxCredentialFile;
+import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.SailPaths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -17,14 +19,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.SequencedMap;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /** Claude Code: {@code claude}, launched headless with sail's own settings file of hooks. */
 final class ClaudeCode implements Harness {
 
   private static final String BINARY = "claude";
-  private static final String RESULT = "\"type\":\"result\"";
 
   /** Where Claude Code sends its requests, which its stored key fixes to the Anthropic API. */
   private static final String BASE_URL = "ANTHROPIC_BASE_URL";
@@ -44,11 +44,24 @@ final class ClaudeCode implements Harness {
    */
   private static final String HOST_MANAGED = "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST";
 
-  /** A result that says the login's account is out of quota, and when it resets, if it says. */
-  private static final Pattern LIMIT =
-      Pattern.compile("You['\u2019]ve hit your .*?limit(?:\\s*\u00b7\\s*resets\\s+(.+))?");
-
   private static final List<String> EFFORTS = List.of("low", "medium", "high", "xhigh");
+
+  /**
+   * How sail runs Claude Code as one process it talks to: JSON lines both ways, text as written.
+   */
+  private static final List<String> STREAMING =
+      List.of(
+          BINARY,
+          "--print",
+          "--input-format",
+          "stream-json",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--include-partial-messages");
+
+  /** The prefix Claude Code gives the name of every tool an MCP server serves. */
+  private static final String MCP_TOOL = "mcp__";
 
   /** Where, under the dev user's home, Claude Code keeps its own sign-in. */
   private static final String CREDENTIALS = ".claude/.credentials.json";
@@ -209,21 +222,8 @@ final class ClaudeCode implements Harness {
    */
   @Override
   public Optional<List<String>> live(LiveLaunch launch) {
-    var command =
-        new ArrayList<>(
-            List.of(
-                BINARY,
-                "--print",
-                "--input-format",
-                "stream-json",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--include-partial-messages",
-                "--permission-prompts",
-                "none",
-                "--settings",
-                LIVE_SETTINGS_PATH));
+    var command = new ArrayList<>(STREAMING);
+    command.addAll(List.of("--permission-prompts", "none", "--settings", LIVE_SETTINGS_PATH));
     command.addAll(
         launch.fullPermissions() ? List.of("--dangerously-skip-permissions") : READ_ONLY_ARGS);
     if (launch.model() != null) {
@@ -236,6 +236,80 @@ final class ClaudeCode implements Harness {
   @Override
   public Optional<LiveSettings> liveSettings() {
     return Optional.of(new LiveSettings(LIVE_SETTINGS_PATH, settings()));
+  }
+
+  /**
+   * Claude Code's streaming mode with every request a person answers relayed on its stdout ({@code
+   * --permission-prompt-tool stdio}: without it nothing is asked, and each call its mode does not
+   * allow is refused), as the S0 probe recorded it asking on 2.1.332, with no {@code initialize}
+   * sent first, which it does not need. It runs under the live member's settings: the read-deny
+   * rules, and no hook to race the person's answer. Never {@code --bare}, which ignores a sign-in
+   * the workspace stored, drops {@code CLAUDE.md} and the person's skills and cuts the tools
+   * (recorded). Its process outlives a closed stdin while a background task it started runs, and
+   * begins a turn of its own when that task ends (recorded).
+   */
+  @Override
+  public Optional<List<String>> chat(ChatLaunch launch) {
+    var mode = Mode.named(chatModes(), launch.mode(), displayName());
+    var command = new ArrayList<>(STREAMING);
+    command.addAll(List.of("--settings", LIVE_SETTINGS_PATH));
+    if (launch.model() != null) {
+      command.addAll(List.of("--model", launch.model()));
+    }
+    command.addAll(List.of("--permission-prompt-tool", "stdio"));
+    if (!mode.args().isBlank()) {
+      command.addAll(List.of(mode.args().strip().split(" ")));
+    }
+    launch.resume().ifPresent(id -> command.addAll(List.of("--resume", id)));
+    return Optional.of(List.copyOf(command));
+  }
+
+  /**
+   * Claude Code's own permission modes, as a person is told them in a chat: its {@code default},
+   * which a start with no mode is in (recorded), first. A workspace's settings may name another
+   * default, so the mode a chat is in is the one Claude Code says ({@code init}, {@code status}).
+   * In plan mode the recorded turns ran on a model other than the one {@code --model} named, until
+   * the plan was approved.
+   */
+  @Override
+  public List<Mode> chatModes() {
+    return List.of(
+        new Mode(
+            "default",
+            "Asks first",
+            "Asks before edits, shell commands and network actions.",
+            "",
+            false),
+        permissionMode(
+            "acceptEdits",
+            "Edits freely",
+            "Makes file edits and common filesystem commands without asking, and asks before the"
+                + " rest.",
+            false),
+        permissionMode(
+            "plan",
+            "Plans first",
+            "Researches and proposes a plan, and changes nothing until you approve it.",
+            false),
+        permissionMode(
+            "bypassPermissions",
+            "Never asks",
+            "Runs everything without asking, skipping every permission check.",
+            true));
+  }
+
+  /** What each of Claude Code's tools does, by its name; a tool an MCP server serves is MCP's. */
+  @Override
+  public ChatItem.ToolKind toolKind(String tool) {
+    return switch (tool) {
+      case "Bash" -> ChatItem.ToolKind.COMMAND;
+      case "Edit", "Write", "NotebookEdit" -> ChatItem.ToolKind.EDIT;
+      case "Read" -> ChatItem.ToolKind.READ;
+      case "Grep", "Glob" -> ChatItem.ToolKind.SEARCH;
+      case "WebFetch", "WebSearch" -> ChatItem.ToolKind.WEB;
+      case "Agent", "Task" -> ChatItem.ToolKind.AGENT;
+      default -> tool.startsWith(MCP_TOOL) ? ChatItem.ToolKind.MCP : ChatItem.ToolKind.OTHER;
+    };
   }
 
   @Override
@@ -372,7 +446,7 @@ final class ClaudeCode implements Harness {
 
   @Override
   public List<String> reportMarkers() {
-    return List.of(RESULT);
+    return List.of(ClaudeCodeReport.RESULT);
   }
 
   /**
@@ -385,89 +459,20 @@ final class ClaudeCode implements Harness {
    */
   @Override
   public RunUsage usage(String report) {
-    var found = RunUsage.last(report, RESULT, ClaudeCode::reports);
-    if (found.unreadable()) {
-      return null;
-    }
-    return found.line() == null ? RunUsage.NONE : usageOf(found.line());
+    return ClaudeCodeReport.usage(report);
   }
 
   /**
-   * The last {@code result}, when it is an error: a 401 is a refusal of the login; "Not logged in"
-   * is no login delivered at all (only a harness given no credential, or an empty one, prints it:
-   * 2.1.322, recorded); "You've hit your … limit" is a limit, with the time it resets. No other
-   * credential is ever used in the login's place: under {@link #HOST_MANAGED} no settings file's
-   * {@code apiKeyHelper} or key, a user's, a project's or a managed one, no key kept by {@code
-   * /login} and no signed-in subscription outranks the key's own variable, and its {@code init}
-   * line names that variable (2.1.327, measured).
+   * The last {@code result}, when it is an error, read as {@link LiveStream#loginOutcome} reads a
+   * failed turn of a chat: a 401, "Not logged in" or a limit. No other credential is ever used in
+   * the login's place: under {@link #HOST_MANAGED} no settings file's {@code apiKeyHelper} or key,
+   * a user's, a project's or a managed one, no key kept by {@code /login} and no signed-in
+   * subscription outranks the key's own variable, and its {@code init} line names that variable
+   * (2.1.327, measured).
    */
   @Override
   public Optional<LoginOutcome> loginOutcome(String report) {
-    var result = RunUsage.last(report, RESULT, line -> "result".equals(line.get("type"))).line();
-    if (result == null || !Boolean.TRUE.equals(result.get("is_error"))) {
-      return Optional.empty();
-    }
-    var said = result.get("result") instanceof String text ? text.strip() : "";
-    var limit = LIMIT.matcher(said);
-    if (Long.valueOf(401).equals(RunUsage.count(result, "api_error_status"))) {
-      return Optional.of(new LoginOutcome.Refused());
-    }
-    if (said.startsWith("Not logged in")) {
-      return Optional.of(new LoginOutcome.Undelivered());
-    }
-    if (limit.matches()) {
-      return Optional.of(new LoginOutcome.Limited(LoginOutcome.resetTime(limit.group(1))));
-    }
-    return Optional.empty();
-  }
-
-  private static boolean reports(Map<String, Object> line) {
-    if (!"result".equals(line.get("type"))) {
-      return false;
-    }
-    var usage = usageOf(line);
-    return (usage.costUsd() != null && usage.costUsd() > 0)
-        || (usage.tokens() != null && usage.tokens() > 0);
-  }
-
-  private static RunUsage usageOf(Map<String, Object> result) {
-    var cost = result.get("total_cost_usd") instanceof Number usd ? usd.doubleValue() : null;
-    var models = RunUsage.map(result, "modelUsage");
-    if (models.isEmpty()) {
-      var usage = RunUsage.map(result, "usage");
-      return new RunUsage(
-          null,
-          RunUsage.count(usage, "input_tokens"),
-          RunUsage.count(usage, "output_tokens"),
-          RunUsage.count(usage, "cache_read_input_tokens"),
-          RunUsage.count(usage, "cache_creation_input_tokens"),
-          cost,
-          RunUsage.Source.RESULT);
-    }
-    String model = null;
-    var most = -1.0;
-    long in = 0;
-    long out = 0;
-    long read = 0;
-    long write = 0;
-    for (var entry : models.entrySet()) {
-      var figures = RunUsage.map(models, entry.getKey());
-      in += figure(figures, "inputTokens");
-      out += figure(figures, "outputTokens");
-      read += figure(figures, "cacheReadInputTokens");
-      write += figure(figures, "cacheCreationInputTokens");
-      var spent = figures.get("costUSD") instanceof Number usd ? usd.doubleValue() : 0;
-      if (spent > most) {
-        most = spent;
-        model = entry.getKey();
-      }
-    }
-    return new RunUsage(model, in, out, read, write, cost, RunUsage.Source.RESULT);
-  }
-
-  private static long figure(Map<String, Object> figures, String key) {
-    var count = RunUsage.count(figures, key);
-    return count == null ? 0 : count;
+    return ClaudeCodeReport.loginOutcome(report);
   }
 
   /**
@@ -603,8 +608,7 @@ final class ClaudeCode implements Harness {
   }
 
   private static String boxCredentialReadDeny() {
-    var credential = SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME);
-    return "Read(/" + credential + ")";
+    return "Read(/" + SailPaths.apiSocketContainerDir().resolve(BoxCredentialFile.FILE_NAME) + ")";
   }
 
   private static String invocation(Launch launch) {
