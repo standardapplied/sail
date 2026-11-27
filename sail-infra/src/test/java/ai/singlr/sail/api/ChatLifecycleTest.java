@@ -564,6 +564,20 @@ class ChatLifecycleTest {
     }
   }
 
+  /** I4: an entry logged while a reader reads is never missed: it is answered, never waited for. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void anEntryLoggedAsAReaderReadsIsNeverMissed() {
+    var session = bench.samsChat();
+    bench.readsWait();
+    bench.clock.onRead(2, () -> bench.send(session, "hi"));
+
+    var read = bench.read(session, 0);
+
+    assertEquals(List.of("message"), read.items().stream().map(item -> item.get("type")).toList());
+    assertEquals(0, bench.held.availablePermits(), "it never waited");
+  }
+
   /** I4: a log entry wakes only its own chat's readers. */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
