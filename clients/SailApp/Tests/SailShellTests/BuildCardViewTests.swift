@@ -143,7 +143,7 @@ import Testing
     /// the files; and an ended session Workspaces finds goes to the check that every section's does.
     @Test func theShellTellsWorkspacesTheWindowAndTheSession() async throws {
         let desk = try Desk(["whoami"])
-        let shell = try WelcomeViewTests.shell(desk, defaults: ReattachTests.defaults(), vault: OneSession(fde: "uday", lasts: AccountPaneTests.month))
+        let shell = try WelcomeViewTests.shell(desk, defaults: WelcomeViewTests.reached(), vault: OneSession(fde: "uday", lasts: AccountPaneTests.month))
         defer { shell.window.orderOut(nil) }
         _ = shell.windowShouldClose(shell.window)
         #expect(shell.workspaces.away, "the window closed")
