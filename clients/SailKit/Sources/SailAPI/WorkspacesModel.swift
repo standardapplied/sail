@@ -67,11 +67,15 @@ public struct WorkspacesModel: Sendable {
         case shown(Panel, Content)
     }
 
-    /// The left panel: This Mac's group, then the control plane's projects under its host.
+    /// The left panel: This Mac's group, then the control plane's projects under its host, each open
+    /// one with the person's own workspaces under it.
     public struct Panel: Equatable, Sendable {
         public let projects: [Project]
         /// The project chosen, ``WorkspacesModel/thisMac`` while This Mac is.
         public let chosen: String?
+        /// The person's own workspace chosen in the project chosen, whose row under it is the panel's
+        /// row chosen while that project is open.
+        public let chosenRow: String?
         /// The control plane's host, which heads its projects' group.
         public let controlPlane: String
         /// Who is signed in and their role ("ana · member"), which the empty card's line says.
@@ -91,7 +95,63 @@ public struct WorkspacesModel: Sendable {
     public struct Project: Equatable, Sendable {
         public let name: String
         public let mark: Mark?
+        /// It is open in the panel: what it holds is listed under it.
+        public let expanded: Bool
+        /// What it holds as last listed while it is open; nil while shut, or before its workspaces were
+        /// asked and answered.
+        public let holds: Nest?
     }
+
+    /// What a project holds as the panel says it, from the one listing its page shows: the person's
+    /// own workspaces, how many of other people's, and, when its listing failed, a line saying so.
+    public struct Nest: Equatable, Sendable {
+        public let yours: [Workspace]
+        public let others: Int
+        public let failed: String?
+
+        public init(yours: [Workspace], others: Int, failed: String?) {
+            self.yours = yours
+            self.others = others
+            self.failed = failed
+        }
+
+        /// The one row other people's workspaces are in the panel; nil for none.
+        public var othersSaid: String? {
+            others == 0 ? nil : "Other people's · \(others)"
+        }
+
+        /// It holds nothing to show: listed with no workspace and no failure.
+        public var empty: Bool {
+            yours.isEmpty && others == 0 && failed == nil
+        }
+    }
+
+    /// One of the person's own workspaces under its project in the panel, as its page's row says it.
+    public struct Workspace: Equatable, Sendable {
+        public let name: String
+        public let state: Open<WorkspaceState>
+        /// What is under way on it, its state said so.
+        public let busy: Action?
+        /// What Return does on it, as its page's row's Open or Start and Open; nil, nothing.
+        public let primary: Primary?
+        /// Its + offers New Session, as its page's row does.
+        public let newSession: Bool
+
+        public init(name: String, state: Open<WorkspaceState>, busy: Action?, primary: Primary?, newSession: Bool) {
+            self.name = name
+            self.state = state
+            self.busy = busy
+            self.primary = primary
+            self.newSession = newSession
+        }
+
+        init(_ line: Line) {
+            self.init(name: line.name, state: line.state, busy: line.busy, primary: line.primary, newSession: line.menu.contains(.newSession))
+        }
+    }
+
+    /// What the panel says under a project whose workspaces could not be listed.
+    public static let unlisted = "Couldn’t list its workspaces"
 
     /// A project's template when no version is current, as its row's pill says it.
     public enum Mark: Equatable, Sendable {
@@ -316,9 +376,12 @@ public struct WorkspacesModel: Sendable {
     private var projects: [ProjectSummary]?
     private var projectsFailure: SailError?
     private var projectsAsked = 0
+    /// Every project's workspaces as listed, the panel's and the pages' alike.
     private var listing = WorkspaceListing()
-    private var listedAt: Date?
-    private var listFailure: String?
+    private var listedAt: [String: Date] = [:]
+    private var listFailures: [String: String] = [:]
+    /// The projects open in the panel: the person's arrangement on this Mac, never sent anywhere.
+    public private(set) var expanded: Set<String>
     private var creates: [String: CreateLine] = [:]
     /// The person's live sessions in each of their workspaces, by workspace, as last listed.
     private var sessions: [String: Int] = [:]
@@ -347,18 +410,21 @@ public struct WorkspacesModel: Sendable {
         set { if let chosen { creates[chosen] = newValue } }
     }
 
-    /// The model for `person`, the project they chose last (`chosen`) kept chosen while it is listed.
-    public init(person: Person, chosen: String? = nil) {
+    /// The model for `person`, the project they chose last (`chosen`) kept chosen while it is listed
+    /// and open with those they left `expanded`.
+    public init(person: Person, chosen: String? = nil, expanded: [String] = []) {
         self.person = person
         thisMacChosen = chosen == Self.thisMac
         self.chosen = thisMacChosen ? nil : chosen
+        self.expanded = Set(expanded + [self.chosen].compactMap { $0 })
     }
 
     // MARK: Projects and lists
 
-    /// Takes the projects listed; the first is chosen when none still is. Returns the list request
-    /// the chosen project needs: a project chosen again is listed again too, as what was shown
-    /// before may have changed, keeping what is under way on it.
+    /// Takes the projects listed; the first is chosen when none still is, and a project no longer
+    /// listed is no longer open. Returns the list request the chosen project needs: a project chosen
+    /// again is listed again too, as what was shown before may have changed, keeping what is under
+    /// way on it.
     @discardableResult
     public mutating func projectsListed(_ result: Result<ProjectList, SailError>, request: Int? = nil) -> Int? {
         if let request, request != projectsAsked { return nil }
@@ -366,6 +432,7 @@ public struct WorkspacesModel: Sendable {
         case let .success(list):
             projects = list.projects
             projectsFailure = nil
+            expanded.formIntersection(list.projects.map(\.name))
             buildSaid = buildSaid.filter { name, _ in list.projects.contains { $0.name == name && [.known(.missing), .known(.failed)].contains($0.template) } }
             if let created {
                 self.created = nil
@@ -411,8 +478,6 @@ public struct WorkspacesModel: Sendable {
         chosen = name
         chosenRow = nil
         sessions = [:]
-        listFailure = nil
-        listedAt = nil
         let request = listing.ask(name)
         if refused[name] != nil, refused[name]?.since == nil { refused[name]?.since = request }
         askNextWaiting()
@@ -424,23 +489,47 @@ public struct WorkspacesModel: Sendable {
         listing.ask(chosen)
     }
 
-    /// Takes a list answered for request `request` when it is still the latest; `at` is when.
+    /// Takes a list answered for request `request` when it is still its project's latest; `at` is when.
     public mutating func listed(_ result: Result<WorkspaceList, SailError>, request: Int, at: Date) {
         switch result {
         case let .success(list):
-            guard listing.take(list.workspaces, request: request) else { return }
-            listedAt = at
-            listFailure = nil
-            if let project = listing.listed, let since = refused[project]?.since, request > since { refused[project] = nil }
-            if let project = listing.listed { forgetGone(in: project, request: request) }
-            if let project = listing.listed, let wanted = choosingAfterList[project], listing.rows.contains(where: { $0.name == wanted }) {
+            guard let project = listing.take(list.workspaces, request: request) else { return }
+            listedAt[project] = at
+            listFailures[project] = nil
+            if let since = refused[project]?.since, request > since { refused[project] = nil }
+            forgetGone(in: project, request: request)
+            if project == chosen, let wanted = choosingAfterList[project], list.workspaces.contains(where: { $0.name == wanted }) {
                 chosenRow = wanted
                 choosingAfterList[project] = nil
             }
         case let .failure(error):
-            guard listing.isLatest(request) else { return }
-            listFailure = error.said(at: person.controlPlane)
+            guard let project = listing.project(of: request) else { return }
+            listFailures[project] = error.said(at: person.controlPlane)
         }
+    }
+
+    /// The project request `request` lists, while it is that project's latest.
+    public func project(of request: Int) -> String? {
+        listing.project(of: request)
+    }
+
+    /// Opens `project` in the panel: the request for its workspaces when they were never asked, or
+    /// their last listing failed; nil when what was listed serves.
+    public mutating func expand(_ project: String) -> Int? {
+        expanded.insert(project)
+        guard !listing.asked(project) || listFailures[project] != nil else { return nil }
+        return listing.ask(project)
+    }
+
+    public mutating func collapse(_ project: String) {
+        expanded.remove(project)
+    }
+
+    /// A refresh of every open project but the one chosen, which the projects' own answer lists:
+    /// the requests, in the panel's order; none while the projects' last answer failed.
+    public mutating func askExpanded() -> [Int] {
+        guard projectsFailure == nil else { return [] }
+        return (projects ?? []).map(\.name).filter { expanded.contains($0) && $0 != chosen }.map { listing.ask($0) }
     }
 
     /// The number of a new request for `workspace`'s sessions in the project shown.
@@ -484,15 +573,16 @@ public struct WorkspacesModel: Sendable {
     }
 
     /// Takes the answer to the create sent in `project`, wherever the person is now: a created
-    /// workspace is chosen once listed (the request to list it, when that project is shown); a
-    /// refusal is said under the name in that project's row, kept to be fixed.
+    /// workspace is chosen once listed (the request to list that project again, shown or not, as its
+    /// rows are the panel's too); a refusal is said under the name in that project's row, kept to be
+    /// fixed.
     public mutating func created(_ result: Result<WorkspaceCreated, SailError>, project: String) -> Int? {
         guard let sent = creates[project], sent.underWay else { return nil }
         switch result {
         case let .success(created):
             creates[project] = nil
             choosingAfterList[project] = created.workspace
-            return project == chosen ? listAgain() : nil
+            return listing.ask(project)
         case let .failure(error):
             creates[project] = CreateLine(name: sent.name, underWay: false, refusal: lines(error), existing: nil)
             return nil
@@ -575,7 +665,7 @@ public struct WorkspacesModel: Sendable {
     /// runner tells the person only of their own terminals. Nothing is asked while a question is
     /// open or the row is under way.
     public mutating func ask(_ action: Action, _ name: String, terminals: Int?) -> Asked? {
-        guard let project = chosen, busy[project]?[name] == nil, let row = listing.rows.first(where: { $0.name == name }) else { return nil }
+        guard let project = chosen, busy[project]?[name] == nil, let row = listing.rows[project]?.first(where: { $0.name == name }) else { return nil }
         guard asking == nil else {
             notAsked(action, name, project: project)
             return nil
@@ -654,7 +744,7 @@ public struct WorkspacesModel: Sendable {
     /// Questions about workspaces no longer in `project`'s list are not asked: a waiting one is
     /// dropped, and an open one is withdrawn and said.
     private mutating func forgetGone(in project: String, request: Int) {
-        let names = Set(listing.rows.map(\.name))
+        let names = Set((listing.rows[project] ?? []).map(\.name))
         waiting.removeAll { $0.project == project && !names.contains($0.name) }
         guard let open = asking, open.project == project, !names.contains(open.name) else { return }
         asking = nil
@@ -674,20 +764,20 @@ public struct WorkspacesModel: Sendable {
         return true
     }
 
-    /// Takes the answer to `action` on `name` in `project`, wherever the person is now, and the
-    /// request to list that project again when it is shown. A plain delete refused for the work it
-    /// holds asks Delete Anyway in the server's sentence (after the question open, if one is); in a
-    /// project left, and any other refusal, it is said over that project's page.
+    /// Takes the answer to `action` on `name` in `project`, wherever the person is now, its row
+    /// settled at once, and the request to list that project again, shown or not: its rows are the
+    /// panel's too. A plain delete refused for the work it holds asks Delete Anyway in the server's
+    /// sentence (after the question open, if one is); in a project left, and any other refusal, it is
+    /// said over that project's page, from the person's return there when they left it.
     public mutating func changed(_ action: Action, _ name: String, project: String, _ result: Result<WorkspaceChanged, SailError>) -> Int? {
         guard busy[project]?[name] == action else { return nil }
         busy[project]?[name] = nil
-        let request = project == chosen ? listAgain() : nil
+        let request = listing.ask(project), since = project == chosen ? request : nil
         switch result {
         case let .success(answer):
-            guard request != nil, listing.listed == project else { break }
             switch answer.change {
-            case .known(.deleted): listing.settle(name, as: nil)
-            case .known(.stopped), .known(.alreadyStopped): listing.settle(name, as: .stopped)
+            case .known(.deleted): listing.settle(name, in: project, as: nil)
+            case .known(.stopped), .known(.alreadyStopped): listing.settle(name, in: project, as: .stopped)
             default: break
             }
         case let .failure(.refused(refusal)) where refusal.code == .known(.workspaceHoldsWork) && action == .delete(force: false) && project == chosen:
@@ -699,10 +789,10 @@ public struct WorkspacesModel: Sendable {
             )
             if asking == nil { asking = anyway } else { waiting.append(anyway) }
         case let .failure(.refused(refusal)) where refusal.code == .known(.workspaceHoldsWork):
-            refused[project] = (Notice(tone: .error, title: Self.holdsWork(refusal.message, name).said, line: "", tryAgain: false), request)
+            refused[project] = (Notice(tone: .error, title: Self.holdsWork(refusal.message, name).said, line: "", tryAgain: false), since)
         case let .failure(error):
             let said = lines(error)
-            refused[project] = (Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: false), request)
+            refused[project] = (Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: false), since)
         }
         return request
     }
@@ -723,12 +813,27 @@ public struct WorkspacesModel: Sendable {
 
     /// The left panel, This Mac's group listed whether or not the control plane's projects are.
     public var panel: Panel {
-        Panel(
-            projects: (projects ?? []).map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: thisMacChosen ? Self.thisMac : chosen,
-            controlPlane: person.named, who: who, listed: projects != nil, emptyLine: emptyLine,
-            stale: projects != nil && (projectsFailure != nil || (chosen != nil && listing.listed == chosen && listFailure != nil)),
+        let shownFailed = chosen.map { listing.rows[$0] != nil && listFailures[$0] != nil } ?? false
+        return Panel(
+            projects: (projects ?? []).map { Project(name: $0.name, mark: Self.mark($0.template), expanded: expanded.contains($0.name), holds: expanded.contains($0.name) ? nest($0.name) : nil) },
+            chosen: thisMacChosen ? Self.thisMac : chosen, chosenRow: panelRow, controlPlane: person.named, who: who, listed: projects != nil, emptyLine: emptyLine,
+            stale: projects != nil && (projectsFailure != nil || shownFailed),
             creates: person.creates && projects != nil && (projects?.isEmpty == false || thisMacChosen)
         )
+    }
+
+    /// What `project` holds as last listed, as the panel says it; nil before any answer.
+    private func nest(_ project: String) -> Nest? {
+        let failed = listFailures[project].map { _ in Self.unlisted }
+        guard let rows = listing.rows[project] else { return failed.map { Nest(yours: [], others: 0, failed: $0) } }
+        let sorted = WorkspaceList(project: project, workspaces: rows).rows(for: person.handle), mine = sorted.filter { $0.owner == person.handle }
+        return Nest(yours: mine.map { Workspace(line($0, in: project)) }, others: sorted.count - mine.count, failed: failed)
+    }
+
+    /// The row chosen in the project chosen when it is one of the person's own, which the panel holds.
+    private var panelRow: String? {
+        guard !thisMacChosen, let chosen, let chosenRow else { return nil }
+        return listing.rows[chosen]?.contains { $0.name == chosenRow && $0.owner == person.handle } == true ? chosenRow : nil
     }
 
     /// What the panel says under the control plane's head: no project listed, none at all to one who
@@ -857,9 +962,9 @@ public struct WorkspacesModel: Sendable {
     /// the project already has: during a rebuild they stay listed, with Open, and New Workspace
     /// says why it waits; only a project with none listed says what is missing in its place.
     private func page(_ project: ProjectSummary) -> Page {
-        let name = project.name, listed = listing.listed == name, unready = Self.unready(project)
+        let name = project.name, listed = listing.rows[name] != nil, unready = Self.unready(project), listFailure = listFailures[name]
         let banner = refused[name]?.notice ?? listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? projectsBanner
-        let rows = listed ? WorkspaceList(project: name, workspaces: listing.rows).rows(for: person.handle) : []
+        let rows = WorkspaceList(project: name, workspaces: listing.rows[name] ?? []).rows(for: person.handle)
         if let unready, rows.isEmpty, listed, listFailure == nil {
             return Page(
                 name: name, lede: unready.lede, canCreate: false, createWhy: unready.why, banner: banner,
@@ -880,10 +985,10 @@ public struct WorkspacesModel: Sendable {
                     line: nil, action: .newWorkspace, missing: false
                 ))
             } else {
-                let lines = rows.map(line)
+                let lines = rows.map { line($0, in: name) }
                 let yours = lines.filter(\.mine), others = lines.filter { !$0.mine }
                 let shown = create.map { line in
-                    let taken = !line.refusal.isEmpty && listing.rows.contains { $0.name == line.name }
+                    let taken = !line.refusal.isEmpty && rows.contains { $0.name == line.name }
                     return CreateLine(name: line.name, underWay: line.underWay, refusal: line.refusal, existing: taken ? line.name : nil)
                 }
                 body = .list(Table(yours: yours, others: others, create: shown, creating: creating(in: name), count: lines.count))
@@ -892,7 +997,7 @@ public struct WorkspacesModel: Sendable {
         return Page(
             name: name, lede: unready.map { rows.isEmpty ? $0.lede : $0.withRows } ?? "Your own copies of \(name) on the runner. Each one opens as a terminal tab.", canCreate: canCreate,
             createWhy: createWhy(project), banner: banner,
-            body: body, stale: listed && listFailure != nil, listedAt: listedAt
+            body: body, stale: listed && listFailure != nil, listedAt: listedAt[name]
         )
     }
 
@@ -905,14 +1010,15 @@ public struct WorkspacesModel: Sendable {
         )
     }
 
-    private func line(_ row: WorkspaceRow) -> Line {
-        let mine = row.owner == person.handle, opens = row.opens(for: person.handle, admin: person.admin)
+    /// Row `row` of `project` as its page says it, chosen and counted only in the project chosen.
+    private func line(_ row: WorkspaceRow, in project: String) -> Line {
+        let mine = row.owner == person.handle, opens = row.opens(for: person.handle, admin: person.admin), shown = project == chosen
         let primary: Primary? = switch row.state {
         case .known(.running): opens ? .open : nil
         case .known(.stopped), .known(.frozen): opens ? .startAndOpen : nil
         default: nil
         }
-        let underWay = chosen.flatMap { busy[$0]?[row.name] }
+        let underWay = busy[project]?[row.name]
         let entry: [Entry] = primary.map { [$0 == .open ? .open : .startAndOpen] } ?? []
         let acts: [Entry] = opens ? (row.state == .known(.running) || row.state == .known(.frozen) ? [.stop, .delete] : [.delete]) : []
         let agents: [Entry] = mine && primary != nil ? lastStarted.map { [.startLast($0), .newSession] } ?? [.newSession] : []
@@ -923,10 +1029,10 @@ public struct WorkspacesModel: Sendable {
         case let handle?: .person(handle)
         }
         return Line(
-            name: row.name, instance: row.instance, state: row.state, creating: false, mine: mine, owner: owner, chosen: row.name == chosenRow,
+            name: row.name, instance: row.instance, state: row.state, creating: false, mine: mine, owner: owner, chosen: shown && row.name == chosenRow,
             primary: underWay == nil ? primary : nil, why: row.whyNotOpened(for: person.handle, admin: person.admin),
             menu: underWay == nil ? entry + agents + [.copyName] + acts : [.copyName],
-            sessions: mine && row.state == .known(.running) ? sessions[row.name] ?? 0 : 0, busy: underWay, askingAgents: row.name == askingAgentsIn
+            sessions: shown && mine && row.state == .known(.running) ? sessions[row.name] ?? 0 : 0, busy: underWay, askingAgents: shown && row.name == askingAgentsIn
         )
     }
 

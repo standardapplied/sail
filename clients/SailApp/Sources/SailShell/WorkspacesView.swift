@@ -12,7 +12,9 @@ import SailWorkbench
 /// a person's action holds a control (#462): a refresh never does. Under a 720 pt card the panel
 /// hides, and ⌃⌘S (View ▸ Show Sidebar) shows it over the content until a project is chosen or
 /// Escape; on a wider card ⌃⌘S hides and shows it beside the content. A row's New Session asks the
-/// workspace's agents route and shows its answer in the New Session panel under the row.
+/// workspace's agents route and shows its answer in the New Session panel under the row, or beside
+/// the left panel's row. A project opened in the left panel has its workspaces asked once and again
+/// on every refresh; choosing one of them shows its project's page with its row chosen.
 @MainActor
 public final class WorkspacesView: NSView {
     static let narrow = 720.0, cardWidth = 440.0
@@ -33,7 +35,7 @@ public final class WorkspacesView: NSView {
                 projectSheet?.withdraw()
                 lastReads?.cancel()
                 reading = (nil, true)
-                model = WorkspacesModel(person: person, chosen: lastChosen(person))
+                model = WorkspacesModel(person: person, chosen: lastChosen(person), expanded: lastExpanded(person))
                 memory = remembered(person)
                 model.lastStarted = memory.last?.display
                 era += 1
@@ -55,6 +57,10 @@ public final class WorkspacesView: NSView {
     var lastChosen: @MainActor (WorkspacesModel.Person) -> String? = { _ in nil }
     /// Keeps the project a person chose, told each time they choose one.
     var keepChosen: @MainActor (String, WorkspacesModel.Person) -> Void = { _, _ in }
+    /// The projects a person left open in the left panel on a control plane.
+    var lastExpanded: @MainActor (WorkspacesModel.Person) -> [String] = { _ in [] }
+    /// Keeps the projects a person has open, told each time they open or shut one.
+    var keepExpanded: @MainActor ([String], WorkspacesModel.Person) -> Void = { _, _ in }
     /// The person's starts: the mode and the way in chosen for each harness and the last start,
     /// which their own rows offer to start again.
     var memory = ModeMemory() {
@@ -102,7 +108,8 @@ public final class WorkspacesView: NSView {
     /// The newest ask of an agents route: an answer to any earlier one is dropped when it lands.
     private var asks = 0
     /// Where the panel's row was when it opened, and what it said: the panel follows it or closes.
-    private var panelRow: (frame: NSRect, line: WorkspacesModel.Line)?
+    /// `inPanel`, the row is the left panel's.
+    private var panelRow: (frame: NSRect, line: WorkspacesModel.Line, inPanel: Bool)?
     /// The card shown in place of the panel and the project: an empty state saying why.
     package let card = NSView()
     /// The card's first action as last drawn: Sign In or Try Again.
@@ -171,6 +178,14 @@ public final class WorkspacesView: NSView {
         contentFull = project.leadingAnchor.constraint(equalTo: leadingAnchor)
         contentLeading.isActive = true
         panel.onChoose = { [weak self] name in self?.choose(name) }
+        panel.onChooseRow = { [weak self] project, name in self?.choose(project, row: name) }
+        panel.onToggle = { [weak self] project in self?.toggle(project) }
+        panel.onOpen = { [weak self] project, name in self?.onOpen(project, name) }
+        panel.onNewSession = { [weak self] project, name in
+            guard let self, let client else { return }
+            choose(project, row: name, keepingThePanel: true)
+            askAgents(name, project: project, client, again: false, inPanel: true)
+        }
         panel.onTryAgain = { [weak self] in self?.askAgain(nil) }
         panel.onCreate = { [weak self] in self?.createProject() }
         project.on = { [weak self] act in self?.act(act) }
@@ -178,9 +193,10 @@ public final class WorkspacesView: NSView {
         newSession.onStoreKey = { [weak self] offer in self?.storeKey(offer) }
         newSession.onClose = { [weak self] in
             self?.panelRow = nil
+            self?.panel.opened = nil
             self?.project.list.primaryElsewhere = false
         }
-        if let clip = project.listScroll?.contentView {
+        for clip in [project.listScroll?.contentView, panel.scroll.contentView].compactMap({ $0 }) {
             clip.postsBoundsChangedNotifications = true
             NotificationCenter.default.addObserver(self, selector: #selector(listScrolled(_:)), name: NSView.boundsDidChangeNotification, object: clip)
         }
@@ -317,7 +333,10 @@ public final class WorkspacesView: NSView {
             let answer = await Self.result { () async throws(SailError) in try await client.send(.projects) }
             guard era == self.era else { return }
             if case .failure = answer { triedAt = Date() }
+            let open = model.expanded
             if let request = model.projectsListed(answer, request: asked) { list(request) }
+            if model.expanded != open { keepExpanded(model.expanded.sorted(), person) }
+            model.askExpanded().forEach(list)
             render()
         }
         projectsAsked = asking
@@ -327,15 +346,16 @@ public final class WorkspacesView: NSView {
     /// The projects asked for last: what a test awaits.
     package private(set) var projectsAsked: Task<Void, Never>?
 
+    /// Lists the project request `request` asks for, the chosen one's rows counting their sessions.
     private func list(_ request: Int) {
-        guard let client, let name = model.chosen else { return }
+        guard let client, let name = model.project(of: request) else { return }
         let era = self.era
         Task {
             let answer = await Self.result { () async throws(SailError) in try await client.send(.workspaces(project: name)) }
             guard era == self.era else { return }
             model.listed(answer, request: request, at: Date())
             render()
-            if case let .success(list) = answer { countSessions(in: list, by: client) }
+            if case let .success(list) = answer, name == model.chosen { countSessions(in: list, by: client) }
         }
     }
 
@@ -371,12 +391,15 @@ public final class WorkspacesView: NSView {
         count([name], in: project, by: client)
     }
 
-    /// Chooses `name` in the panel: This Mac, its page asking the control plane nothing, or a project.
-    private func choose(_ name: String) {
+    /// Chooses `name` in the panel: This Mac, its page asking the control plane nothing, or a project,
+    /// its page with workspace `row` chosen (none for the project's own row). The panel shown over
+    /// the content goes, unless `keepingThePanel` (a row's +, whose New Session opens beside it).
+    private func choose(_ name: String, row: String? = nil, keepingThePanel: Bool = false) {
         let thisMac = name == WorkspacesModel.thisMac
-        guard thisMac ? !model.thisMacChosen : name != model.chosen || model.thisMacChosen else { return }
+        let shown = thisMac ? model.thisMacChosen : name == model.chosen && !model.thisMacChosen
+        guard !shown || (!thisMac && model.chosenRow != row) else { return }
         newSession.close()
-        if overlaid {
+        if overlaid, !keepingThePanel {
             overlaid = false
             arrange()
         }
@@ -385,11 +408,25 @@ public final class WorkspacesView: NSView {
             keepChosen(name, person)
             return render()
         }
-        let request = model.choose(name)
-        keepChosen(name, person)
+        let request = shown ? nil : model.choose(name)
+        model.chooseRow(row)
+        if !shown { keepChosen(name, person) }
         render()
+        guard let request else { return }
         list(request)
         showQuestion()
+    }
+
+    /// Opens a shut project in the panel or shuts an open one, its workspaces asked the first time;
+    /// the projects open kept for the person.
+    private func toggle(_ project: String) {
+        if model.expanded.contains(project) {
+            model.collapse(project)
+        } else if let request = model.expand(project) {
+            list(request)
+        }
+        keepExpanded(model.expanded.sorted(), person)
+        render()
     }
 
     /// Runs a person's action: busy while it runs.
@@ -446,7 +483,9 @@ public final class WorkspacesView: NSView {
         case .cancelCreate:
             model.cancelCreate()
             render(claim: .list)
-        case let .chose(name): model.chooseRow(name)
+        case let .chose(name):
+            model.chooseRow(name)
+            panel.render(model.panel)
         case let .show(name):
             model.chooseRow(name)
             render()
@@ -551,7 +590,8 @@ public final class WorkspacesView: NSView {
     /// the row's quick item: the last start starts at once when it still can (``NewSession/startsAgain``),
     /// else the panel opens at its harness saying why. The newest press wins: a press during an ask
     /// takes it over, its row then marked asking, and the earlier answer is dropped when it lands.
-    private func askAgents(_ name: String, project projectName: String, _ client: SailClient, again: Bool) {
+    /// `inPanel`, asked from the left panel's row, beside which it opens.
+    private func askAgents(_ name: String, project projectName: String, _ client: SailClient, again: Bool, inPanel: Bool = false) {
         let asked = startingIn.map { $0.project == projectName && $0.name == name } ?? false
         if newSession.isOpen {
             newSession.close()
@@ -575,10 +615,12 @@ public final class WorkspacesView: NSView {
                 if panel.startsAgain, let start = panel.start() { return started(start, panel.memory) }
             }
             render()
-            guard let row = project.rowFrame(name), let line = model.screen.line(name) else { return }
-            newSession.open(said(answer), workspace: name, memory: memory, under: row, page: project, narrow: project.narrow, anchor: project.plus(name))
+            guard let row = inPanel ? panel.rowFrame(projectName, name) : project.rowFrame(name), let line = model.screen.line(name) else { return }
+            let anchor = inPanel ? panel.plus(projectName, name) : project.plus(name)
+            newSession.open(said(answer), workspace: name, memory: memory, under: row, page: inPanel ? self : project, narrow: !inPanel && project.narrow, beside: inPanel, anchor: anchor)
             guard newSession.isOpen else { return }
-            panelRow = (row, line)
+            panelRow = (row, line, inPanel)
+            panel.opened = inPanel ? LeftPanel.id(projectName, name) : nil
             project.list.primaryElsewhere = true
         }
     }
@@ -662,9 +704,8 @@ public final class WorkspacesView: NSView {
     private func keepPanelOnItsRow() {
         guard newSession.isOpen, let place = startingIn, let opened = panelRow else { return }
         let line = model.chosen == place.project ? model.screen.line(place.name) : nil
-        guard let line, line.state == opened.line.state, line.owner == opened.line.owner, line.mine == opened.line.mine,
-              project.rowFrame(place.name) == opened.frame
-        else { return newSession.close() }
+        let frame = opened.inPanel ? panel.rowFrame(place.project, place.name) : project.rowFrame(place.name)
+        guard let line, line.state == opened.line.state, line.owner == opened.line.owner, line.mine == opened.line.mine, frame == opened.frame else { return newSession.close() }
     }
 
     @objc private func listScrolled(_: Notification) {

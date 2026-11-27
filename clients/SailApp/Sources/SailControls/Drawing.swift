@@ -111,6 +111,18 @@ package enum Draw {
         )
     }
 
+    /// A disclosure's chevron filling `rect`: down while open, else pointing along the line, mirrored
+    /// right to left.
+    package static func disclosure(open: Bool, in rect: NSRect, ink: Tint, rightToLeft: Bool) {
+        guard !open, rightToLeft else { return icon(open ? .down : .right, in: rect, ink: ink) }
+        let context = NSGraphicsContext.current?.cgContext
+        context?.saveGState()
+        context?.translateBy(x: rect.midX * 2, y: 0)
+        context?.scaleBy(x: -1, y: 1)
+        icon(.right, in: rect, ink: ink)
+        context?.restoreGState()
+    }
+
     /// One of the design's line icons filling `rect`, its strokes scaled with it as an SVG's are.
     package static func icon(_ icon: LineIcon, in rect: NSRect, ink: Tint) {
         let scale = Double(rect.width) / LineIcon.side, down = NSGraphicsContext.current?.isFlipped ?? true
