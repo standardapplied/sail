@@ -232,15 +232,6 @@ public final class ChatHost implements AutoCloseable {
     }
   }
 
-  /**
-   * The process that holds {@code chat}'s conversation, started when none of this host's does: the
-   * one way a process is started for a chat. Called under the chat's lock.
-   */
-  private ChatProcess holder(ChatStore.Chat chat) {
-    var held = live.get(chat.id());
-    return held != null && !held.end().over() ? held : startProcess(chat);
-  }
-
   private boolean ended(String session) {
     return store.find(session).map(ChatStore.Chat::ended).orElse(true);
   }
@@ -394,12 +385,17 @@ public final class ChatHost implements AutoCloseable {
   }
 
   /**
-   * Starts the process that holds {@code chat}'s conversation, and reads it: a turn a process
-   * before it left open, proved gone in the start, is cut first, before the process starts, so
-   * nothing between its start and its holding can fail. Called under the chat's lock.
+   * The process that holds {@code chat}'s conversation, the one way a process is started for a
+   * chat: this host's, else one started and read, a turn a process before it left open, proved gone
+   * in the start, cut first, before the process starts, so nothing between its start and its
+   * holding can fail. Called under the chat's lock.
    */
-  private ChatProcess startProcess(ChatStore.Chat chat) {
+  private ChatProcess holder(ChatStore.Chat chat) {
     var session = chat.id();
+    var held = live.get(session);
+    if (held != null && !held.end().over()) {
+      return held;
+    }
     var log = log(session);
     var started =
         launch.start(
