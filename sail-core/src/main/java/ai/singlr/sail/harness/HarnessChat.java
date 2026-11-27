@@ -72,6 +72,12 @@ public interface HarnessChat {
    */
   List<Harness.Mode> modes();
 
+  /**
+   * Whether a chat may use the sign-in a person made inside their workspace ({@link
+   * Harness#signIn}), which Sail never holds, copies or relays; a stored key is always taken.
+   */
+  boolean signsInInside();
+
   /** What a call of the harness's tool {@code tool} does, as a person reads its row. */
   ChatItem.ToolKind kind(String tool);
 

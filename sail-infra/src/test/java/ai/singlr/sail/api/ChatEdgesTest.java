@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -251,7 +252,8 @@ class ChatEdgesTest {
         ProjectReader.ofCatalog(new ProjectStore(bench.db)),
         bench.processes,
         shell,
-        TestAuth.roles(bench.db));
+        TestAuth.roles(bench.db),
+        Harnesses::of);
   }
 
   /** A shell whose every command fails with {@code failure}. */

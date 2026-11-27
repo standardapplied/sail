@@ -126,6 +126,7 @@ class ScopedReadsTest {
           "/v1/runs",
           "/v1/logins",
           "/v1/passkeys",
+          "/v1/me/preferences",
           "/v1/projects");
 
   /**
@@ -302,9 +303,9 @@ class ScopedReadsTest {
   /**
    * The operations a {@code GET} reaches that answer their opener alone, never by scope, so a
    * scoped reader and an admin are both told there is none: a chat ({@code ChatHostTest} holds it
-   * to its opener).
+   * to its opener), and the chats a workspace's listing names ({@code ChatListingTest}).
    */
-  private static final Set<String> THE_OPENERS_ALONE = Set.of("chats");
+  private static final Set<String> THE_OPENERS_ALONE = Set.of("chats", "chatListing");
 
   /** The operations HTTP never addresses to a row: a round of sync, and the local socket's. */
   private static final Set<String> NEVER_ADDRESSED_OVER_HTTP =

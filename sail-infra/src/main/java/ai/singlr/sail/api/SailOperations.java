@@ -52,6 +52,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AttentionStore;
@@ -109,6 +110,7 @@ public final class SailOperations implements HostOperations {
   private HostIdentity identity;
   private HostPty pty;
   private ChatHost chats;
+  private ChatListing chatListing;
   private HostSchema schema;
   private TemplateBuildService templateBuildService;
   private Predicate<String> asksForCredentials = new ShellExecutor(false)::asksForCredentials;
@@ -137,6 +139,7 @@ public final class SailOperations implements HostOperations {
             ProjectReader.ofCatalog(projectStore),
             identity::workspaceOwner,
             shell);
+    var chatTiming = ChatTiming.real();
     this.chats =
         new ChatHost(
             new ChatStore(db),
@@ -146,8 +149,10 @@ public final class SailOperations implements HostOperations {
                 ProjectReader.ofCatalog(projectStore),
                 chatProcesses,
                 shell,
-                roles()),
-            ChatTiming.real());
+                roles(),
+                Harnesses::of),
+            chatTiming);
+    this.chatListing = new ChatListing(new ChatStore(db), new FdeStore(db), chatTiming);
     projectSkills = new ProjectSkills(this::projectFiles);
     dispatchOps.useProjectSkills(projectSkills);
     return this;
@@ -220,6 +225,11 @@ public final class SailOperations implements HostOperations {
   @Override
   public ChatHost chats() {
     return requireHost(chats);
+  }
+
+  @Override
+  public ChatListing chatListing() {
+    return requireHost(chatListing);
   }
 
   @Override
@@ -891,6 +901,11 @@ public final class SailOperations implements HostOperations {
   @Override
   public PasskeyOperations passkeys() {
     return new PasskeyOperations(controlPlane);
+  }
+
+  @Override
+  public PreferenceOperations preferences() {
+    return new PreferenceOperations(controlPlane);
   }
 
   /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */

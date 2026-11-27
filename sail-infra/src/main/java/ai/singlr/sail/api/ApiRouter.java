@@ -55,6 +55,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
 
   private static final String PROJECT = "/v1/projects/{project}";
   private static final String SESSION = "/v1/sessions/{session}";
+  private static final String PREFERENCES = "/v1/me/preferences";
 
   private static final String SPEC = "spec";
   private static final String ROOM = "room";
@@ -140,6 +141,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     var keepLogins = Gate.decides(Action.KEEP_LOGINS);
     var keepPasskeys = Gate.decides(Action.KEEP_PASSKEYS);
     var enterWorkspace = Gate.decides(Action.ENTER_WORKSPACE);
+    var keepPreferences = Gate.decides(Action.KEEP_PREFERENCES);
     return List.of(
         route(GET, "/v1/health", Gate.unauthenticated("the liveness probe"), this::health),
         route(Route.ANY, "/v1/health", unserved, ApiRouter::absent),
@@ -232,6 +234,18 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             }),
         route(Route.ANY, "/v1/passkeys/{id}", unserved, ApiRouter::absent),
         route(Route.ANY, "/v1/passkeys/{rest...}", unserved, ApiRouter::absent),
+        route(
+            GET,
+            PREFERENCES,
+            keepPreferences,
+            call -> ApiResponse.ok(operations.preferences().read())),
+        route(
+            PUT,
+            PREFERENCES,
+            keepPreferences,
+            call -> ApiResponse.ok(operations.preferences().keep(call.body()))),
+        route(Route.ANY, PREFERENCES, unserved, ApiRouter::absent),
+        route(Route.ANY, "/v1/me/{rest...}", unserved, ApiRouter::absent),
         route(POST, "/v1/attention", Gate.ATTENDS, this::attend),
         route(Route.ANY, "/v1/attention", unserved, ApiRouter::absent),
         route(GET, "/v1/reviews/{review}", reads, this::reviewDetail),
@@ -773,15 +787,17 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   }
 
   /**
-   * The caller's terminal sessions in a workspace, which an app reattaches to: those the terminal
+   * The caller's sessions in a workspace, which an app reattaches to: the terminals the terminal
    * host would let the caller's own credential attach to, so a member lists nothing of another
-   * person's. The workspace is looked up first as its list reads it, so a project the caller may
-   * not read, or a workspace this runner does not hold, is not found; and a session made before the
-   * workspace's own instance was, in an earlier one of its name, is not listed. Refused as the
-   * ticket route is on a box that offers no terminal over the network.
+   * person's, and the caller's own chats, an admin's too, in one list. The workspace is looked up
+   * first as its list reads it, so a project the caller may not read, or a workspace this runner
+   * does not hold, is not found; and a terminal made before the workspace's own instance was, in an
+   * earlier one of its name, is not listed. On a box that offers no terminal over the network the
+   * listing is the caller's chats alone; with a terminal door, its host's refusal, an unreachable
+   * host's too, refuses the whole answer, since a list without its live terminals would say they
+   * are gone.
    */
   private ApiResponse sessions(Call call) {
-    var tickets = offered();
     var project = call.project();
     var name = call.param("workspace");
     var listed = operations.workspaces(project);
@@ -795,8 +811,14 @@ public final class ApiRouter implements HttpHandler, RouteTable {
                 .findFirst()
                 .orElseThrow(
                     () -> ApiException.of(ErrorCode.NOT_FOUND, Workspaces.absent(project, name)));
-    return ApiResponse.ok(
-        tickets.sessions(ApiAuth.credentialOf(call.exchange()), project, name, row.started()));
+    var terminals =
+        terminal
+            .map(
+                door ->
+                    door.sessions(
+                        ApiAuth.credentialOf(call.exchange()), project, name, row.started()))
+            .orElse(WorkspaceSessionsResponse.NONE);
+    return ApiResponse.ok(terminals.with(operations.chatListing().of(project, name)));
   }
 
   /**

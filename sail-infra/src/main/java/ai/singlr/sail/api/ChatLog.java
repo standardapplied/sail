@@ -174,8 +174,11 @@ final class ChatLog {
     return store.unhanded(session, MESSAGE);
   }
 
-  /** What the open turn left open, read from the log since the last turn ended. */
-  Open open() {
+  /**
+   * What chat {@code session}'s open turn left open, read from its log in {@code store} since the
+   * last turn ended: the one read a turn's end, a cut and the sessions listing all make.
+   */
+  static Open open(ChatStore store, String session) {
     var rows = new LinkedHashMap<String, String>();
     var requests = new LinkedHashMap<String, Instant>();
     for (var item : store.since(session, TURN_ENDED, OPENING)) {
@@ -251,7 +254,7 @@ final class ChatLog {
   }
 
   private void closeOpen() {
-    var open = open();
+    var open = open(store, session);
     open.rows()
         .forEach((id, under) -> append(new ChatItem.ToolDone(under, id, UNREAD, false, false)));
     open.requests().keySet().forEach(id -> append(new ChatItem.Withdrawn(id)));

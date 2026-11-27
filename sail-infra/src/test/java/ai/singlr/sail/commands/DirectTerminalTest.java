@@ -159,8 +159,9 @@ class DirectTerminalTest {
   }
 
   /**
-   * Scenario 1 and N1: with neither setting nothing more is bound, the ticket route is no route,
-   * and the unix socket answers as on main: an API token is no credential of its hello.
+   * Scenario 1 and N1: with neither setting nothing more is bound, the ticket route is no route, a
+   * workspace's listing is the caller's chats alone, and the unix socket answers as on main: an API
+   * token is no credential of its hello.
    */
   @Test
   void withNeitherSettingNothingMoreIsBoundAndEveryAnswerIsMains() throws Exception {
@@ -178,9 +179,13 @@ class DirectTerminalTest {
           "404 terminal_not_offered This runner offers no terminal over the network; ask an admin.",
           statusAndError(send(base, "POST", "/v1/terminal/tickets", ada, OPEN_ACME)));
       assertEquals(
-          "404 terminal_not_offered This runner offers no terminal over the network; ask an admin.",
-          statusAndError(
-              send(base, "GET", "/v1/projects/acme/workspaces/main/sessions", ada, null)));
+          List.of(),
+          YamlUtil.parseMap(
+                  body(
+                      send(base, "GET", "/v1/projects/acme/workspaces/main/sessions", ada, null),
+                      200))
+              .get("sessions"),
+          "with no terminal door the listing is the caller's chats alone, here none");
       assertEquals(
           "404 not_found API endpoint was not found.",
           statusAndError(send(base, "GET", "/v1/terminal/tickets", ada, null)));
@@ -330,6 +335,23 @@ class DirectTerminalTest {
     assertEquals(
         DateTimeUtils.format(DateTimeUtils.now().plus(PtyMessage.TICKET_LIFE)).substring(0, 16),
         answer.get("expires_at").toString().substring(0, 16));
+  }
+
+  /**
+   * A box with a terminal door whose host lists nothing here refuses a workspace's whole listing,
+   * as an unreachable host does: a list without its live terminals would say they are gone.
+   */
+  @Test
+  void aTerminalDoorWhoseHostListsNothingRefusesTheWholeListing() throws Exception {
+    assertEquals(
+        "503 terminal_unavailable This terminal host lists no sessions here.",
+        statusAndError(
+            send(
+                "http://127.0.0.1:" + api.port(),
+                "GET",
+                "/v1/projects/acme/workspaces/main/sessions",
+                ada,
+                null)));
   }
 
   /**

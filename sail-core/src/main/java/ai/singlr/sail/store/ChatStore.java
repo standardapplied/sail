@@ -269,6 +269,38 @@ public final class ChatStore {
     return db.changes();
   }
 
+  /**
+   * The chats {@code opener} opened in workspace {@code workspace} of {@code project} that are open
+   * or ended at or after {@code endedSince}, newest first, then by id; at most {@code limit}.
+   */
+  public List<Chat> listed(
+      String opener, String project, String workspace, Instant endedSince, int limit) {
+    return db.query(
+        "SELECT "
+            + COLUMNS
+            + " FROM chat_sessions WHERE opener = ? AND project = ? AND workspace = ?"
+            + " AND (ended_at IS NULL OR ended_at >= ?) ORDER BY created_at DESC, id LIMIT ?",
+        ChatStore::chat,
+        opener,
+        project,
+        workspace,
+        endedSince,
+        limit);
+  }
+
+  /** The kinds of the chat's last {@code limit} items of {@code kinds}, the last first. */
+  public List<String> lastKinds(String session, List<String> kinds, int limit) {
+    var params = new ArrayList<Object>(List.of(session));
+    params.addAll(kinds);
+    params.add(limit);
+    return db.query(
+        "SELECT kind FROM chat_items WHERE session = ? AND kind IN ("
+            + String.join(", ", Collections.nCopies(kinds.size(), "?"))
+            + ") ORDER BY seq DESC LIMIT ?",
+        row -> row.text(0),
+        params.toArray());
+  }
+
   private static Item item(Sqlite.Row row) {
     return new Item(row.integer(0), row.text(1), row.text(2), row.instant(3));
   }

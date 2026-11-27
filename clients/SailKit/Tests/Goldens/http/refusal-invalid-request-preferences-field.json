@@ -1,0 +1,21 @@
+{
+  "request": {
+    "body": {
+      "session_form": "chat",
+      "theme": "dark"
+    },
+    "method": "PUT",
+    "path": "/v1/me/preferences"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "A preference names only session_form."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

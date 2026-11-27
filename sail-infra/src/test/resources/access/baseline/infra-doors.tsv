@@ -14864,6 +14864,64 @@ read messages of s-ada as room viewer ada-room beta	denied ROOM_NOT_FOUND 404 Ro
 read messages of s-ada as room viewer bob-room acme	ok SpecMessagesResponse msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of s-ada as room viewer bob-room all	ok SpecMessagesResponse msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of s-ada as room viewer bob-room beta	denied ROOM_NOT_FOUND 404 Room 's-ada' was not found. | 
+read my preferences as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as api admin root all	ok Preferences
+read my preferences as api member ada acme	ok Preferences
+read my preferences as api member ada all	ok Preferences
+read my preferences as api member ada beta	ok Preferences
+read my preferences as api member bob acme	ok Preferences
+read my preferences as api member bob all	ok Preferences
+read my preferences as api member bob beta	ok Preferences
+read my preferences as api member machine all	denied FORBIDDEN 403 This credential acts for no person, so it holds no preferences. | Use a credential of your own.
+read my preferences as api viewer ada acme	ok Preferences
+read my preferences as api viewer ada all	ok Preferences
+read my preferences as api viewer ada beta	ok Preferences
+read my preferences as api viewer bob acme	ok Preferences
+read my preferences as api viewer bob all	ok Preferences
+read my preferences as api viewer bob beta	ok Preferences
+read my preferences as cli admin root all	ok Preferences
+read my preferences as cli member ada acme	ok Preferences
+read my preferences as cli member ada all	ok Preferences
+read my preferences as cli member ada beta	ok Preferences
+read my preferences as cli member bob acme	ok Preferences
+read my preferences as cli member bob all	ok Preferences
+read my preferences as cli member bob beta	ok Preferences
+read my preferences as cli viewer ada acme	ok Preferences
+read my preferences as cli viewer ada all	ok Preferences
+read my preferences as cli viewer ada beta	ok Preferences
+read my preferences as cli viewer bob acme	ok Preferences
+read my preferences as cli viewer bob all	ok Preferences
+read my preferences as cli viewer bob beta	ok Preferences
+read my preferences as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container member ada beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container member bob beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container viewer ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container viewer ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container viewer ada beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container viewer bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container viewer bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as container viewer bob beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+read my preferences as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+read my preferences as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
 read project acme as agent member ada-agent acme	ok ProjectResponse acme
 read project acme as agent member ada-agent all	ok ProjectResponse acme
 read project acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
@@ -19298,6 +19356,64 @@ serve the stack of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_CATA
 serve the stack of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 serve the stack of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 serve the stack of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+set my preferences as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as api admin root all	ok Preferences
+set my preferences as api member ada acme	ok Preferences
+set my preferences as api member ada all	ok Preferences
+set my preferences as api member ada beta	ok Preferences
+set my preferences as api member bob acme	ok Preferences
+set my preferences as api member bob all	ok Preferences
+set my preferences as api member bob beta	ok Preferences
+set my preferences as api member machine all	denied FORBIDDEN 403 This credential acts for no person, so it holds no preferences. | Use a credential of your own.
+set my preferences as api viewer ada acme	ok Preferences
+set my preferences as api viewer ada all	ok Preferences
+set my preferences as api viewer ada beta	ok Preferences
+set my preferences as api viewer bob acme	ok Preferences
+set my preferences as api viewer bob all	ok Preferences
+set my preferences as api viewer bob beta	ok Preferences
+set my preferences as cli admin root all	ok Preferences
+set my preferences as cli member ada acme	ok Preferences
+set my preferences as cli member ada all	ok Preferences
+set my preferences as cli member ada beta	ok Preferences
+set my preferences as cli member bob acme	ok Preferences
+set my preferences as cli member bob all	ok Preferences
+set my preferences as cli member bob beta	ok Preferences
+set my preferences as cli viewer ada acme	ok Preferences
+set my preferences as cli viewer ada all	ok Preferences
+set my preferences as cli viewer ada beta	ok Preferences
+set my preferences as cli viewer bob acme	ok Preferences
+set my preferences as cli viewer bob all	ok Preferences
+set my preferences as cli viewer bob beta	ok Preferences
+set my preferences as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container member ada beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container member bob beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container viewer ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container viewer ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container viewer ada beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container viewer bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container viewer bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as container viewer bob beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep preferences. | Do it from outside the container: with sail on the host, or in Mast.
+set my preferences as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
+set my preferences as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep preferences. | Only an operator lane (CLI or API token) may do this.
 start workspace ghost of acme as agent member ada-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
 start workspace ghost of acme as agent member ada-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
 start workspace ghost of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.

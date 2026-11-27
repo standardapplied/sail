@@ -1,0 +1,127 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/dock/sessions"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "sessions": [
+        {
+          "agent": {
+            "display": "Claude Code",
+            "harness": "claude-code",
+            "login": "stored",
+            "mode": "default"
+          },
+          "created_at": "2026-11-11T09:00:06.656Z",
+          "form": "chat",
+          "live": false,
+          "name": "00000000-0000-7000-8000-000000000016",
+          "opener": "uday",
+          "state": "ended"
+        },
+        {
+          "agent": {
+            "display": "Claude Code",
+            "harness": "claude-code",
+            "login": "stored",
+            "mode": "default"
+          },
+          "created_at": "2026-11-11T09:00:05.656Z",
+          "form": "chat",
+          "live": true,
+          "name": "00000000-0000-7000-8000-000000000017",
+          "opener": "uday",
+          "state": "error"
+        },
+        {
+          "agent": {
+            "display": "Claude Code",
+            "harness": "claude-code",
+            "login": "stored",
+            "mode": "default"
+          },
+          "created_at": "2026-11-11T09:00:04.656Z",
+          "form": "chat",
+          "live": true,
+          "name": "00000000-0000-7000-8000-000000000018",
+          "opener": "uday",
+          "state": "your_turn"
+        },
+        {
+          "agent": {
+            "display": "Claude Code",
+            "harness": "claude-code",
+            "login": "stored",
+            "mode": "default"
+          },
+          "created_at": "2026-11-11T09:00:03.656Z",
+          "form": "chat",
+          "live": true,
+          "name": "00000000-0000-7000-8000-000000000019",
+          "opener": "uday",
+          "state": "needs_you"
+        },
+        {
+          "agent": {
+            "display": "Claude Code",
+            "harness": "claude-code",
+            "login": "stored",
+            "mode": "default"
+          },
+          "created_at": "2026-11-11T09:00:02.656Z",
+          "form": "chat",
+          "live": true,
+          "name": "00000000-0000-7000-8000-000000000020",
+          "opener": "uday",
+          "state": "working"
+        },
+        {
+          "agent": {
+            "display": "Claude Code",
+            "harness": "claude-code",
+            "login": "stored",
+            "mode": "default"
+          },
+          "created_at": "2026-11-11T09:00:01.656Z",
+          "form": "chat",
+          "live": true,
+          "name": "00000000-0000-7000-8000-000000000021",
+          "opener": "uday",
+          "state": "idle"
+        },
+        {
+          "agent": {
+            "display": "Claude Code",
+            "harness": "claude-code",
+            "login": "stored",
+            "mode": "default"
+          },
+          "attached": 1,
+          "command": [
+            "claude"
+          ],
+          "created_at": "2025-11-18T10:00:00.000Z",
+          "form": "terminal",
+          "live": true,
+          "name": "app-1f2e3d4c",
+          "opener": "uday",
+          "writer": "uday"
+        },
+        {
+          "attached": 0,
+          "command": [],
+          "created_at": "2025-11-18T09:00:00.000Z",
+          "ended_reason": "Workspace dock of harbor was stopped by ana.",
+          "form": "terminal",
+          "live": false,
+          "name": "app-5a6b7c8d",
+          "opener": "uday",
+          "writer": ""
+        }
+      ]
+    },
+    "status": 200
+  }
+}

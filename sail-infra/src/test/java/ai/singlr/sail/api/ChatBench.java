@@ -143,7 +143,8 @@ final class ChatBench implements AutoCloseable {
             ProjectReader.ofCatalog(new ProjectStore(db)),
             processes,
             processes.container(),
-            roles);
+            roles,
+            Harnesses::of);
     processes.container().holds("try");
     processes.onStart(fake -> fake.onClose(fake::exitsIfRunning));
     host = restarted();
