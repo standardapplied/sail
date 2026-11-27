@@ -309,6 +309,77 @@ import Testing
         #expect(panel.tryAgain.isHidden && panel.emptyLine.isHidden, "the loading panel says it failed")
     }
 
+    static let longHost = "sail.standardapplied.com", fortyHost = "eu-west.runners.sail.standardapplied.com"
+
+    /// The control plane's head at the default, the least and the most panel width, left to right
+    /// and right to left: a host that fits is drawn whole; one that does not yields to the count,
+    /// which keeps its place, cut in its middle with one ellipsis to end the count's 8 pt before it
+    /// (keeping all of its ends that fit), no ink between them, its tooltip saying it whole; and it
+    /// yields so to a control the head holds beside its count.
+    @Test(arguments: [Look.light, .dark], [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
+    func aLongHostYieldsToTheCount(_ look: Look, _ direction: NSUserInterfaceLayoutDirection) throws {
+        let mono = try LabelFont(directory: LookTests.fonts), font = mono.font(Look.Step.caption.points) as NSFont
+        try #require(Self.fortyHost.count == 40)
+        let cases: [(host: String, width: Double, cut: Bool)] = [
+            ("127.0.0.1:7979", LeftPanel.width.standard, false), ("127.0.0.1:7979", LeftPanel.width.least, false),
+            (Self.longHost, LeftPanel.width.standard, true), (Self.longHost, LeftPanel.width.least, true), (Self.longHost, LeftPanel.width.most, false),
+            (Self.fortyHost, LeftPanel.width.standard, true), (Self.fortyHost, LeftPanel.width.least, true), (Self.fortyHost, LeftPanel.width.most, true),
+        ]
+        let glyph = Double(Draw.text("M", font, look.textTertiary, tracking: Look.Tracking.eyebrow).size().width)
+        let rightToLeft = direction == .rightToLeft
+        for (host, width, cut) in cases {
+            let panel = LeftPanel(look: look, mono: mono)
+            panel.resize(to: width)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+            defer { window.orderOut(nil) }
+            window.contentView = panel
+            var model = WorkspacesModel(person: WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "https://\(host)"))
+            let projects = ["harbor", "dock", "pier"].map { ProjectSummary(name: $0, containerStatus: .known(.running), template: .known(.ready)) }
+            _ = model.projectsListed(.success(ProjectList(projects: projects, total: projects.count)))
+            panel.render(model.panel)
+            panel.layoutSubtreeIfNeeded()
+            let head = try #require(panel.list.view(atColumn: 0, row: 2, makeIfNecessary: true) as? HeadCell)
+            head.userInterfaceLayoutDirection = direction
+            let said = "\(host) at \(width) pt"
+            try #require(head.accessibilityLabel() == "\(host), 3" && head.bounds.width > 0, "\(said): the head says \(head.accessibilityLabel() ?? "nothing") in \(head.bounds)")
+            let whole = host.uppercased(), fitted = head.fitted.string, title = head.titleFrame, count = head.countFrame
+            let room = rightToLeft ? Double(title.minX) - Double(count.maxX) - HeadCell.countGap : Double(count.minX) - HeadCell.countGap - Double(title.maxX)
+            #expect(room > -0.5, "\(said): the host at \(title) runs within \(HeadCell.countGap) pt of the count at \(count)")
+            #expect((fitted != whole) == cut, "\(said): drawn as \(fitted) in \(title.width) pt")
+            if cut {
+                let ends = fitted.components(separatedBy: "\u{2026}")
+                #expect(ends.count == 2 && whole.hasPrefix(ends[0]) && whole.hasSuffix(ends[1]) && abs(ends[0].count - ends[1].count) <= 1, "\(said): cut as \(fitted)")
+                #expect(room < glyph, "\(said): \(room) pt left unused beside \(fitted)")
+            }
+            #expect(head.tooltip.text == host && head.tooltip.shows == cut, "\(said): the tooltip says \(head.tooltip.text), \(head.tooltip.shows ? "shown" : "not shown")")
+            let gap = rightToLeft ? (Double(count.maxX), Double(title.minX)) : (Double(title.maxX), Double(count.minX))
+            #expect(!Self.inks(head, from: gap.0, to: gap.1, rightToLeft: rightToLeft), "\(said): ink between the host's \(title) and the count's \(count)")
+            let control = NSView(frame: NSRect(x: rightToLeft ? Double(count.maxX) + HeadCell.countGap : Double(count.minX) - HeadCell.countGap - 20, y: 0, width: 20, height: Double(head.bounds.height)))
+            head.addSubview(control)
+            let beside = head.titleFrame
+            let besideRoom = rightToLeft ? Double(beside.minX) - Double(control.frame.maxX) : Double(control.frame.minX) - Double(beside.maxX)
+            #expect(besideRoom > HeadCell.countGap - 0.5, "\(said): the host at \(beside) runs within \(HeadCell.countGap) pt of the control at \(control.frame)")
+        }
+    }
+
+    /// Whether `view` draws, anywhere between `start` and `end` points across it, what its margin
+    /// (3 pt in from its leading edge) does not.
+    static func inks(_ view: NSView, from start: Double, to end: Double, rightToLeft: Bool) -> Bool {
+        guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return true }
+        view.cacheDisplay(in: view.bounds, to: image)
+        let scale = Double(image.pixelsWide) / Double(view.bounds.width)
+        let margin = Int((rightToLeft ? Double(view.bounds.width) - 3 : 3) * scale)
+        func channels(_ x: Int, _ y: Int) -> [Double] {
+            image.colorAt(x: x, y: y).map { [$0.redComponent, $0.greenComponent, $0.blueComponent, $0.alphaComponent].map(Double.init) } ?? []
+        }
+        return (0 ..< image.pixelsHigh).contains { y in
+            let ground = channels(margin, y)
+            return (Int((start + 0.5) * scale) ..< max(Int((end - 0.5) * scale), Int((start + 0.5) * scale))).contains { x in
+                zip(channels(x, y), ground).contains { abs($0 - $1) > 0.02 }
+            }
+        }
+    }
+
     /// r3-2: the longest taken name at the narrowest card: "Show …" is cut at its end yet reads as a
     /// link (the line runs under Cancel and Create, which sit level with the box above it), and "or
     /// choose another name." keeps its whole width on the one line.
