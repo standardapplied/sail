@@ -294,11 +294,22 @@ final class ChatLaunch {
     void run() throws IOException;
   }
 
+  /**
+   * What {@code door} answers, or its refusal as the API says it: its own code when it names one,
+   * its words as they are.
+   */
   private static <T> T ask(Door<T> door) {
     try {
       return door.ask();
     } catch (IOException refused) {
-      throw refusal(refused);
+      throw switch (refused) {
+        case PtyAdmission.Absent absent -> ApiException.of(ErrorCode.NOT_FOUND, absent);
+        case PtyAdmission.Unavailable unavailable ->
+            ApiException.of(ErrorCode.CONTAINER_ERROR, unavailable);
+        case Remedied remedied when Strings.isNotBlank(remedied.code()) ->
+            ApiException.of(ErrorCode.valueOf(remedied.code().toUpperCase(Locale.ROOT)), refused);
+        default -> ApiException.of(ErrorCode.FORBIDDEN, refused);
+      };
     }
   }
 
@@ -308,17 +319,5 @@ final class ChatLaunch {
           act.run();
           return null;
         });
-  }
-
-  /** {@code refused} as the API says it: its own code when it names one, its words as they are. */
-  private static ApiException refusal(IOException refused) {
-    return switch (refused) {
-      case PtyAdmission.Absent absent -> ApiException.of(ErrorCode.NOT_FOUND, absent);
-      case PtyAdmission.Unavailable unavailable ->
-          ApiException.of(ErrorCode.CONTAINER_ERROR, unavailable);
-      case Remedied remedied when Strings.isNotBlank(remedied.code()) ->
-          ApiException.of(ErrorCode.valueOf(remedied.code().toUpperCase(Locale.ROOT)), refused);
-      default -> ApiException.of(ErrorCode.FORBIDDEN, refused);
-    };
   }
 }
