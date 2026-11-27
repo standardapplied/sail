@@ -19,6 +19,7 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The chats this box holds: a person talks to an agent in their own workspace, the agent run as one
@@ -96,7 +97,7 @@ public final class ChatHost implements AutoCloseable {
   private final ChatTiming timing;
   private final Map<String, ChatProcess> live = new ConcurrentHashMap<>();
   private final Map<String, Object> locks = new ConcurrentHashMap<>();
-  private final Map<String, Object> arrivals = new ConcurrentHashMap<>();
+  private final Map<String, AtomicLong> arrivals = new ConcurrentHashMap<>();
   private final PeriodicPass sweepPass = new PeriodicPass("chats", this::sweep);
   private volatile boolean closing;
 
@@ -160,24 +161,37 @@ public final class ChatHost implements AutoCloseable {
     }
     yours(session);
     var deadline = timing.clock().get().plus(timing.poll());
-    var waiting = arrivals(session);
-    synchronized (waiting) {
-      while (true) {
-        var ended = store.find(session).map(chat -> chat.ended() && !chat.launched()).orElse(true);
-        var items = store.after(session, after, PAGE);
-        var page = page(items);
-        var now = timing.clock().get();
-        if (!page.isEmpty() || ended || !now.isBefore(deadline)) {
-          return new Read(
-              page.stream().map(ChatLog::wire).toList(),
-              ended && page.size() == items.size() && items.size() < PAGE);
-        }
-        try {
-          timing.patience().await(waiting, Duration.between(now, deadline));
-        } catch (InterruptedException interrupted) {
-          Thread.currentThread().interrupt();
-          return new Read(List.of(), false);
-        }
+    var arrived = arrivals(session);
+    while (true) {
+      var seen = arrived.get();
+      var ended = store.find(session).map(chat -> chat.ended() && !chat.launched()).orElse(true);
+      var items = store.after(session, after, PAGE);
+      var page = page(items);
+      var now = timing.clock().get();
+      if (!page.isEmpty() || ended || !now.isBefore(deadline)) {
+        return new Read(
+            page.stream().map(ChatLog::wire).toList(),
+            ended && page.size() == items.size() && items.size() < PAGE);
+      }
+      try {
+        awaitArrival(arrived, seen, Duration.between(now, deadline));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return new Read(List.of(), false);
+      }
+    }
+  }
+
+  /**
+   * Waits up to {@code within} for an entry of the chat {@code arrived} counts, unless one arrived
+   * since it counted {@code seen}. The log is read outside this wait, so a write that wakes it
+   * never waits on a reader.
+   */
+  private void awaitArrival(AtomicLong arrived, long seen, Duration within)
+      throws InterruptedException {
+    synchronized (arrived) {
+      if (arrived.get() == seen) {
+        timing.patience().await(arrived, within);
       }
     }
   }
@@ -331,14 +345,12 @@ public final class ChatHost implements AutoCloseable {
     var cut = new AtomicInteger();
     try (var each = Executors.newVirtualThreadPerTaskExecutor()) {
       for (var session : store.launched()) {
-        if (!live.containsKey(session)) {
-          each.execute(
-              () -> {
-                if (settled(session)) {
-                  cut.incrementAndGet();
-                }
-              });
-        }
+        each.execute(
+            () -> {
+              if (settled(session)) {
+                cut.incrementAndGet();
+              }
+            });
       }
     }
     return cut.get();
@@ -469,14 +481,15 @@ public final class ChatHost implements AutoCloseable {
     return locks.computeIfAbsent(session, id -> new Object());
   }
 
-  private Object arrivals(String session) {
-    return arrivals.computeIfAbsent(session, id -> new Object());
+  private AtomicLong arrivals(String session) {
+    return arrivals.computeIfAbsent(session, id -> new AtomicLong());
   }
 
   private void arrived(String session) {
-    var waiting = arrivals(session);
-    synchronized (waiting) {
-      waiting.notifyAll();
+    var arrived = arrivals(session);
+    synchronized (arrived) {
+      arrived.incrementAndGet();
+      arrived.notifyAll();
     }
   }
 }

@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -136,8 +137,8 @@ class ChatLifecycleTest {
 
     fake.failsItsReader(new IllegalStateException("database is locked"));
     over(fake);
+    fake.awaitStdinClosed();
 
-    assertTrue(fake.stdinClosed());
     assertEquals(List.of(AgentProcess.Signal.INT), fake.signals);
     assertFalse(bench.store.find(session).orElseThrow().launched(), "known gone");
     assertEquals(
@@ -534,6 +535,33 @@ class ChatLifecycleTest {
     var read = bench.read(session, 0);
 
     assertEquals(words, read.items().getFirst().get("words"));
+  }
+
+  /**
+   * I4: a reader waiting as a turn ends is answered with every entry the end wrote together, and
+   * the write never waits on the reader: a reader holds nothing while it reads the log.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aReaderWaitingAsATurnEndsIsAnsweredAndHoldsUpNoWrite() throws Exception {
+    for (var round = 0; round < 20; round++) {
+      var session = bench.samsChat();
+      bench.send(session, "hi");
+      var fake = bench.says(INIT, CALLS);
+      var last = bench.kinds(session).size();
+      bench.readsWait();
+      var reading = CompletableFuture.supplyAsync(() -> bench.read(session, last));
+      bench.held.acquire();
+
+      fake.says(ENDS);
+      fake.settle();
+
+      assertEquals(
+          List.of("tool_done", "turn_ended"),
+          reading.get(30, TimeUnit.SECONDS).items().stream()
+              .map(item -> item.get("type"))
+              .toList());
+    }
   }
 
   /** I4: a log entry wakes only its own chat's readers. */
