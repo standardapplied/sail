@@ -376,9 +376,10 @@ import Testing
         #expect(await desk.asked.filter { $0 == build }.count == 2)
     }
 
-    /// A sign-out between a project's create and its build asks no build, for them or for whoever
-    /// signs in next.
-    @Test func aSignOutBeforeTheBuildAsksNone() async throws {
+    /// Another person signed in while a project's create, or the list after it, is under way: the
+    /// create carries nothing over to them, neither its build nor its project chosen.
+    @Test(arguments: ["POST /v1/projects", "GET /v1/projects"])
+    func aChangeOfPersonCarriesNoCreateOver(_ held: String) async throws {
         let build = "POST /v1/projects/lighthouse/template%3Abuild"
         let desk = try Desk(["projects-none", "agents"])
         let (view, window) = try WorkspacesViewTests.view(desk)
@@ -386,13 +387,12 @@ import Testing
             window.attachedSheet.map { window.endSheet($0) }
             window.orderOut(nil)
         }
-        let dana = WorkspacesModel.Person(handle: "dana", admin: true, confirmed: true, controlPlane: "127.0.0.1", creates: true)
-        view.person = dana
+        view.person = WorkspacesModel.Person(handle: "dana", admin: true, confirmed: true, controlPlane: "127.0.0.1", creates: true)
         view.shown()
         #expect(await RunnerTabTests.until { Driverless.button("Create Project", in: view.project) != nil }, "\(view.text)")
         await desk.answer(try Exchange("project-created").altered(at: ["name"], to: "lighthouse"))
-        await desk.answer(try Exchange("projects").altered(at: ["projects"], to: [["name": "lighthouse", "container_status": "not_created", "template": "missing"]]))
-        await desk.hold("GET /v1/projects")
+        await desk.answer(try Exchange("projects").altered(at: ["projects"], to: ["harbor", "lighthouse"].map { ["name": $0, "container_status": "not_created", "template": "missing"] }))
+        await desk.hold(held)
         Self.press(try #require(Driverless.button("Create Project", in: view.project)))
         #expect(await RunnerTabTests.until { window.attachedSheet is CreateProjectSheet }, "Create Project opened no sheet")
         let sheet = try #require(window.attachedSheet as? CreateProjectSheet)
@@ -401,9 +401,9 @@ import Testing
         await desk.arrived(during: Task { _ = await RunnerTabTests.until { false } })
         view.person = WorkspacesViewTests.ana
         await desk.release()
-        #expect(await RunnerTabTests.until { !view.busy }, "the create's list never ended")
-        view.shown()
-        #expect(await RunnerTabTests.until { !view.busy }, "another's sign-in never ended its work")
-        #expect(await desk.asked.contains(build) == false, "a build asked once its creator signed out, or for another")
+        await sheet.sending?.value
+        #expect(await RunnerTabTests.until { !view.busy }, "the create's work never ended")
+        #expect(await desk.asked.contains(build) == false, "a build asked once another signed in")
+        #expect(view.panel.list.chosen != "lighthouse", "dana's project chosen for ana: \(view.text)")
     }
 }

@@ -23,7 +23,7 @@ public final class EmptyState: NSView {
     private let mono: LabelFont
     let title: NSTextField
     let body: NSTextField
-    let line: NSTextField?
+    let line: PartsLine?
 
     public init(
         icon: LineIcon, title: String, body: String, actions: [SailButton], line: String? = nil, lineFirst: Bool = false, missing: Bool = false, look: Look,
@@ -38,13 +38,14 @@ public final class EmptyState: NSView {
         self.mono = mono
         self.title = NSTextField(wrappingLabelWithString: title)
         self.body = NSTextField(wrappingLabelWithString: body)
-        self.line = line.map { NSTextField(wrappingLabelWithString: Self.breakingAtDots($0)) }
+        self.line = line.map(PartsLine.init)
         super.init(frame: .zero)
         clipsToBounds = false
-        for label in [self.title, self.body] + [self.line].compactMap({ $0 }) {
+        for label in [self.title, self.body] {
             label.alignment = .center
             addSubview(label)
         }
+        if let line = self.line { addSubview(line) }
         for action in actions {
             addSubview(action)
         }
@@ -63,14 +64,9 @@ public final class EmptyState: NSView {
     private func repaint() {
         title.attributedStringValue = Self.centred(title.stringValue, titleFont.font(.title2) as NSFont, look.text, lineHeight: 1.2, tracking: -0.012)
         body.attributedStringValue = Self.centred(body.stringValue, .systemFont(ofSize: Look.Step.callout.points), look.textSecondary, lineHeight: 1.5)
-        line?.attributedStringValue = Self.centred(line?.stringValue ?? "", mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, lineHeight: 1.4)
+        line?.attributes = Self.centred(" ", mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, lineHeight: 1.4).attributes(at: 0, effectiveRange: nil)
         actions.forEach { $0.look = look }
         needsDisplay = true
-    }
-
-    /// `line` with its parts kept whole: too long for one line, it wraps only at a " · ".
-    private static func breakingAtDots(_ line: String) -> String {
-        line.components(separatedBy: " · ").map { $0.replacingOccurrences(of: " ", with: "\u{00A0}") }.joined(separator: " · ")
     }
 
     static func centred(_ text: String, _ font: NSFont, _ ink: Tint, lineHeight: Double, tracking: Double = 0) -> NSAttributedString {
@@ -105,10 +101,10 @@ public final class EmptyState: NSView {
         }
         guard lineFirst else {
             let actionsRect = NSRect(x: (width - row) / 2, y: Double(bodyRect.maxY) + Self.gap + Self.actionsGap, width: row, height: tallest)
-            let lineRect = NSRect(x: left, y: Double(actionsRect.maxY) + Self.gap, width: column, height: measured(line))
+            let lineRect = NSRect(x: left, y: Double(actionsRect.maxY) + Self.gap, width: column, height: line.height(width: column))
             return (tileRect, titleRect, bodyRect, actionsRect, lineRect, Double(lineRect.maxY))
         }
-        let lineRect = NSRect(x: left, y: Double(bodyRect.maxY) + Self.gap, width: column, height: measured(line))
+        let lineRect = NSRect(x: left, y: Double(bodyRect.maxY) + Self.gap, width: column, height: line.height(width: column))
         let actionsRect = NSRect(x: (width - row) / 2, y: Double(lineRect.maxY) + Self.gap + Self.actionsGap, width: row, height: tallest)
         return (tileRect, titleRect, bodyRect, actionsRect, lineRect, Double(actionsRect.maxY))
     }
@@ -130,7 +126,7 @@ public final class EmptyState: NSView {
         let padding = Self.labelPadding
         title.frame = placed.title.insetBy(dx: -padding, dy: 0)
         body.frame = placed.body.insetBy(dx: -padding, dy: 0)
-        if let line, let at = placed.line { line.frame = at.insetBy(dx: -padding, dy: 0) }
+        if let line, let at = placed.line { line.frame = at }
         var x = Double(placed.actions.minX)
         for action in actions {
             let size = action.intrinsicContentSize
@@ -162,5 +158,58 @@ public final class EmptyState: NSView {
         NSGraphicsContext.restoreGraphicsState()
         Draw.box(tile, radius: Look.contentRadius, fill: nil, edge: paint.edge, dash: paint.dashed ? [3, 2] : [])
         Draw.icon(icon, in: tile.insetBy(dx: (tile.width - Self.iconSide) / 2, dy: (tile.height - Self.iconSide) / 2), ink: paint.ink)
+    }
+}
+
+/// Words in parts, on one line joined by " · " while they fit; a part that does not fit starts a
+/// new line with no dot, so no line starts or ends with one. Centred, each part whole.
+@MainActor
+package final class PartsLine: NSView {
+    package let words: String
+    private let parts: [String]
+    /// Its font, ink and paragraph.
+    var attributes: [NSAttributedString.Key: Any] = [:] {
+        didSet { needsDisplay = true }
+    }
+
+    init(_ words: String) {
+        self.words = words
+        parts = words.components(separatedBy: " · ")
+        super.init(frame: .zero)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(words)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override package var isFlipped: Bool {
+        true
+    }
+
+    package func width(of text: String) -> Double {
+        Double(NSAttributedString(string: text, attributes: attributes).size().width)
+    }
+
+    /// Its lines at `width`.
+    package func lines(width: Double) -> [String] {
+        parts.reduce(into: []) { lines, part in
+            if let last = lines.last, self.width(of: last + " · " + part) <= width { lines[lines.count - 1] = last + " · " + part } else { lines.append(part) }
+        }
+    }
+
+    package func height(width: Double) -> Double {
+        Double(drawn(width: width).boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude), options: .usesLineFragmentOrigin).height).rounded(.up)
+    }
+
+    private func drawn(width: Double) -> NSAttributedString {
+        NSAttributedString(string: lines(width: width).joined(separator: "\n"), attributes: attributes)
+    }
+
+    override package func draw(_: NSRect) {
+        drawn(width: Double(bounds.width)).draw(with: bounds, options: .usesLineFragmentOrigin)
     }
 }

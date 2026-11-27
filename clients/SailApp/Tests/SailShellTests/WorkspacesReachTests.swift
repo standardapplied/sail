@@ -272,17 +272,15 @@ import Testing
         }
     }
 
-    /// The line in `root` naming `host`, where it does not show whole: a part between its " · "
-    /// wider than the line, or the line shorter than its words at its width.
+    /// The line in `root` naming `host`, where it does not show whole: a line it draws wider than
+    /// itself, a dot at a line's start or end, or its frame shorter than its lines.
     static func cut(naming host: String, in root: NSView) -> [String] {
-        guard let line = LookSwitchTests.views(under: root).compactMap({ $0 as? NSTextField }).first(where: { $0.stringValue.contains(host) && $0.stringValue.contains(" · ") && !$0.isHiddenOrHasHiddenAncestor }),
-              let cell = line.cell
-        else { return ["no line names \(host)"] }
-        let width = Double(line.bounds.width), text = line.attributedStringValue, ink = text.attributes(at: 0, effectiveRange: nil)
-        let widest = line.stringValue.components(separatedBy: " · ").map { Double(NSAttributedString(string: $0, attributes: ink).size().width) }.max() ?? 0
-        let tall = Double(cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 10000)).height)
-        let whole = widest <= width && tall <= Double(line.bounds.height) + 0.5 && (Double(text.size().width) <= width || cell.wraps)
-        return whole ? [] : ["'\(line.stringValue)' (\(text.size().width) pt, its widest part \(widest) pt) is cut in \(line.frame)"]
+        guard let line = LookSwitchTests.views(under: root).compactMap({ $0 as? PartsLine }).first(where: { $0.words.contains(host) && !$0.isHiddenOrHasHiddenAncestor }) else {
+            return ["no line names \(host)"]
+        }
+        let width = Double(line.bounds.width), lines = line.lines(width: width)
+        let whole = lines.allSatisfy { line.width(of: $0) <= width + 0.5 && !$0.hasPrefix("·") && !$0.hasSuffix("·") } && line.height(width: width) <= Double(line.bounds.height) + 0.5
+        return whole ? [] : ["'\(line.words)' drawn as \(lines) in \(line.frame)"]
     }
 
     /// What in `root` a person could see but not reach. A text field's own insides (the field

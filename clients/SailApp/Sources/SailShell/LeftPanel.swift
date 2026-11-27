@@ -30,7 +30,7 @@ package final class LeftPanel: NSView {
     /// drag edge, so a reach for the thumb never resizes the panel.
     package let scroll: QuietScrollView
     let heading = NSTextField(labelWithString: "Workspaces")
-    /// "No projects yet.", with none listed, or why none could be.
+    /// "No projects yet." or "No project is open to you yet.", with none listed, or why none could be.
     let emptyLine = NSTextField(labelWithString: "")
     /// Under the empty line while no project could be listed and This Mac's page is shown, where
     /// no card offers its own: the projects asked again.
