@@ -252,6 +252,35 @@ class CiFleetTest {
   }
 
   /**
+   * A canary the workspace holds outside {@code ~/.ssh}, in a file or a commit, fails the proof row
+   * whose logs and comments alone would pass.
+   */
+  @Test
+  void aCanaryInTheWorkspaceOutsideItsProbeFailsTheProofRow() throws Exception {
+    aWorkspaceOfTheReadDenySpec(
+        List.of(BY_RULE), "eng: Read /home/dev/.ssh/fleet-read-deny-probe.");
+    Files.writeString(dir.resolve("probe"), PROBE_CONTENT);
+    Files.writeString(
+        dir.resolve("leaks"),
+        "the canary is in: /home/dev/workspace/notes.txt /home/dev/workspace/nocaptcha/(a commit)");
+
+    var ended =
+        Child.run(
+            shell(
+                SOURCED + "read_refused_by_its_rule sourced eng readdeny-1 " + PROBE_CONTENT,
+                SCRIPT.toString()));
+
+    assertEquals(1, ended.exit(), ended.stdout() + ended.stderr());
+    assertEquals(
+        List.of(
+            "the probe file in acme-readdeny-1 holds its canary",
+            logs(1, 0, 1),
+            "the spec's comments do not hold the canary",
+            "the canary is in: /home/dev/workspace/notes.txt /home/dev/workspace/nocaptcha/(a commit)"),
+        ended.stdout().strip().lines().toList());
+  }
+
+  /**
    * Eng's box as far as the read-deny row goes: spec {@code readdeny-1} has workspace {@code
    * acme-readdeny-1} and one run, whose log is {@code lines}; {@code sail project exec} reads the
    * probe file back when the test wrote it and writes it only when the test made it writable, and
@@ -272,6 +301,7 @@ class CiFleetTest {
                 [[ -e $FLEET_TEST/writable ]] || { echo "Unmatched arguments" >&2; exit 2; }
                 printf %%s %s > "$FLEET_TEST/probe" ;;
               *"project exec acme-readdeny-1 -- sh -c"*"base64 -d"*)
+                [[ -e $FLEET_TEST/leaks ]] && { cat "$FLEET_TEST/leaks"; exit 1; }
                 echo "the canary is in no file outside ~/.ssh and no commit" ;;
               *"spec comments readdeny-1 --no-sync"*) cat "$FLEET_TEST/comments" ;;
               *"agent sessions acme --json"*) echo '{"runs": [{"id": "run-1", "spec_id": "readdeny-1"}]}' ;;
