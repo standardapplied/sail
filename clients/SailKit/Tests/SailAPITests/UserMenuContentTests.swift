@@ -53,10 +53,15 @@ import Testing
         #expect(menu.items == [.account])
     }
 
-    /// Keys is offered and not yet usable: it says so, the server's spec not built.
-    @Test func keysIsShownButNotYetUsable() {
-        #expect(!UserMenuContent.Item.keys.enabled && UserMenuContent.Item.keys.why == "Keys come in a later version of Sail.")
-        #expect(UserMenuContent.Item.account.enabled && UserMenuContent.Item.account.key == "," && UserMenuContent.Item.signOut.key == nil)
+    /// The Account view's header says the handle and the role apart, as the menu has them: the
+    /// two never disagree. Account alone has a key.
+    @Test func theHandleAndTheRoleAreTheMenusOwn() {
+        let menu = UserMenuContent.signedIn(handle: "uday", address: "sail.example.com", whoami: Self.uday, unreachable: false, refreshing: false)
+        #expect(menu.handle == "@uday" && menu.role == "Admin" && menu.detail == "\(menu.handle ?? "") · \(menu.role ?? "")")
+        let unknown = UserMenuContent.signedIn(handle: "ana", address: "sail.example.com", whoami: nil, unreachable: false, refreshing: false)
+        #expect(unknown.handle == "@ana" && unknown.role == nil && unknown.detail == "@ana")
+        #expect(UserMenuContent.signedOut(lastUsed: nil).handle == nil && UserMenuContent.checking(at: "sail.example.com").role == nil)
+        #expect(UserMenuContent.Item.allCases.map(\.key) == [",", nil, nil, nil])
     }
 
     /// On the main actor, as ``SignInMemoryTests`` are: Foundation's `UserDefaults` on Linux is not

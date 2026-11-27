@@ -132,7 +132,7 @@ import Testing
         #expect(claude.login == nil && panel.way(of: claude.harness) == .signIn && NewSessionWords.key(claude) == nil)
         panel.choose(way: .key)
         #expect(panel.way(of: claude.harness) == .signIn)
-        #expect(claude.storable?.kind == "api-key" && claude.storable?.said == "Create an API key in the Claude Console.", "Store a Key offers the API key and says how to make it")
+        #expect(claude.declaration.storable?.kind == "api-key" && claude.declaration.storable?.said == "Create an API key in the Claude Console.", "Store a Key offers the API key and says how to make it")
         #expect(claude.kinds.map(\.said) == ["Create an API key in the Claude Console."], "its one kind is a key whose how is words alone")
         let made = panel.start()
         #expect(made?.wire == SessionAgent(harness: claude.harness, mode: claude.modeDefault, inside: true))

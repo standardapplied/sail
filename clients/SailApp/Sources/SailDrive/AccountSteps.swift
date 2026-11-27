@@ -2,6 +2,7 @@ import AppKit
 import ImageIO
 import SailAccount
 import SailAPI
+import SailControls
 import SailShell
 import SailTestPasskey
 import SailVT
@@ -20,6 +21,33 @@ extension Driver {
         }
         if let shows = step.accountShows {
             return accountShows(shows)
+        }
+        if let pick = step.accountRow, pick.count == 3 {
+            return await accountRow(pick[0], pick[1], pick[2])
+        }
+        if let words = step.accountSays {
+            let said = await waitUntil(step.seconds ?? 10) { self.shell.account.text.contains(words) }
+            return (said, "the account says: " + shell.account.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if step.accountAtKeys == true {
+            return await accountAtKeys(step)
+        }
+        if let days = step.sessionEndsIn {
+            do {
+                try await GoldenDesk.shared.signInEnds(in: days)
+                return (true, "")
+            } catch {
+                return (false, "passkey-login-finish: \(error)")
+            }
+        }
+        if let rightToLeft = step.accountRightToLeft {
+            Self.direct(shell.account, rightToLeft: rightToLeft)
+            shell.account.show()
+            shell.account.layoutSubtreeIfNeeded()
+            return (true, "the account is laid out \(rightToLeft ? "right to left" : "left to right")")
+        }
+        if let name = step.accountShot {
+            return await accountShot(name)
         }
         if let state = step.welcomeShows {
             return welcomeShows(state)
@@ -187,8 +215,75 @@ extension Driver {
         return (true, shell.account.text)
     }
 
+    /// The Account view's list of `group`.
+    private func accountList(_ group: String) -> SailList? {
+        switch group {
+        case "passkeys": shell.account.passkeyList
+        case "keys": shell.account.keyList
+        default: nil
+        }
+    }
+
+    /// `action` on the row titled `title` of the Account view's `group`.
+    private func accountRow(_ group: String, _ title: String, _ action: String) async -> (Bool, String) {
+        guard let list = accountList(group) else { return (false, "no account group \(group)") }
+        let found = await waitUntil(10) { list.entries.contains { if case let .item(item) = $0 { item.name == title } else { false } } }
+        let item = list.entries.lazy.compactMap { entry -> SailList.Item? in if case let .item(item) = entry, item.name == title { item } else { nil } }.first
+        guard found, let item else { return (false, "\(group) has no row \(title): \(shell.account.text.replacingOccurrences(of: "\n", with: " | "))") }
+        list.layoutSubtreeIfNeeded()
+        if action == "hover" {
+            list.point(at: item.id)
+            let shown = await waitUntil(2) { list.actionsShown(item.id) }
+            return (shown, "\(title) is hovered, its actions \(shown ? "shown" : "not shown")")
+        }
+        guard let row = list.entries.firstIndex(where: { if case let .item(found) = $0 { found.id == item.id } else { false } }),
+              let view = list.rowView(atRow: row, makeIfNecessary: true)
+        else { return (false, "\(title) has no row on screen") }
+        list.point(at: item.id)
+        view.layoutSubtreeIfNeeded()
+        let buttons = Self.views(in: view).compactMap { $0 as? SailButton }.filter { !$0.isHiddenOrHasHiddenAncestor }
+        if action.hasPrefix("⋯ ") {
+            let title = String(action.dropFirst(2))
+            guard let more = buttons.first(where: { $0.menu != nil }), let menu = more.menu, let index = menu.items.firstIndex(where: { $0.title == title }) else {
+                return (false, "\(item.name)'s ⋯ menu has no \(title)")
+            }
+            menu.performActionForItem(at: index)
+            return (true, "chose \(title) from \(item.name)'s menu")
+        }
+        guard let button = buttons.first(where: { $0.title == action }) else { return (false, "\(item.name) shows no \(action): \(buttons.map(\.title))") }
+        guard await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY)) else { return (false, "\(action) could not be clicked") }
+        return (true, "clicked \(action) on \(item.name)")
+    }
+
+    /// The Account view shown, scrolled to Keys, as the user menu's Keys leaves it.
+    private func accountAtKeys(_ step: Step) async -> (Bool, String) {
+        let pane = shell.account
+        let there = await waitUntil(step.seconds ?? 5) {
+            pane.layoutSubtreeIfNeeded()
+            let most = max(Double(pane.scroll.documentView?.frame.height ?? 0) - Double(pane.scroll.contentSize.height), 0)
+            let keys = min(max(Double(pane.eyebrows[2].frame.minY) - AccountPane.inset.top, 0), most)
+            return self.shell.rail.selected == .account && abs(pane.scrolledTo - keys) < 1
+        }
+        return (there, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"), the account scrolled to \(pane.scrolledTo) pt, its keys at \(pane.eyebrows[2].frame.minY) pt")
+    }
+
+    /// The window in both looks at 1024 × 800, then at its least frame, then as it was.
+    private func accountShot(_ name: String) async -> (Bool, String) {
+        let was = shell.window.frame
+        var said: [String] = [], ok = true
+        for (suffix, size) in [("", NSSize(width: 1024, height: 800)), ("-least", ShellApp.leastFrame)] {
+            shell.window.setFrame(NSRect(x: was.minX, y: was.maxY - size.height, width: size.width, height: size.height), display: true)
+            shell.account.layoutSubtreeIfNeeded()
+            let (taken, detail) = await inBothLooks(name + suffix) { file in await self.capture(.window(self.shell.window.windowNumber), to: file) }
+            ok = ok && taken
+            said.append(detail)
+        }
+        shell.window.setFrame(was, display: true)
+        return (ok, said.joined(separator: "; "))
+    }
+
     /// What the user menu shows, as one line: closed, and whether its button has the keys; or open,
-    /// whom and where it says, what is highlighted, the Appearance chosen, whether Keys says why.
+    /// whom and where it says, what is highlighted, the Appearance chosen.
     var menuSaid: String {
         let menu = shell.userMenu, view = menu.view
         guard menu.isOpen else { return "closed" + (shell.window.firstResponder === shell.rail.button(.account) ? ", the keys on its button" : "") }
@@ -197,8 +292,7 @@ extension Driver {
         if let address = content.address { place = " at " + address + ", " + (content.plane?.said ?? "") }
         var highlighted = "nothing"
         if let index = view.highlighted { highlighted = index == view.items.count ? "Appearance" : view.items[index].item.rawValue }
-        let tip = view.tip.isShown ? "; Keys says why" : ""
-        return "open: " + content.name + place + "; " + highlighted + " highlighted; " + view.chosenLook.said + " chosen" + tip
+        return "open: " + content.name + place + "; " + highlighted + " highlighted; " + view.chosenLook.said + " chosen"
     }
 
     /// The Account pane through the user menu, as a person reaches it: the button, then Account
@@ -257,8 +351,7 @@ extension Driver {
         guard await click(row, at: at) else { return (false, "the click was not made") }
         let done: Bool
         switch row.item {
-        case .keys: done = await waitUntil(2) { view.tip.isShown } && menu.isOpen
-        case .account: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .account }
+        case .account, .keys: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .account }
         case .signIn: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .workspaces }
         case .signOut:
             done = await waitUntil(step.seconds ?? 20) { self.shell.flow.actions > began && !self.shell.flow.isActing && self.shell.flow.standing == nil }
@@ -266,7 +359,7 @@ extension Driver {
         let took = (ContinuousClock.now - clickedAt) / .milliseconds(1)
         let reached = "\(title) took \(row.downs - before.0) mouse-down and \(row.ups - before.1) mouse-up in \(Self.ms(took)) ms; at the click \(scene); "
             + "the app's current event after it \(NSApp.currentEvent.map { "\($0.type.rawValue) in window \($0.windowNumber)" } ?? "none")"
-        return (done && (row.item == .keys || !menu.isOpen), "\(menuSaid); \(reached)" + (row.item == .signOut ? "; \(said)" : ""))
+        return (done && !menu.isOpen, "\(menuSaid); \(reached)" + (row.item == .signOut ? "; \(said)" : ""))
     }
 
     /// Where a click at `point` in `view` lands, as the window server and AppKit see it just before

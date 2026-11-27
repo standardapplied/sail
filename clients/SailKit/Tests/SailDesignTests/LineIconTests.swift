@@ -110,6 +110,12 @@ import Testing
         #expect(LineIcon.fingerprint.strokes.first == Self.line((12, 11.5), (12, 15.5)) && LineIcon.fingerprint.strokes.count == 8)
     }
 
+    /// The account's Sign Out, as the first impressions page's `out` (`M14 4.5h4.5v15H14M10 8l-4 4
+    /// 4 4M6 12h9.5`): the door's frame, the arrow's head, its shaft.
+    @Test func signOutIsTheFirstImpressionsPages() {
+        #expect(LineIcon.out.strokes == [Self.line((14, 4.5), (18.5, 4.5), (18.5, 19.5), (14, 19.5)), Self.line((10, 8), (6, 12), (10, 16)), Self.line((6, 12), (15.5, 12))])
+    }
+
     /// A folder's disclosure, as the files mockup's `right` and `down` draw it: shut, then open.
     @Test func theDisclosureIsTheFilesMockups() {
         #expect(LineIcon.right.strokes == [Self.line((9, 6), (15, 12), (9, 18))])

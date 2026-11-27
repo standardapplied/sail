@@ -48,3 +48,17 @@ extension Endpoint where Response == LoginStored {
         Self(.post, Route.logins + [harness, name + ":use"])
     }
 }
+
+/// What a removal answered: the login removed, none when no login of that name was stored, and
+/// what is said once of runs that started with it.
+public struct LoginRemoved: Codable, Equatable, Sendable {
+    public let login: StoredLogin?
+    public let note: String?
+}
+
+extension Endpoint where Response == LoginRemoved {
+    /// Removes the caller's login `name` of `harness`; sessions already running keep it.
+    public static func removeLogin(harness: String, name: String) -> Self {
+        Self(.delete, Route.logins + [harness, name])
+    }
+}

@@ -34,8 +34,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let welcome: WelcomeView
     /// The card's outline on the chrome, over its edge, taking no clicks; none in light.
     let cardEdge: CardEdge
-    /// The menu behind the rail's user button: who is signed in and where, Account, Keys,
-    /// Appearance and Sign Out.
+    /// The menu behind the rail's user button: who is signed in and where, Account, Keys (the
+    /// Account view at its keys), Appearance and Sign Out.
     package let userMenu: UserMenu
     /// Where the app keeps what a person chose: the Appearance among it.
     package let defaults: UserDefaults
@@ -232,6 +232,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if welcoming { welcome.claimKeys() } else { workspaces.shown() }
         case .account:
             window.title = Self.title
+            account.shown()
         }
     }
 
@@ -286,7 +287,9 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .account: select(.account)
         case .signIn: select(.workspaces)
         case .signOut: account.signOutHere(nil)
-        case .keys: break
+        case .keys:
+            select(.account)
+            account.scrollToKeys()
         }
     }
 
@@ -574,6 +577,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspaces.remembered = { [defaults] person in ModeMemory.stored(in: defaults, for: person) }
         workspaces.memory = workspaces.remembered(workspaces.person)
         workspaces.keep = { [defaults] memory, person in memory.store(in: defaults, for: person) }
+        account.useStored = { [weak self] stored, client in await self?.workspaces.useStored(stored, by: client) ?? false }
         workspaces.lastChosen = { [defaults] person in defaults.string(forKey: Self.chosenKey(person)) }
         workspaces.keepChosen = { [defaults] name, person in defaults.set(name, forKey: Self.chosenKey(person)) }
         workspaces.onStart = { [weak self] start, project, name in

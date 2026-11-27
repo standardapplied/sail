@@ -3,7 +3,7 @@ import SailAPI
 
 /// The Store a Key sheet's model for one harness (`login-store-mockup.html`): the kind it stores,
 /// the name a store takes, and where it stands. The kind is the first the server names that a
-/// person makes without running anything (``SailAPI/AgentOffer/storable``). The name is `default`
+/// person makes without running anything (``SailAPI/AgentDeclaration/storable``). The name is `default`
 /// and not asked while the person has no login of the harness; with one, a free name is suggested
 /// and said as words beside Change, which names it with the key's field put away: a key and an
 /// editable name are never asked together, which AppKit would take for a login form and offer
@@ -51,16 +51,17 @@ public struct StoreLogin: Equatable, Sendable {
     /// The key was put away by Change, or sent with a name the server refused: it is pasted again.
     public private(set) var keyDropped = false
 
-    /// The sheet for `offer` of a person whose logins are `logins`, on the control plane at
-    /// `address`; nil when the harness offers no kind the app stores.
-    public init?(_ offer: AgentOffer, logins: [StoredLogin], address: String) {
-        guard let kind = offer.storable else { return nil }
-        harness = offer.harness
-        display = offer.display
+    /// The sheet for the harness `agent` declares, of a person whose logins are `logins`, on the
+    /// control plane at `address`, storing under `naming` when given (a key replaced); nil when the
+    /// harness takes no kind the app stores.
+    public init?(_ agent: AgentDeclaration, logins: [StoredLogin], address: String, naming: String? = nil) {
+        guard let kind = agent.storable else { return nil }
+        harness = agent.harness
+        display = agent.display
         self.kind = kind
-        taken = logins.filter { $0.harness == offer.harness }.map(\.name)
+        taken = logins.filter { $0.harness == agent.harness }.map(\.name)
         place = Self.place(address)
-        name = taken.isEmpty ? Self.defaultName : Self.free(among: taken)
+        name = naming ?? (taken.isEmpty ? Self.defaultName : Self.free(among: taken))
     }
 
     static let defaultName = "default"

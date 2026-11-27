@@ -42,7 +42,7 @@ public final class SailButton: NSButton {
     }
     public let size: ButtonSize
     public private(set) var busyWord: String?
-    private let icon: LineIcon?
+    package let icon: LineIcon?
     private let iconOnly: Bool
     private let popUp: Bool
     private var showsShortcut = false

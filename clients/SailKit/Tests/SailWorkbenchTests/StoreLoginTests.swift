@@ -24,7 +24,7 @@ import Testing
 
     /// The sheet for Claude Code in dock with no Claude Code login, the key pasted.
     static func filled(logins golden: String = "logins") throws -> StoreLogin {
-        var sheet = try #require(StoreLogin(try offer(), logins: try logins(golden), address: address))
+        var sheet = try #require(StoreLogin(try offer().declaration, logins: try logins(golden), address: address))
         sheet.typed(holdsSomething: true)
         return sheet
     }
@@ -87,25 +87,46 @@ import Testing
     /// its API key. A harness whose every kind runs a command (here the recorded kind given a
     /// command as its how) offers no sheet.
     @Test func theKindIsTheFirstWhoseHowNamesNoCommand() throws {
-        let sheet = try #require(StoreLogin(try Self.offer(), logins: [], address: Self.address))
+        let sheet = try #require(StoreLogin(try Self.offer().declaration, logins: [], address: Self.address))
         #expect(sheet.kind.kind == "api-key" && sheet.label == "API key" && sheet.placeholder == "Paste your API key")
         #expect(sheet.help == "Create an API key in the Claude Console." && sheet.title == "Store a Claude Code key")
         #expect(sheet.fieldName == "Claude Code API key" && sheet.storeName == "Store Claude Code key")
         #expect(sheet.kept == "Kept on 127.0.0.1:7979 for your sessions only. Sail never shows it again.")
-        let codex = try #require(StoreLogin(try Self.offer(at: 1), logins: [], address: "https://sail.example.com"))
+        let codex = try #require(StoreLogin(try Self.offer(at: 1).declaration, logins: [], address: "https://sail.example.com"))
         #expect(codex.kind.kind == "api-key" && codex.help == "Create an API key at platform.openai.com/api-keys." && codex.place == "sail.example.com")
         let command: [Any] = [["text": "Run "], ["run": "program", "verb": "make-key", "args": []]]
         let commandOnly = try Exchange("workspace-agents-dock-no-login")
             .altered(at: ["offered", 0, "kinds", 0, "how"], to: command)
         let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: commandOnly.body))
-        #expect(StoreLogin(agents.offered[0], logins: [], address: Self.address) == nil, "a kind made by running a command was offered")
+        #expect(StoreLogin(agents.offered[0].declaration, logins: [], address: Self.address) == nil, "a kind made by running a command was offered")
+    }
+
+    /// The sheet is the harness's declaration, which the server's list of harnesses and a
+    /// workspace's offer both carry: the Account view and the New Session panel open the same sheet.
+    @Test func theAgentsRouteAndAWorkspacesOfferOpenTheSameSheet() throws {
+        let known = try Endpoint.knownAgents.decode(HTTPResponse(status: 200, headers: [:], body: try Exchange("agents").body))
+        let logins = try Self.logins("logins-no-default")
+        for (at, agent) in known.agents.enumerated() {
+            let offered = try Self.offer(at: at)
+            #expect(agent.declaration == offered.declaration, "\(agent.name) is declared otherwise than dock offers it")
+            #expect(StoreLogin(agent.declaration, logins: logins, address: Self.address) == StoreLogin(offered.declaration, logins: logins, address: Self.address))
+        }
+    }
+
+    /// Replace names the key it replaces, whatever else the person has: the store is sent under it.
+    @Test func replaceStoresUnderTheNameReplaced() throws {
+        var sheet = try #require(StoreLogin(try Self.offer().declaration, logins: try Self.logins("logins-no-default"), address: Self.address, naming: "home"))
+        #expect(sheet.name == "home" && sheet.asksName)
+        sheet.typed(holdsSomething: true)
+        let store = sheet.store(Self.pasted, clipboard: Self.elsewhere)
+        #expect(store?.request.route == "PUT /v1/logins/claude-code/home")
     }
 
     /// A label is the kind's as a label starts, whatever case the server gives it.
     @Test func aLabelStartsUpperCase() throws {
         let lower = try Exchange("workspace-agents-dock-no-login").altered(at: ["offered", 0, "kinds", 0, "label"], to: "secret key")
         let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: lower.body))
-        let sheet = try #require(StoreLogin(agents.offered[0], logins: [], address: Self.address))
+        let sheet = try #require(StoreLogin(agents.offered[0].declaration, logins: [], address: Self.address))
         #expect(sheet.label == "Secret key" && sheet.placeholder == "Paste your secret key")
     }
 
@@ -154,7 +175,7 @@ import Testing
     /// Empty: Store off and nothing sent. Filled: Store on. Storing: Store off, a second store and
     /// typing change nothing. Stored: the server's login.
     @Test func theSheetGoesFromEmptyToFilledToStoringToStored() throws {
-        var sheet = try #require(StoreLogin(try Self.offer(), logins: [], address: Self.address))
+        var sheet = try #require(StoreLogin(try Self.offer().declaration, logins: [], address: Self.address))
         #expect(sheet.stage == .empty && !sheet.storable)
         let empty = sheet.store(Self.pasted, clipboard: Self.elsewhere)
         #expect(empty == nil && sheet.stage == .empty, "an empty field was stored")

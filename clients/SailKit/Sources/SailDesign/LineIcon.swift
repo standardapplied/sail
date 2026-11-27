@@ -5,6 +5,8 @@ public enum LineIcon: String, CaseIterable, Sendable {
     case refresh, hammer, plus, more, info, warning, error, box, layers, cloudOff, close
     /// The welcome's: the control plane's chip, a passkey's Touch ID, a passkey made; New session's chosen row.
     case cloud, fingerprint, check
+    /// The account's Sign Out.
+    case out
     /// A folder's disclosure: shut (pointing along the line, mirrored right to left) and open.
     case right, down
     /// This Mac's: its group's head, its project's tile and a shell (New session's Shell tile too),
@@ -71,6 +73,7 @@ public enum LineIcon: String, CaseIterable, Sendable {
                 .arc(Point(12, 12.21), radius: 7.4, from: -149.9, to: -1.6), line((19.4, 12), (19.4, 13.6)), line((4.6, 12.6), (4.6, 13.8)),
                 line((17.2, 18.6), (17.61, 17.82), (17.95, 16.97), (18.21, 16.1), (18.4, 15.2)),
             ]
+        case .out: return [line((14, 4.5), (18.5, 4.5), (18.5, 19.5), (14, 19.5)), line((10, 8), (6, 12), (10, 16)), line((6, 12), (15.5, 12))]
         case .check: return [line((5, 12.5), (9.5, 17), (19, 7.5))]
         case .right: return [line((9, 6), (15, 12), (9, 18))]
         case .down: return [line((6, 9), (12, 15), (18, 9))]
