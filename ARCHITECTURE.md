@@ -4519,7 +4519,7 @@ keyed by its id under the process's monitor, until it is answered, withdrawn, it
 process ends; an `unreadable` request is never held. `POST /v1/sessions/{id}/chat/requests/{request}`
 `{"decision", "message", "answers"}` (`allow`, `allow_always`, `deny`, `answer`; no other field)
 takes the held step out, logs `answered {request, decision, message?, answers?, by}` and only then
-writes one `control_response` (`LiveChat.reply`), and answers `{"seq"}`: an allow hands back the
+writes one `control_response` (`LiveReply.reply`), and answers `{"seq"}`: an allow hands back the
 step's own input, `allow_always` its own `permission_suggestions` exactly and only when its item
 offers an `always`, a denial the person's words untrimmed (at most `CONTENT_CODE_POINTS`, else "The
 person did not allow this."), and an answer one per question by its exact text, labels of its own
