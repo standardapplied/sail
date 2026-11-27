@@ -517,6 +517,7 @@ public final class WorkspacesView: NSView {
             guard era == self.era, ask == asks else { return }
             model.askingAgentsIn = nil
             guard model.chosen == projectName, !isHiddenOrHasHiddenAncestor else { return }
+            let memory = again ? self.memory.atLastHarness : self.memory
             if again, case let .success(agents) = answer, agents.refusal == nil {
                 var panel = NewSession(agents, memory: memory)
                 if panel.startsAgain, let start = panel.start() { return started(start, panel.memory) }
@@ -618,8 +619,9 @@ public final class WorkspacesView: NSView {
         keepPanelOnItsRow()
     }
 
-    /// Start pressed: the person's starts remember it, and it opens.
-    private func started(_ start: AgentStart, _ memory: ModeMemory) {
+    /// The primary pressed, a harness started or the Shell (nil) opened: the person's starts
+    /// remember it, and it opens.
+    private func started(_ start: AgentStart?, _ memory: ModeMemory) {
         guard let place = startingIn else { return }
         self.memory = memory
         onStart(start, place.project, place.name)

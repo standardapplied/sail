@@ -54,6 +54,9 @@ final class Driver {
     var held: (view: TerminalView, refreshes: Int)?
     /// How many times the last divider drag held still for the session's resize hold.
     var dragHolds = 0
+    /// Where the Workspaces section stood just before the last window step resized the window, and
+    /// when the New session panel last opened (`workspacesLayout`).
+    var layoutBeforeResize = "", layoutAtOpen = ""
     lazy var standIn: TerminalView = {
         guard let fonts = Bundle.main.resourceURL.flatMap({ try? TerminalFonts(directory: $0.appending(path: "Fonts")) }),
               let view = try? TerminalView(fonts: fonts)

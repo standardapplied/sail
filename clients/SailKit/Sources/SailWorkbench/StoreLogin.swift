@@ -231,19 +231,19 @@ public struct StoreLogin: Equatable, Sendable {
     /// The panel's one quiet line once stored: the clipboard's sentence when it was cleared, and
     /// what the server says once of runs on a login it replaced.
     public var stored: String? {
-        line(".")
+        line { "Stored \(display) key “\($0)”." }
     }
 
     /// The line in place of ``stored`` where the key could not be made the one Start takes (``use``
     /// not answered or refused, the key removed meanwhile among them): whatever the reason, the
-    /// same plain sentence of what that leaves and what to do, never the server's words.
+    /// same plain sentence, what to do first, never the server's words.
     public var notUsed: String? {
-        line(", but Sign in still offers your earlier key; store it again to make it the one Start takes.")
+        line { "Start still takes your earlier key: store “\($0)” again to switch." }
     }
 
-    private func line(_ ending: String) -> String? {
+    /// `said` of the key's name, then the clipboard's sentence and the server's note.
+    private func line(_ said: (String) -> String) -> String? {
         guard case let .stored(answer, cleared) = stage else { return nil }
-        let clipboard = cleared ? " Removed the key from the clipboard." : ""
-        return "Stored \(display) key “\(answer.login.name)”" + ending + clipboard + (answer.note.map { " " + $0 } ?? "")
+        return said(answer.login.name) + (cleared ? " Clipboard cleared." : "") + (answer.note.map { " " + $0 } ?? "")
     }
 }

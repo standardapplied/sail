@@ -72,6 +72,19 @@ import Testing
         #expect(LineIcon.error.strokes == [ring, Self.line((12, 7.5), (12, 13)), Self.line((12, 16.2), (12, 16.3))])
     }
 
+    /// New session's Shell tile, as `first-impressions-mockup.html`'s `term` draws it: the terminal's
+    /// rounded box (2.5 corners), clockwise from its top edge, each stroke meeting the next, then its
+    /// prompt and cursor.
+    @Test func theTerminalIsTheFirstImpressionsMockups() {
+        #expect(LineIcon.terminal.strokes == [
+            Self.line((5.5, 4.5), (18.5, 4.5)), .arc(.init(18.5, 7), radius: 2.5, from: -90, to: 0),
+            Self.line((21, 7), (21, 17)), .arc(.init(18.5, 17), radius: 2.5, from: 0, to: 90),
+            Self.line((18.5, 19.5), (5.5, 19.5)), .arc(.init(5.5, 17), radius: 2.5, from: 90, to: 180),
+            Self.line((3, 17), (3, 7)), .arc(.init(5.5, 7), radius: 2.5, from: 180, to: 270),
+            Self.line((7.5, 9.5), (10.5, 12), (7.5, 14.5)), Self.line((12.5, 15), (16.5, 15)),
+        ])
+    }
+
     /// The welcome's icons, as `first-impressions-mockup.html`'s `IC` writes them: the cloud's
     /// outline (`M7 18.5h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.6 4.5 4.5 0 0 0 7 18.5z`) as its
     /// arcs, clockwise from the bottom left, each meeting the next where the path does; the check.

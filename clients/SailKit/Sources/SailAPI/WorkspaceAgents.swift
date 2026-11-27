@@ -18,7 +18,7 @@ public struct WorkspaceAgents: Codable, Equatable, Sendable {
 /// until a person chooses (`modeDefault`), and why it has no others (`note`); its two ways in, the
 /// default key the person stored (`login`, of the `kinds` it takes) and its own sign-in inside the
 /// session (`signIn`, when a person may start it so: `inside`); and why it does not start at all
-/// (`refusal`).
+/// (`refusal`), with the few words a row says of that (`unavailable`).
 public struct AgentOffer: Codable, Equatable, Sendable {
     public let harness: String
     public let display: String
@@ -30,9 +30,10 @@ public struct AgentOffer: Codable, Equatable, Sendable {
     public let inside: Bool
     public let signIn: AgentSignIn?
     public let refusal: Refusal?
+    public let unavailable: String?
 
     private enum CodingKeys: String, CodingKey {
-        case harness, display, modes, note, login, kinds, inside, refusal
+        case harness, display, modes, note, login, kinds, inside, refusal, unavailable
         case modeDefault = "mode_default"
         case signIn = "sign_in"
     }
@@ -57,12 +58,13 @@ public struct AgentSignIn: Codable, Equatable, Sendable {
     }
 }
 
-/// A mode a harness starts in: its name as a start asks for it, and what the harness calls it and
-/// does in it.
+/// A mode a harness starts in: its name as a start asks for it, what the harness calls it and does
+/// in it, and whether it skips the harness's own permission checks (`risky`).
 public struct AgentMode: Codable, Equatable, Sendable {
     public let mode: String
     public let label: String
     public let about: String
+    public let risky: Bool
 }
 
 /// The stored login a harness starts signed in with: its name and kind, never its value.

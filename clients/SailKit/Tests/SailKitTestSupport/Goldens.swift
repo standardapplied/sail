@@ -165,6 +165,34 @@ public struct Exchange: Sendable {
         return Exchange(self, body: try JSONSerialization.data(withJSONObject: replacing(object, at: path[...], with: value)))
     }
 
+    /// This agents answer with `offers` listed after its own, as a server that knew more harnesses
+    /// would list them.
+    public func offering(_ offers: [[String: Any]]) throws -> Exchange {
+        let object = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        guard let offered = object?["offered"] as? [Any] else { throw GoldenError(reason: "\(path) offers nothing") }
+        return try altered(at: ["offered"], to: offered + offers)
+    }
+
+    /// A harness no client has heard of, declared as the server declares one in its own words: its
+    /// own sign-in, a key stored for it, its own mode and, `risky`, a second that warns; refused
+    /// and said `unavailable` where that is given.
+    public static func madeUpOffer(_ display: String, risky: Bool = false, unavailable: String? = nil) -> [String: Any] {
+        let own: [String: Any] = ["mode": "own", "label": "\(display)'s own", "about": "Starts as \(display) starts by itself.", "risky": false]
+        let reckless: [String: Any] = ["mode": "reckless", "label": "Reckless", "about": "Runs anything without asking.", "risky": true]
+        var offer: [String: Any] = [
+            "harness": display.lowercased().replacingOccurrences(of: " ", with: "-"), "display": display, "mode_default": "own", "inside": true,
+            "modes": risky ? [own, reckless] : [own],
+            "kinds": [["kind": "token", "label": "\(display) token", "how": [["text": "Create a token in \(display)'s settings"]]]],
+            "login": ["name": "default", "kind": "token"],
+            "sign_in": ["name": "Your \(display) account", "signed_in": false, "how": [["text": "\(display) asks you to sign in when it starts, once in each workspace."]]],
+        ]
+        if let unavailable {
+            offer["refusal"] = ["code": "harness_not_installed", "message": "\(display) is not installed in harbor's workspaces.", "action": "An admin adds it to harbor's agent install list.", "field_errors": [Any]()]
+            offer["unavailable"] = unavailable
+        }
+        return offer
+    }
+
     private func replacing(_ node: Any, at path: ArraySlice<any JSONPathStep>, with value: Any?) throws -> Any {
         guard let step = path.first else { return value as Any }
         switch (step, node) {

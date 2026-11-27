@@ -3,13 +3,14 @@
 /// shows is the design's, not a system symbol.
 public enum LineIcon: String, CaseIterable, Sendable {
     case refresh, hammer, plus, more, info, warning, error, box, layers, cloudOff, close
-    /// The welcome's: the control plane's chip, a passkey's Touch ID, a passkey made.
+    /// The welcome's: the control plane's chip, a passkey's Touch ID, a passkey made; New session's chosen row.
     case cloud, fingerprint, check
     /// The account's Sign Out.
     case out
     /// A folder's disclosure: shut (pointing along the line, mirrored right to left) and open.
     case right, down
-    /// This Mac's: its group's head, its project's tile and a shell, and its page's "not synced".
+    /// This Mac's: its group's head, its project's tile and a shell (New session's Shell tile too),
+    /// and its page's "not synced".
     case laptop, terminal, lock
 
     public static let side = 24.0, width = 1.75

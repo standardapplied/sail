@@ -119,19 +119,12 @@ actor GoldenDesk: Transport {
     /// From now on dock's agents are the golden `workspace-agents-dock-no-login`'s with a third
     /// harness after them that no word of the app names: its own sign-in, words and key, as a
     /// server declaring it would.
-    func answerMadeUp() throws {
-        let exchange = try Exchange("workspace-agents-dock-no-login")
-        guard var body = try JSONSerialization.jsonObject(with: exchange.body) as? [String: Any], let offered = body["offered"] as? [[String: Any]] else { return }
-        let madeUp: [String: Any] = [
-            "harness": "tide", "display": "Tide", "mode_default": "default", "inside": true,
-            "modes": [["mode": "default", "label": "Tide's own", "about": "Starts as Tide starts by itself."]],
-            "kinds": [["kind": "token", "label": "Tide token", "how": [["text": "Create a token on the Tide dashboard"]]]],
-            "login": ["name": "default", "kind": "token"],
-            "sign_in": ["name": "Your Tide crew", "signed_in": false,
-                        "how": [["text": "Tide asks you to sign in with your Tide crew when it starts, once in each workspace. Pick “Join by code” there."]]],
-        ]
-        body["offered"] = offered + [madeUp]
-        answers["GET /v1/projects/harbor/workspaces/dock/agents"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+    func answerMadeUp(_ madeUp: Step.MadeUpAgents) throws {
+        let offers = madeUp.offers.map { name in
+            Exchange.madeUpOffer(name, risky: madeUp.risky?.contains(name) == true, unavailable: madeUp.unavailable?.contains(name) == true ? "Not installed in harbor" : nil)
+        }
+        let exchange = try Exchange("workspace-agents-dock-no-login").offering(offers)
+        answers["GET /v1/projects/harbor/workspaces/dock/agents"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: exchange.body)
         held["GET /v1/projects/harbor/workspaces/dock/agents"] = .zero
     }
 
@@ -249,9 +242,9 @@ extension Driver {
         if let started = await performNewSession(step) { return started }
         if let stored = await performLoginSheet(step) { return stored }
         let pane = shell.workspaces
-        if step.agentsMadeUp == true {
+        if let madeUp = step.agentsMadeUp {
             do {
-                try await GoldenDesk.shared.answerMadeUp()
+                try await GoldenDesk.shared.answerMadeUp(madeUp)
                 return (true, "")
             } catch {
                 return (false, "workspace-agents-dock-no-login: \(error)")
@@ -520,6 +513,7 @@ extension Driver {
         }
         if let size = step.window ?? (step.leastWindow == true ? [Double(ShellApp.leastFrame.width), Double(ShellApp.leastFrame.height)] : nil), size.count == 2 {
             let frame = shell.window.frame
+            layoutBeforeResize = workspacesLayout
             shell.window.setFrame(NSRect(x: frame.minX, y: frame.maxY - size[1], width: size[0], height: size[1]), display: true)
             pane.layoutSubtreeIfNeeded()
             let now = shell.window.frame.size, reached = abs(Double(now.width) - size[0]) < 0.5 && abs(Double(now.height) - size[1]) < 0.5
@@ -619,10 +613,31 @@ extension Driver {
         return nil
     }
 
+    /// What the window shows of `page` on screen, measured apart from the New session panel's own
+    /// measure, so the check checks it: the page's bounds, cut by the window's content.
+    static func shown(_ page: NSView, in window: NSWindow) -> NSRect {
+        window.convertToScreen(page.convert(page.bounds, to: nil)).intersection(window.convertToScreen(window.contentLayoutRect))
+    }
+
+    /// Where the Workspaces section stands, every frame in window coordinates: the window's on
+    /// screen, the card's, the section's, the sidebar's, the page's and what the window shows of it
+    /// (on screen, `shown`), the page's direction, the backing scale and the panel's box while it
+    /// is open.
+    var workspacesLayout: String {
+        let window = shell.window, pane = shell.workspaces, project = pane.project
+        let frame = { (view: NSView?) in view.map { "\($0.convert($0.bounds, to: nil))" } ?? "none" }
+        let shows = Self.shown(project, in: window)
+        return "the window \(window.frame), the card \(frame(pane.superview)), the section \(frame(pane)), the sidebar "
+            + (pane.panel.isHidden ? "hidden" : frame(pane.panel)) + ", the page \(frame(project)), what shows of it \(shows), "
+            + (project.userInterfaceLayoutDirection == .rightToLeft ? "right to left" : "left to right") + ", scale \(window.backingScaleFactor), the box "
+            + (pane.newSession.isOpen ? "\(pane.newSession.popover.frame)" : "closed")
+    }
+
     /// A1's steps: a row's + and ⋯, the New Session panel and what its Start asks of the runner.
     private func performNewSession(_ step: Step) async -> (Bool, String)? {
         let pane = shell.workspaces, panel = pane.newSession, list = pane.project.list
         let said = { panel.isOpen ? "the panel says: " + panel.view.words.joined(separator: " | ") : "the panel is closed" }
+        panel.onOpen = { [weak self] in self?.layoutAtOpen = self?.workspacesLayout ?? "" }
         if let shows = step.rowShows, let name = shows.first {
             guard await clickRow(name, in: list) else { return (false, "no row \(name) to click") }
             let titles = { Self.rowButtons(name, in: list).map(\.title) }
@@ -644,6 +659,44 @@ extension Driver {
             let chosen = { panel.view.rows.first(where: \.chosen)?.name.stringValue }
             let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && chosen() == name }
             return (found, "chosen: \(chosen() ?? "none"); " + said())
+        }
+        if step.newSessionNoPrimary == true {
+            let none = await waitUntil(step.seconds ?? 5) { panel.isOpen && panel.view.primary == nil }
+            return (none, "the primary: \(panel.view.primary?.title ?? "none"); " + said())
+        }
+        if let names = step.newSessionRows {
+            let rows = { panel.view.rows.map(\.name.stringValue) }
+            let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && rows() == names }
+            return (found, "the rows: \(rows()); " + said())
+        }
+        if let words = step.newSessionWarns {
+            let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && (panel.view.warned ?? "") == words }
+            return (found, "warned: \(panel.view.warned ?? "nothing"); " + said())
+        }
+        if let name = step.newSessionHover {
+            let view = panel.view, row = { view.rows.first { $0.name.stringValue == name } }
+            guard !name.isEmpty else {
+                view.pointer = nil
+                return (true, "the pointer given back")
+            }
+            guard panel.isOpen, row() != nil else { return (false, "no row \(name) to hold the pointer over; " + said()) }
+            view.pointer = { row().map { $0.convert(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: nil) } }
+            view.pointed()
+            let hovered = await waitUntil(step.seconds ?? 5) { row()?.hovered == true }
+            return (hovered, "\(name) \(hovered ? "is" : "is not") under the pointer; hovered: \(view.rows.filter(\.hovered).map(\.name.stringValue))")
+        }
+        if step.newSessionInPage == true {
+            let project = pane.project
+            let inPage = { () -> String? in
+                guard panel.isOpen, let window = project.window else { return "the panel is closed" }
+                let page = Self.shown(project, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5), box = panel.popover.frame
+                guard page.contains(box) else { return "the box \(box) leaves the page less 8 pt \(page)" }
+                guard let chosen = panel.view.rows.first(where: \.chosen), panel.view.list.contentView.documentVisibleRect.insetBy(dx: -0.5, dy: -0.5).contains(chosen.frame) else { return "the chosen row is not whole in view" }
+                return nil
+            }
+            let stands = await waitUntil(step.seconds ?? 5) { inPage() == nil }
+            let layouts = "; before the last resize: \(layoutBeforeResize); at its opening: \(layoutAtOpen); now: \(workspacesLayout)"
+            return (stands, (inPage() ?? "the box \(panel.popover.frame) stands in the page") + layouts)
         }
         if let primary = step.newSessionPrimary, primary.count == 2 || primary.count == 3 {
             let button = { panel.view.primary }
