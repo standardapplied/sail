@@ -18,6 +18,9 @@ final class BuildCard: NSView {
     /// The tinted box's insets and type (the page's `.bsaid`), and the least room the line beside Build
     /// Again keeps before it goes under it.
     static let box = (vertical: 10.0, sides: 12.0, points: 12.5), againGap = 10.0, beside = 160.0, refusalMark = 14.0, refusalGap = 6.0
+    /// Narrower than this, as at the least window, the card is drawn tighter (rows 24 pt, gaps and its
+    /// top and bottom 12 and 16 pt), so a stopped build's Build Again is in view without a scroll.
+    static let compact = (below: 420.0, row: 24.0, gap: 12.0, padding: 16.0)
 
     var look: Look {
         didSet {
@@ -115,7 +118,9 @@ final class BuildCard: NSView {
         var laid = Laid()
         guard let build else { return laid }
         let x = Self.padding.sides, room = max(width - 2 * Self.padding.sides, 1)
-        var y = Self.padding.top
+        let tight = width < Self.compact.below, gap = tight ? Self.compact.gap : Self.gap, rowHeight = tight ? Self.compact.row : Self.row
+        let ends = tight ? Self.compact.padding : Self.padding.top
+        var y = ends
         let elapsed = build.startedAt.map { text(WorkspacesModel.Build.elapsed(from: $0, to: build.endedAt ?? now), mono.font(Look.Step.callout.points) as NSFont, look.textSecondary) }
         let elapsedWidth = elapsed.map { max(Double(ceil($0.size().width)), Double(ceil(text("00:00", mono.font(Look.Step.callout.points) as NSFont, look.textSecondary).size().width))) }
         let wordsX = x + Self.markColumn + Self.headGap, wordsRoom = max(room - Self.markColumn - Self.headGap - (elapsedWidth.map { $0 + Self.headGap } ?? 0), 1)
@@ -133,7 +138,7 @@ final class BuildCard: NSView {
         }
         y += head
         if let at = build.at {
-            y += Self.gap
+            y += gap
             laid.bar = NSRect(x: x, y: y, width: room, height: Self.bar)
             y += Self.bar + Self.barGap
             let small = mono.font(Look.Step.micro.points, .regular) as NSFont
@@ -153,7 +158,7 @@ final class BuildCard: NSView {
             y += atHeight
         }
         if !build.groups.isEmpty {
-            y += Self.gap
+            y += gap
             let nameX = x + Self.iconColumn + Self.iconGap, nameRoom = max(room - Self.iconColumn - Self.iconGap, 1)
             for (index, group) in build.groups.enumerated() {
                 let ink = switch group.mark {
@@ -162,14 +167,14 @@ final class BuildCard: NSView {
                 case .done, .running: look.text
                 }
                 let name = text(group.name, .systemFont(ofSize: Look.Step.callout.points), ink, lineHeight: 1.4)
-                let nameHeight = Self.height(name, nameRoom), row = max(Self.row, nameHeight + 8)
+                let nameHeight = Self.height(name, nameRoom), row = max(rowHeight, nameHeight + 8)
                 laid.texts.append((name, NSRect(x: nameX, y: y + (row - nameHeight) / 2, width: nameRoom, height: nameHeight)))
                 laid.icons.append((group.mark, NSRect(x: x, y: y + (row - Self.iconColumn) / 2, width: Self.iconColumn, height: Self.iconColumn)))
                 y += row + (index == build.groups.count - 1 ? 0 : Self.rowGap)
             }
         }
         if !build.reason.isEmpty {
-            y += Self.gap
+            y += gap
             let said = reason(build.reason), wordsRoom = max(room - 2 * Self.box.sides, 1), height = Self.height(said, wordsRoom)
             laid.box = NSRect(x: x, y: y, width: room, height: height + 2 * Self.box.vertical)
             laid.texts.append((said, NSRect(x: x + Self.box.sides, y: y + Self.box.vertical, width: wordsRoom, height: height)))
@@ -177,7 +182,7 @@ final class BuildCard: NSView {
         }
         let foot = build.foot.map { text($0, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, lineHeight: 1.45) }
         if build.buildsAgain {
-            y += Self.gap
+            y += gap
             let size = again.intrinsicContentSize, button = NSRect(x: x, y: y, width: Double(size.width), height: Double(size.height))
             laid.again = button
             let beside = room - Double(size.width) - Self.againGap
@@ -195,7 +200,7 @@ final class BuildCard: NSView {
                 y += Double(size.height)
             }
         } else if let foot {
-            y += Self.gap
+            y += gap
             let height = Self.height(foot, room)
             laid.texts.append((foot, NSRect(x: x, y: y, width: room, height: height)))
             y += height
@@ -208,7 +213,7 @@ final class BuildCard: NSView {
             laid.texts.append((said, NSRect(x: wordsX, y: y, width: wordsRoom, height: height)))
             y += height
         }
-        laid.height = (y + Self.padding.bottom).rounded(.up)
+        laid.height = (y + ends).rounded(.up)
         return laid
     }
 

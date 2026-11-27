@@ -94,7 +94,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     }()
 
     /// The build card's frame, which scrolls it where the window is too short for it.
-    private lazy var buildFrame = ListFrame(scrolling: buildCard, look: look)
+    private(set) lazy var buildFrame = ListFrame(scrolling: buildCard, look: look)
 
     /// The build card's frame as tall as the card at the column's width.
     private func fitBuild() {

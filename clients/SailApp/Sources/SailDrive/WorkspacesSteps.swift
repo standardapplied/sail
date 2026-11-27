@@ -163,7 +163,8 @@ actor GoldenDesk: Transport {
     }
 
     /// From now on `project`'s template reads as the golden `name`, its project's name `project`, its
-    /// build at `step` started by `by` 4:18 ago and, when it stopped, stopped 13 s ago.
+    /// build at `step` started by `by` 4:18 ago and, when it stopped, stopped 13 s ago; the projects,
+    /// where they list it, list its template in that state, as one server says both.
     func answerTemplate(_ project: String, as name: String, step: Int, by: String) throws {
         let started = Date(timeIntervalSinceNow: -258), instant = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
         var exchange = try Exchange(name).altered(at: ["build", "step"], to: step).altered(at: ["build", "by"], to: by)
@@ -174,6 +175,15 @@ actor GoldenDesk: Transport {
         let said = String(decoding: exchange.body, as: UTF8.self).replacingOccurrences(of: "lighthouse", with: project).replacingOccurrences(of: "\"harbor\"", with: "\"\(project)\"")
         answers["GET /v1/projects/\(project)/template"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: Data(said.utf8))
         held["GET /v1/projects/\(project)/template"] = .zero
+        guard let listed = answers["GET /v1/projects"], var body = try JSONSerialization.jsonObject(with: listed.body) as? [String: Any],
+              let projects = body["projects"] as? [[String: Any]], let state = (try JSONSerialization.jsonObject(with: exchange.body) as? [String: Any])?["state"] else { return }
+        body["projects"] = projects.map { row in
+            guard row["name"] as? String == project else { return row }
+            var changed = row
+            changed["template"] = state
+            return changed
+        }
+        answers["GET /v1/projects"] = HTTPResponse(status: listed.status, headers: listed.headers, body: try JSONSerialization.data(withJSONObject: body))
     }
 
     /// From now on `project`'s workspaces are listed as none.

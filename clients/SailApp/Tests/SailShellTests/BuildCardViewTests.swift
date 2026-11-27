@@ -82,7 +82,7 @@ import Testing
                 for (text, rect) in laid.texts {
                     #expect(rect.minX >= BuildCard.padding.sides - 0.5 && rect.maxX <= width - BuildCard.padding.sides + 0.5, "'\(text.string)' at \(rect) in \(width)")
                     #expect(BuildCard.height(text, Double(rect.width)) <= Double(rect.height) + 0.5, "'\(text.string)' cut in \(rect)")
-                    #expect(Double(rect.maxY) + BuildCard.padding.bottom <= laid.height + 0.5, "'\(text.string)' below the card")
+                    #expect(Double(rect.maxY) + BuildCard.compact.padding <= laid.height + 0.5, "'\(text.string)' below the card")
                 }
                 for (index, one) in boxes.enumerated() {
                     for other in boxes[(index + 1)...] {
@@ -107,6 +107,20 @@ import Testing
                 #expect(Double(other.frame.minX) > 300, "\(other.frame) stays at the leading side")
             }
         }
+    }
+
+    /// At the least window a stopped build's Build Again stands inside the card's frame, in view with
+    /// no scroll: the card is drawn tighter there.
+    @Test func atTheLeastWindowBuildAgainIsInView() async throws {
+        let pauses = Pauses()
+        let (view, window, _) = try await Self.section("failed", "template-2h-failed", pauses)
+        defer { window.orderOut(nil) }
+        window.setContentSize(NSSize(width: WorkspacesViewTests.narrowestCard, height: ShellApp.leastFrame.height - ShellApp.bandHeight - 4))
+        #expect(await RunnerTabTests.until { view.text.contains("Build Again picks up at step 13") }, "\(view.text)")
+        view.layoutSubtreeIfNeeded()
+        let card = view.project.buildCard, frame = view.project.buildFrame
+        let button = card.convert(card.again.alignmentRect(forFrame: card.again.frame), to: frame)
+        #expect(!card.again.isHidden && frame.bounds.insetBy(dx: 1, dy: 1).contains(button), "Build Again at \(button) in a frame \(frame.bounds)")
     }
 
     /// Build Again only for those who may build; while it is asked it says so.
