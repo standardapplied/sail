@@ -386,6 +386,10 @@ struct Step: Decodable {
     /// New Session stands in the window less 8 pt, its top on the top of the left panel's row of this
     /// id.
     var newSessionBeside: String?
+    /// Workspaces is the signed-in person's at this control plane address from now on, the
+    /// requests still going where they went: what its host draws, seen with the goldens' answers;
+    /// "" gives it back the sign-in's own.
+    var panelHost: String?
     /// This Mac's session row of this title clicked as a person clicks it: chosen, the list holding
     /// the keys, within `seconds` (5 by default).
     var chooseSession: String?
