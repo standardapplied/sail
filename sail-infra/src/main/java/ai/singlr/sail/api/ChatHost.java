@@ -315,6 +315,16 @@ public final class ChatHost implements AutoCloseable {
     return cut.size();
   }
 
+  /** Erases the chats of workspace {@code workspace} of {@code project}, which was deleted. */
+  public void forgetWorkspace(String project, String workspace) {
+    store.eraseWorkspace(project, workspace);
+  }
+
+  /** Erases every chat of {@code project}, whose workspaces were destroyed. */
+  public void forgetProject(String project) {
+    store.eraseProject(project);
+  }
+
   /** Holds every chat to its bounds at {@code interval}. */
   public void startSweep(Duration interval) {
     sweepPass.start(interval);

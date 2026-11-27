@@ -1648,7 +1648,7 @@ public final class SailOperations implements HostOperations {
         shell,
         identity()::workspaceOwner,
         sessionYield,
-        new ChatStore(controlPlane)::eraseWorkspace,
+        chats()::forgetWorkspace,
         box.isNode() ? box.handle() : null);
   }
 

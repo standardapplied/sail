@@ -299,6 +299,13 @@ class ScopedReadsTest {
         + "\"}}";
   }
 
+  /**
+   * The operations a {@code GET} reaches that answer their opener alone, never by scope, so a
+   * scoped reader and an admin are both told there is none: a chat ({@code ChatHostTest} holds it
+   * to its opener).
+   */
+  private static final Set<String> THE_OPENERS_ALONE = Set.of("chats");
+
   /** The operations HTTP never addresses to a row: a round of sync, and the local socket's. */
   private static final Set<String> NEVER_ADDRESSED_OVER_HTTP =
       Set.of(
@@ -1580,6 +1587,7 @@ class ScopedReadsTest {
     return Arrays.stream(Operations.class.getMethods())
         .map(Method::getName)
         .filter(operation -> !NOT_READ_OVER_HTTP.contains(operation))
+        .filter(operation -> !THE_OPENERS_ALONE.contains(operation))
         .collect(Collectors.toCollection(TreeSet::new));
   }
 
