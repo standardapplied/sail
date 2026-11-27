@@ -31,6 +31,13 @@ package final class NewSessionPanel: NSObject {
     static let width = 388.0, gap = 4.0
     package static let inset = 8.0
 
+    /// What shows of `page` on screen: its bounds as far as its ancestors and the window show them.
+    /// `visibleRect` alone is not cut to the page's own bounds: it reaches as far as the window shows
+    /// the page's ancestors, so a card laid out wider than the page widened the box past it.
+    package static func shows(_ page: NSView, in window: NSWindow) -> NSRect {
+        window.convertToScreen(page.convert(page.visibleRect.intersection(page.bounds), to: nil))
+    }
+
     /// The agents route's answer as the panel takes it: what can start, or why nothing was listed.
     enum Answer: Equatable {
         case agents(WorkspaceAgents)
@@ -115,7 +122,7 @@ package final class NewSessionPanel: NSObject {
         signInFocused = false
         content = Self.content(answer, memory: memory)
         view.direction = page.userInterfaceLayoutDirection
-        let area = window.convertToScreen(page.convert(page.visibleRect, to: nil)), row = window.convertToScreen(row)
+        let area = Self.shows(page, in: window), row = window.convertToScreen(row)
         let width = narrow ? Double(area.width) - 2 * Self.inset : min(Self.width, Double(area.width) - 2 * Self.inset)
         let rightToLeft = page.userInterfaceLayoutDirection == .rightToLeft, trailing = RowStyle.list.margin + RowStyle.list.trailing
         let wanted = narrow ? Double(area.minX) + Self.inset : rightToLeft ? Double(row.minX) + trailing : Double(row.maxX) - trailing - width

@@ -570,7 +570,7 @@ extension Driver {
     var workspacesLayout: String {
         let window = shell.window, pane = shell.workspaces, project = pane.project
         let frame = { (view: NSView?) in view.map { "\($0.convert($0.bounds, to: nil))" } ?? "none" }
-        let shows = window.convertToScreen(project.convert(project.visibleRect, to: nil))
+        let shows = NewSessionPanel.shows(project, in: window)
         return "the window \(window.frame), the card \(frame(pane.superview)), the section \(frame(pane)), the sidebar "
             + (pane.panel.isHidden ? "hidden" : frame(pane.panel)) + ", the page \(frame(project)), what shows of it \(shows), "
             + (project.userInterfaceLayoutDirection == .rightToLeft ? "right to left" : "left to right") + ", scale \(window.backingScaleFactor), the box "
@@ -633,7 +633,7 @@ extension Driver {
             let project = pane.project
             let inPage = { () -> String? in
                 guard panel.isOpen, let window = project.window else { return "the panel is closed" }
-                let page = window.convertToScreen(project.convert(project.visibleRect, to: nil)).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5), box = panel.popover.frame
+                let page = NewSessionPanel.shows(project, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5), box = panel.popover.frame
                 guard page.contains(box) else { return "the box \(box) leaves the page less 8 pt \(page)" }
                 guard let chosen = panel.view.rows.first(where: \.chosen), panel.view.list.contentView.documentVisibleRect.insetBy(dx: -0.5, dy: -0.5).contains(chosen.frame) else { return "the chosen row is not whole in view" }
                 return nil

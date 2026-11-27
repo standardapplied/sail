@@ -779,12 +779,33 @@ import Testing
         view.layoutSubtreeIfNeeded()
         #expect(view.project.narrow)
         let panel = try await Self.open("dock", in: view)
-        let page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil)), box = panel.popover.frame
+        let page = NewSessionPanel.shows(view.project, in: window), box = panel.popover.frame
         let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) })
         #expect(near(box.minX, page.minX + NewSessionPanel.inset) && near(box.maxX, page.maxX - NewSessionPanel.inset), "the panel is \(box) on what shows of the page \(page)")
         let content = window.convertToScreen(try #require(window.contentView).frame)
         #expect(box.minX >= content.minX + NewSessionPanel.inset - 0.5 && box.maxX <= content.maxX - NewSessionPanel.inset + 0.5, "the panel \(box) overhangs the window's content \(content)")
         #expect(near(box.maxY, row.minY - NewSessionPanel.gap))
+    }
+
+    /// What shows of the page is the page's own bounds as far as its ancestors show them: a card
+    /// laid out wider than the page and cut by the window (the drive's `fi-least-codex-in-page` found
+    /// the card 511 pt round a 444 pt page in a 508 pt window) does not widen the panel past the
+    /// page less 8 pt. `visibleRect` alone reaches past the page's bounds to what the window shows.
+    @Test func aCardWiderThanThePageWidensNotThePanel() async throws {
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock"], width: WorkspacesViewTests.narrowestCard)
+        defer { window.orderOut(nil) }
+        let width = WorkspacesViewTests.narrowestCard
+        window.setContentSize(NSSize(width: width + 2, height: 700))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: width + 2, height: 700)), card = NSView(frame: NSRect(x: 0, y: 0, width: width + 67, height: 700))
+        window.contentView = root
+        root.addSubview(card)
+        view.frame = NSRect(x: 0, y: 0, width: width, height: 700)
+        card.addSubview(view)
+        view.layoutSubtreeIfNeeded()
+        #expect(view.project.narrow)
+        let panel = try await Self.open("dock", in: view)
+        let page = window.convertToScreen(view.project.convert(view.project.bounds, to: nil)), box = panel.popover.frame
+        #expect(near(box.minX, page.minX + NewSessionPanel.inset) && near(box.maxX, page.maxX - NewSessionPanel.inset), "the panel is \(box) on the page \(page)")
     }
 
     /// Right to left the panel hangs from ⋯'s edge at the row's left, and its rows, bar and foot
@@ -830,7 +851,7 @@ import Testing
     /// not `top`, drawn other than it stands, or its chosen row not whole in view.
     static func misplaced(_ panel: NewSessionPanel, in view: WorkspacesView, top: Double, _ said: String) -> [String] {
         guard let window = view.window else { return ["\(said): no window"] }
-        let page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil)).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
+        let page = NewSessionPanel.shows(view.project, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
         let box = panel.popover.frame, shown = panel.view.list.contentView.documentVisibleRect
         var faults: [String] = []
         if !page.contains(box) { faults.append("\(said): the box \(box) leaves the page \(page)") }
