@@ -597,8 +597,10 @@ final class ClaudeCode implements Harness {
 
   /**
    * A rule denying reads of the absolute {@code path}: written {@code //path}, since a single
-   * leading {@code /} anchors a rule at the settings source, the directory of the {@code
-   * --settings} file, not the root (Claude Code's permission rules, as its documentation says).
+   * leading {@code /} anchors a rule at the directory of the {@code --settings} file, not the root.
+   * Probe 2 recorded it: {@code Read(/home/dev/probe-secret.txt)} denied nothing (03a), {@code
+   * Read(/probe-secret.txt)} denied the file beside the settings file (03f), and {@code
+   * Read(//home/dev/probe-secret.txt)} denied the file (03b).
    */
   private static String readDeny(String path) {
     return "Read(/" + path + ")";

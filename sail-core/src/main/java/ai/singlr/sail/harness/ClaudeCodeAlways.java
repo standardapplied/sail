@@ -71,22 +71,28 @@ final class ClaudeCodeAlways {
   private static final String SESSION = "for this session only.";
 
   /**
-   * What makes a rule compound, {@code &&}, {@code ;} or a pipe ({@code |}, and so {@code ||}), or
-   * a line break, which {@link #quoted} refuses: Claude Code matches each command of one alone.
+   * What makes a rule compound, {@code &} (and so {@code &&}), {@code ;}, a pipe ({@code |}, and so
+   * {@code ||}) or a command substitution ({@code $(}), or a line break, which {@link #quoted}
+   * refuses: Claude Code matches each command of one alone, so a kept one may never match again.
    */
-  private static final List<String> COMPOUND = List.of("&&", ";", "|");
+  private static final List<String> COMPOUND = List.of("&", ";", "|", "$(");
 
-  /** A rule {@code xargs} starts. */
-  private static final Pattern XARGS = Pattern.compile("\\s*xargs(\\s|$)");
+  /**
+   * A rule that runs {@code xargs} anywhere a word of it starts, after a wrapper ({@code timeout 5
+   * xargs}, {@code nice xargs}, {@code env xargs}) or by its path ({@code /usr/bin/xargs}): what a
+   * kept one covers, with whatever {@code xargs} is fed, was never recorded.
+   */
+  private static final Pattern XARGS = Pattern.compile("(^|[\\s/])xargs(\\s|$)");
 
   private ClaudeCodeAlways() {}
 
   /**
    * The one way to allow a call always that Claude Code offers: all its suggestions, kept together,
-   * as 02b recorded each of them: a rule that allows a command ({@code addRules}), a folder it may
-   * work in ({@code addDirectories}) and a chat mode ({@code setMode}), each kept for the session
-   * or in the workspace's own settings file. None when any one is of another shape, since what Sail
-   * cannot say a person cannot consent to.
+   * none when their sentences together are longer than a person is shown whole ({@link
+   * LiveStream#CONTENT_CODE_POINTS}), as 02b recorded each of them: a rule that allows a command
+   * ({@code addRules}), a folder it may work in ({@code addDirectories}) and a chat mode ({@code
+   * setMode}), each kept for the session or in the workspace's own settings file. None when any one
+   * is of another shape, since what Sail cannot say a person cannot consent to.
    */
   static List<ChatItem.Always> of(List<Object> suggestions, List<Harness.Mode> modes) {
     var words = new ArrayList<String>();
@@ -97,7 +103,11 @@ final class ClaudeCodeAlways {
       }
       words.addAll(said);
     }
-    return words.isEmpty() ? List.of() : List.of(new ChatItem.Always(words));
+    return words.isEmpty()
+            || words.stream().mapToInt(said -> said.codePointCount(0, said.length())).sum()
+                > LiveStream.CONTENT_CODE_POINTS
+        ? List.of()
+        : List.of(new ChatItem.Always(words));
   }
 
   /**
@@ -129,15 +139,9 @@ final class ClaudeCodeAlways {
                   .toList();
           default -> List.of(mode(said.get("mode"), modes));
         };
-    return sentences.isEmpty() || !sentences.stream().allMatch(ClaudeCodeAlways::fits)
+    return sentences.isEmpty() || !sentences.stream().allMatch(Optional::isPresent)
         ? List.of()
         : sentences.stream().map(Optional::orElseThrow).toList();
-  }
-
-  private static boolean fits(Optional<String> sentence) {
-    return sentence
-        .filter(said -> said.codePointCount(0, said.length()) <= LiveStream.CONTENT_CODE_POINTS)
-        .isPresent();
   }
 
   /**
@@ -155,7 +159,7 @@ final class ClaudeCodeAlways {
         || !"Bash".equals(said.get("toolName"))
         || !(said.get("ruleContent") instanceof String content)
         || COMPOUND.stream().anyMatch(content::contains)
-        || XARGS.matcher(content).lookingAt()) {
+        || XARGS.matcher(content).find()) {
       return Optional.empty();
     }
     var star = content.indexOf('*');
@@ -173,7 +177,9 @@ final class ClaudeCodeAlways {
    * {@code text} between backticks, so nothing in it reads as the sentence's own words; empty for
    * what cannot be quoted so: a blank, a backtick that would end the quote, a character that is not
    * drawn as itself (a control or format character, such as a line break or a right-to-left
-   * override, or a line or paragraph separator), or a {@code ..} that climbs out of a folder.
+   * override, a line or paragraph separator, a combining mark that draws over its neighbour, a
+   * private-use, unassigned or lone surrogate character), or a {@code ..} that climbs out of a
+   * folder.
    */
   private static Optional<String> quoted(Object text) {
     return text instanceof String said
@@ -190,7 +196,12 @@ final class ClaudeCodeAlways {
       case Character.CONTROL,
           Character.FORMAT,
           Character.LINE_SEPARATOR,
-          Character.PARAGRAPH_SEPARATOR ->
+          Character.PARAGRAPH_SEPARATOR,
+          Character.NON_SPACING_MARK,
+          Character.ENCLOSING_MARK,
+          Character.PRIVATE_USE,
+          Character.SURROGATE,
+          Character.UNASSIGNED ->
           false;
       default -> true;
     };

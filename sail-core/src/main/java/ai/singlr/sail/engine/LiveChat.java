@@ -60,7 +60,8 @@ public final class LiveChat {
       case Step.Plan asked ->
           List.of(new ChatItem.Plan(asked.requestId(), asked.callId(), asked.plan(), false));
       case Step.Shown shown -> List.of(shown.item());
-      case Step.Unreadable unreadable -> List.of(new ChatItem.Unreadable(unreadable.tooLarge()));
+      case Step.Unreadable unreadable ->
+          List.of(new ChatItem.Unreadable(unreadable.tooLarge(), unreadable.requestId() == null));
       case Step.Status status ->
           status.mode() == null
               ? List.of()

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ChatItem.Detail;
 import ai.singlr.sail.engine.LiveStream;
@@ -559,6 +560,12 @@ class HarnessGoldenTest {
         CLAUDE_CODE_CHAT.modes().stream()
             .map(mode -> mode.name() + "=" + mode.label() + (mode.risky() ? ", risky" : ""))
             .toList());
+    assertEquals(
+        "Asks before it edits a file or runs a command, except commands it counts as safe, such as"
+            + " sleep or echo, which run without asking.",
+        CLAUDE_CODE_CHAT.modes().getFirst().about(),
+        "never a claim that it asks where it was recorded not to"
+            + " (LiveChatTest.everyModeWordIsARecordedDecision)");
     assertTrue(CLAUDE_CODE_CHAT.modes().stream().noneMatch(mode -> mode.about().isBlank()));
     assertTrue(
         CLAUDE_CODE.modes().stream().anyMatch(mode -> mode.name().equals("bypassPermissions")),
@@ -601,8 +608,7 @@ class HarnessGoldenTest {
     assertEquals(
         changed(ChatItem.ChangeKind.CHANGE, "/w/a.txt", "old", "new", false, false),
         CLAUDE_CODE_CHAT.detail(
-            "Edit",
-            Map.of("file_path", "/w/a.txt", "old_string", "old", "new_string", "new", "x", "y")));
+            "Edit", Map.of("file_path", "/w/a.txt", "old_string", "old", "new_string", "new")));
     assertEquals(
         changed(ChatItem.ChangeKind.CHANGE, "/w/a.txt", "old", "new", true, false),
         CLAUDE_CODE_CHAT.detail(
@@ -619,7 +625,7 @@ class HarnessGoldenTest {
         "an edit of every occurrence says so");
     assertEquals(
         new Detail.Read("/w/a.txt", false),
-        CLAUDE_CODE_CHAT.detail("Read", Map.of("file_path", "/w/a.txt", "limit", 3)));
+        CLAUDE_CODE_CHAT.detail("Read", Map.of("file_path", "/w/a.txt")));
     assertEquals(
         new Detail.Search("TODO", "/w", false),
         CLAUDE_CODE_CHAT.detail("Grep", Map.of("pattern", "TODO", "path", "/w")));
@@ -631,11 +637,11 @@ class HarnessGoldenTest {
         CLAUDE_CODE_CHAT.detail("WebSearch", Map.of("query", "sail docs")));
     assertEquals(
         new Detail.Fetch("https://example.com", false),
-        CLAUDE_CODE_CHAT.detail("WebFetch", Map.of("url", "https://example.com", "prompt", "p")));
+        CLAUDE_CODE_CHAT.detail("WebFetch", Map.of("url", "https://example.com")));
     assertEquals(
-        new Detail.Command(null, false, false),
-        CLAUDE_CODE_CHAT.detail("Bash", Map.of("command", 7)),
-        "a field that is not text is not said");
+        new Detail.Command("ls", false, false),
+        CLAUDE_CODE_CHAT.detail("Bash", Map.of("command", "ls", "description", "List")),
+        "a description only describes the call (02b:16)");
     assertEquals(
         new Detail.Command("sleep 30", true, false),
         CLAUDE_CODE_CHAT.detail("Bash", Map.of("command", "sleep 30", "run_in_background", true)),
@@ -651,6 +657,35 @@ class HarnessGoldenTest {
         changed(ChatItem.ChangeKind.CHANGE, "/w/a.txt", null, longer.substring(1), false, true),
         CLAUDE_CODE_CHAT.detail("Write", Map.of("file_path", "/w/a.txt", "content", longer)),
         "a file written whole has no text before, and what is shown is clipped and says so");
+  }
+
+  /**
+   * A person is shown everything they allow: a call is drawn as its kind's detail only when its
+   * input holds nothing but what that detail draws and what only describes it; any other field, or
+   * a field of another type, draws the whole input as it is.
+   */
+  @Test
+  void aCallWithAFieldItsDetailDoesNotDrawIsShownWhole() {
+    var cases =
+        List.of(
+            List.<Object>of("Bash", Map.of("command", "ls", "dangerouslyDisableSandbox", true)),
+            List.<Object>of("Bash", Map.of("command", List.of("rm", "-rf", "~"))),
+            List.<Object>of("Bash", Map.of("command", "ls", "run_in_background", "yes")),
+            List.<Object>of("Bash", Map.of("command", "ls", "timeout", 600000)),
+            List.<Object>of("Edit", Map.of("file_path", "/w/a", "old_string", "a", "x", "y")),
+            List.<Object>of("Write", Map.of("file_path", "/w/a", "content", 7)),
+            List.<Object>of("Read", Map.of("file_path", "/w/a", "limit", 3)),
+            List.<Object>of("Grep", Map.of("pattern", "TODO", "-i", true)),
+            List.<Object>of("WebFetch", Map.of("url", "https://example.com", "prompt", "p")));
+    for (var call : cases) {
+      @SuppressWarnings("unchecked")
+      var input = (Map<String, Object>) call.get(1);
+      var tool = (String) call.get(0);
+      assertEquals(
+          new Detail.Other(tool, YamlUtil.dumpJsonValue(input), false),
+          CLAUDE_CODE_CHAT.detail(tool, input),
+          call.toString());
+    }
   }
 
   private static Detail changed(
@@ -738,14 +773,25 @@ class HarnessGoldenTest {
   }
 
   @Test
+  void anAlwaysTooLongToShowWholeInAllIsNotOffered() {
+    var half = "a".repeat(LiveStream.CONTENT_CODE_POINTS / 2);
+    assertEquals(1, always(rule("allow", "localSettings", bash(half))).size(), "one fits");
+    assertEquals(
+        List.of(),
+        always(rule("allow", "localSettings", bash(half), bash(half + "b"))),
+        "together the sentences pass the bound a person is shown whole");
+  }
+
+  @Test
   void aModeSwitchSaysWhatTheModeAllowsAndThatItStaysForTheChat() {
     var edits = Harness.Mode.named(CLAUDE_CODE_CHAT.modes(), "acceptEdits", "claude-code");
     assertEquals(
-        "Edits, moves and deletes files inside this workspace, and in any folder you let it work"
-            + " in, without asking, with file edits and file commands such as rm, mv, cp, sed,"
-            + " mkdir and touch; it asks before anything else.",
+        "Edits files, and runs file commands such as rm, mv, cp and sed, inside this workspace"
+            + " and any folder you let it work in, without asking; it still asks before such a"
+            + " command anywhere else.",
         edits.about(),
-        "the mode's own words say what probe 2 recorded it running without asking (04b)");
+        "the mode's own words say only what was recorded (LiveChatTest"
+            + ".everyModeWordIsARecordedDecision), and the folders its documentation adds");
     assertEquals(
         List.of(
             new ChatItem.Always(
@@ -917,6 +963,37 @@ class HarnessGoldenTest {
             Map.entry(
                 "a prefix rule xargs runs",
                 (Object) rule("allow", "localSettings", bash("xargs rm *"))),
+            Map.entry(
+                "a rule timeout starts xargs in",
+                (Object) rule("allow", "localSettings", bash("timeout 5 xargs touch"))),
+            Map.entry(
+                "a rule nice starts xargs in",
+                (Object) rule("allow", "localSettings", bash("nice xargs rm"))),
+            Map.entry(
+                "a rule that runs xargs by its path",
+                (Object) rule("allow", "localSettings", bash("/usr/bin/xargs rm"))),
+            Map.entry(
+                "a rule env starts xargs in",
+                (Object) rule("allow", "localSettings", bash("env xargs rm"))),
+            Map.entry(
+                "a rule command starts xargs in",
+                (Object) rule("allow", "localSettings", bash("command xargs rm"))),
+            Map.entry(
+                "a compound rule with &",
+                (Object) rule("allow", "localSettings", bash("touch a & rm b"))),
+            Map.entry(
+                "a compound rule with $(…)",
+                (Object) rule("allow", "localSettings", bash("echo $(cat ~/.ssh/id_rsa)"))),
+            Map.entry("a folder a combining mark draws over", (Object) folder("/tmp/a\u0338")),
+            Map.entry(
+                "a rule with a private-use character",
+                (Object) rule("allow", "localSettings", bash("ls \uE000"))),
+            Map.entry(
+                "a rule with a lone surrogate",
+                (Object) rule("allow", "localSettings", bash("ls \uD800"))),
+            Map.entry(
+                "a rule with an unassigned character",
+                (Object) rule("allow", "localSettings", bash("ls \u0378"))),
             Map.entry(
                 "a compound rule with &&",
                 (Object) rule("allow", "localSettings", bash("make && make install"))),

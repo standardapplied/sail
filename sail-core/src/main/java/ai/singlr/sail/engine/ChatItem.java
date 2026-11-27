@@ -344,9 +344,10 @@ public sealed interface ChatItem {
   /**
    * The agent asked something that could not be read whole, or that was {@code tooLarge} to show a
    * person whole, so no person was asked: the host refused it at once, telling the agent to split a
-   * request too large into smaller steps, or, when it named no request to answer, stopped the turn.
+   * request too large into smaller steps, or, when it named no request to answer, {@code stopped}
+   * the turn instead.
    */
-  record Unreadable(boolean tooLarge) implements Notice {}
+  record Unreadable(boolean tooLarge, boolean stopped) implements Notice {}
 
   /** The turn that ends next was begun by the agent itself, not by a person's message. */
   record SelfStarted() implements ChatItem {}

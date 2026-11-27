@@ -51,10 +51,9 @@ class LiveChatTest {
       "Let it work in the folder `/home/dev/workspace`, for this session only.";
 
   private static final String EDITS_FREELY =
-      "Switch this chat to Edits freely: Edits, moves and deletes files inside this workspace, and"
-          + " in any folder you let it work in, without asking, with file edits and file commands"
-          + " such as rm, mv, cp, sed, mkdir and touch; it asks before anything else. It stays for"
-          + " the rest of this chat.";
+      "Switch this chat to Edits freely: Edits files, and runs file commands such as rm, mv, cp"
+          + " and sed, inside this workspace and any folder you let it work in, without asking; it"
+          + " still asks before such a command anywhere else. It stays for the rest of this chat.";
 
   private static Detail written(String path, String text) {
     return new Detail.Edit(
@@ -413,6 +412,70 @@ class LiveChatTest {
   }
 
   /**
+   * Every claim a chat mode's words make, against the recorded decision it rests on: in Asks first
+   * (init {@code default}) a file edit and a command asked, and commands Claude Code counts as safe
+   * ran without asking; in Edits freely (init {@code acceptEdits}) a file edit and file commands
+   * inside the workspace ran without asking, and {@code rm} outside it asked.
+   */
+  @Test
+  void everyModeWordIsARecordedDecision() {
+    assertEquals(
+        List.of(
+            "default: Write /home/dev/workspace/notes.txt asked",
+            "default: date > stamp.txt asked",
+            "default: sleep 30 ran unasked",
+            "default: touch probe-a.txt && echo done ran unasked",
+            "acceptEdits: Write /home/dev/workspace/accept.txt ran unasked",
+            "acceptEdits: rm scratch-rm.txt ran unasked",
+            "acceptEdits: mv scratch-mv.txt scratch-moved.txt ran unasked",
+            "acceptEdits: cp scratch-cp.txt scratch-copied.txt ran unasked",
+            "acceptEdits: sed -i s/one/two/ scratch-sed.txt ran unasked",
+            "acceptEdits: nice rm scratch-rm2.txt ran unasked",
+            "acceptEdits: rm /home/dev/scratch-outside.txt asked"),
+        List.of(
+            decided("02b-relay-stdio", 3, 42, 44),
+            decided("02b-relay-stdio", 3, 14, 16),
+            decided("04b-set-permission-mode-and-background-task", 3, 40, 46),
+            decided("01-always-rule-wrappers", 333, 344, 348),
+            decided("04b-set-permission-mode-and-background-task", 81, 99, 103),
+            decided("04b-accept-edits-shell", 3, 14, 18),
+            decided("04b-accept-edits-shell", 3, 43, 47),
+            decided("04b-accept-edits-shell", 3, 72, 76),
+            decided("04b-accept-edits-shell", 3, 102, 106),
+            decided("04b-accept-edits-shell", 3, 130, 134),
+            decided("04b-accept-edits-shell", 146, 158, 160)));
+  }
+
+  /**
+   * What a recording says of one call: the mode its turn's {@code init} names, the call (its
+   * command, or its tool and file), and whether it asked (a request on {@code decision}) or ran
+   * with no request (a result Claude Code decided itself, by its configuration, on {@code
+   * decision}).
+   */
+  @SuppressWarnings("unchecked")
+  private static String decided(String recording, int init, int call, int decision) {
+    var mode = step(Step.Init.class, recording, init).mode();
+    var made = step(Step.ToolCalls.class, recording, call).calls().getFirst();
+    var what =
+        made.input().get("command") instanceof String command
+            ? command
+            : made.tool() + " " + made.input().get("file_path");
+    var line = LiveStream.read(Recorded.line(recording, decision));
+    if (line instanceof Step.Permission asked) {
+      assertEquals(made.id(), asked.callId());
+      return mode + ": " + what + " asked";
+    }
+    var meta =
+        ((List<Map<String, Object>>) Recorded.parsed(recording, decision).get("tool_result_meta"))
+            .getFirst();
+    assertEquals(made.id(), meta.get("id"));
+    var verdict = (Map<String, Object>) meta.get("permission_decision");
+    assertEquals(
+        List.of("accept", "config"), List.of(verdict.get("decision"), verdict.get("source")));
+    return mode + ": " + what + " ran unasked";
+  }
+
+  /**
    * A read the chat's settings deny never reaches a person: the model is told so in a failed result
    * (probe 2's 03b:14, under {@code Read(//…)}).
    */
@@ -606,7 +669,7 @@ class LiveChatTest {
       var step = LiveStream.read(line);
       assertEquals(new Step.Unreadable("r1", true), step, line.substring(0, 120));
       assertEquals(
-          List.of(new ChatItem.Unreadable(true)),
+          List.of(new ChatItem.Unreadable(true, false)),
           LiveChat.items(step, CLAUDE_CODE),
           line.substring(0, 120));
     }
@@ -731,8 +794,20 @@ class LiveChatTest {
   @Test
   void aRequestThatCannotBeReadIsShownAndRefusedAtOnce() {
     assertEquals(
-        List.of(new ChatItem.Unreadable(false)),
-        LiveChat.items(new Step.Unreadable("r1", false), CLAUDE_CODE));
+        List.of(
+            new ChatItem.Unreadable(false, false),
+            new ChatItem.Unreadable(true, false),
+            new ChatItem.Unreadable(false, true),
+            new ChatItem.Unreadable(true, true)),
+        List.of(
+                new Step.Unreadable("r1", false),
+                new Step.Unreadable("r1", true),
+                new Step.Unreadable(null, false),
+                new Step.Unreadable(null, true))
+            .stream()
+            .flatMap(step -> LiveChat.items(step, CLAUDE_CODE).stream())
+            .toList(),
+        "refused by its id, or, naming none, the turn stopped: the notice says which");
     assertEquals(
         "requestId must not be blank.",
         assertThrows(
