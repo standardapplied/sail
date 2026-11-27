@@ -205,7 +205,7 @@ actor GoldenDesk: Transport {
 
     /// How many times `route` was asked since the session last ended.
     func askedSinceTheEnd(_ route: String) -> Int? {
-        ended.map { asked[$0.asked...].count { $0.route == route } }
+        ended.map { since in asked[since.asked...].count { $0.route == route } }
     }
 
     /// From now on a proxy answers `route` with a 502 of its own; nil, nothing.

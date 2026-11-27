@@ -324,7 +324,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         welcome.checked(answer, endedOn: endedOn)
         let waited = flow.standing == nil && workspaces.asking
         if waited { workspaces.signedOut() }
-        if endedOn != nil || waited && rail.selected == .workspaces { select(.workspaces) }
+        if endedOn != nil || (waited && rail.selected == .workspaces) { select(.workspaces) }
     }
 
     /// What a person does on This Mac's page, done in Terminals: a row's Open shows its tab with
