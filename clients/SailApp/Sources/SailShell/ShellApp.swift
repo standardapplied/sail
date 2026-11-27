@@ -158,26 +158,33 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     public func windowShouldClose(_: NSWindow) -> Bool {
         window.orderOut(nil)
-        thisMac.connectFiles(away: true)
+        away(true)
         return false
     }
 
     public func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows visible: Bool) -> Bool {
         if !visible {
             window.makeKeyAndOrderFront(nil)
-            thisMac.connectFiles(away: false)
+            away(false)
         }
         return true
     }
 
-    /// Hidden (⌘H), the files are not on screen, as from the Dock; shown again, they are while
-    /// the window is up.
+    /// Hidden (⌘H), the window is not on screen, as from the Dock; shown again, it is while the
+    /// window is up.
     public func applicationDidHide(_: Notification) {
-        thisMac.connectFiles(away: true)
+        away(true)
     }
 
     public func applicationDidUnhide(_: Notification) {
-        thisMac.connectFiles(away: !window.isVisible)
+        away(!window.isVisible)
+    }
+
+    /// The window off screen or back: a workspace's files are followed, and a template being built
+    /// read and its time ticking, only while it is on screen.
+    private func away(_ away: Bool) {
+        thisMac.connectFiles(away: away)
+        workspaces.away = away
     }
 
     /// Answers AppKit's deferred terminate, and asks it again: what the quit question ends in.
@@ -359,13 +366,14 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         placeTheStrip()
     }
 
-    /// A workspace's files are followed only while on screen: not from the Dock, nor once closing.
+    /// What follows the screen does so only while the window is on it: not from the Dock, nor once
+    /// closing.
     public func windowDidMiniaturize(_: Notification) {
-        thisMac.connectFiles(away: true)
+        away(true)
     }
 
     public func windowDidDeminiaturize(_: Notification) {
-        thisMac.connectFiles(away: false)
+        away(false)
     }
 
     public func windowDidResize(_: Notification) {
@@ -566,6 +574,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
         workspaces.onSignIn = { [weak self] in self?.select(.account) }
+        workspaces.onSessionEnded = { [weak self] in self?.askWhoIsSignedIn() }
         thisMac.onRunnerTabs = { [weak self] project, name in self?.workspaces.recount(project: project, name: name) }
         thisMac.onSessions = { [weak self] in
             guard let self else { return }

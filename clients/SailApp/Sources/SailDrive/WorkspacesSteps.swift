@@ -162,6 +162,30 @@ actor GoldenDesk: Transport {
         held["DELETE /v1/projects/harbor/workspaces/\(name)"] = .zero
     }
 
+    /// From now on `project`'s template reads as the golden `name`, its project's name `project`, its
+    /// build at `step` started by `by` 4:18 ago and, when it stopped, stopped 13 s ago; the projects,
+    /// where they list it, list its template in that state, as one server says both.
+    func answerTemplate(_ project: String, as name: String, step: Int, by: String) throws {
+        let started = Date(timeIntervalSinceNow: -258), instant = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+        var exchange = try Exchange(name).altered(at: ["build", "step"], to: step).altered(at: ["build", "by"], to: by)
+        exchange = try exchange.altered(at: ["build", "started_at"], to: started.formatted(instant))
+        if String(decoding: exchange.body, as: UTF8.self).contains("\"ended_at\"") {
+            exchange = try exchange.altered(at: ["build", "ended_at"], to: started.addingTimeInterval(245).formatted(instant))
+        }
+        let said = String(decoding: exchange.body, as: UTF8.self).replacingOccurrences(of: "lighthouse", with: project).replacingOccurrences(of: "\"harbor\"", with: "\"\(project)\"")
+        answers["GET /v1/projects/\(project)/template"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: Data(said.utf8))
+        held["GET /v1/projects/\(project)/template"] = .zero
+        guard let listed = answers["GET /v1/projects"], var body = try JSONSerialization.jsonObject(with: listed.body) as? [String: Any],
+              let projects = body["projects"] as? [[String: Any]], let state = (try JSONSerialization.jsonObject(with: exchange.body) as? [String: Any])?["state"] else { return }
+        body["projects"] = projects.map { row in
+            guard row["name"] as? String == project else { return row }
+            var changed = row
+            changed["template"] = state
+            return changed
+        }
+        answers["GET /v1/projects"] = HTTPResponse(status: listed.status, headers: listed.headers, body: try JSONSerialization.data(withJSONObject: body))
+    }
+
     /// From now on `project`'s workspaces are listed as none.
     func answerNoRows(_ project: String) throws {
         let exchange = try Exchange("workspaces-three")
@@ -293,6 +317,14 @@ extension Driver {
                 return (true, "")
             } catch {
                 return (false, "no rows: \(error)")
+            }
+        }
+        if let read = step.templateRead, read.count == 4, let at = Int(read[2]) {
+            do {
+                try await GoldenDesk.shared.answerTemplate(read[0], as: read[1], step: at, by: read[3])
+                return (true, "")
+            } catch {
+                return (false, "the template's read: \(error)")
             }
         }
         if let count = step.rows {
@@ -552,7 +584,7 @@ extension Driver {
         }
         if let host = step.panelHost {
             let signedIn = WorkspacesModel.Person(shell.flow.standing)
-            pane.person = host.isEmpty ? signedIn : WorkspacesModel.Person(handle: signedIn.handle, admin: signedIn.admin, confirmed: signedIn.confirmed, controlPlane: host, creates: signedIn.creates)
+            pane.person = host.isEmpty ? signedIn : WorkspacesModel.Person(handle: signedIn.handle, admin: signedIn.admin, confirmed: signedIn.confirmed, controlPlane: host, creates: signedIn.creates, builds: signedIn.builds)
             return (!signedIn.handle.isEmpty, "Workspaces is \(signedIn.handle)'s at \(pane.person.controlPlane)")
         }
         if let title = step.chooseSession {

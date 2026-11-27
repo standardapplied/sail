@@ -354,7 +354,7 @@ import Testing
         let again = model.listAgain()
         model.listed(.failure(.unreachable("The network connection was lost.")), request: again, at: Self.at.addingTimeInterval(240))
         let page = try #require(Self.page(model))
-        #expect(page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list harbor’s workspaces", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: .list))
+        #expect(page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list harbor’s workspaces", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: true))
         #expect(page.stale && page.listedAt == Self.at && Self.table(model)?.yours.isEmpty == false, "the old list stays, dimmed")
         let recovered = model.listAgain()
         model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: recovered, at: Self.at.addingTimeInterval(300))
@@ -523,7 +523,7 @@ import Testing
         let older = model.askingProjects(), newer = model.askingProjects()
         model.projectsListed(.failure(.unreachable("lost")), request: newer)
         guard case let .shown(panel, .project(page)) = model.screen else { Issue.record("\(model.screen)"); return }
-        #expect(panel.stale && page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list your projects", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: .list))
+        #expect(panel.stale && page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list your projects", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: true))
         model.projectsListed(.success(ProjectList(projects: [], total: 0)), request: older)
         guard case .shown(_, .project) = model.screen else { Issue.record("an older answer was taken: \(model.screen)"); return }
         let again = model.askingProjects()
@@ -532,20 +532,24 @@ import Testing
         #expect(!fresh.stale && Self.page(model)?.banner == nil)
     }
 
-    /// M3: only a current template offers New Workspace; each other state says what is true.
+    /// M3: only a current template offers New Workspace; each other state says what is true: no
+    /// template says what is missing, and a build under way or failed waits for its template's read,
+    /// which draws its card (`BuildCardTests`).
     @Test(arguments: [
-        (TemplateState.missing, "demo isn’t ready yet", "demo has no template yet"),
-        (.failed, "demo’s template could not be built", "demo’s template could not be built"),
-        (.building, "demo’s template is being built", "demo’s template is being built"),
+        (TemplateState.missing, "demo has no template yet"), (.failed, "demo’s template could not be built"), (.building, "demo’s template is being built"),
     ])
-    func onlyACurrentTemplateOffersCreate(_ state: TemplateState, _ title: String, _ why: String) throws {
+    func onlyACurrentTemplateOffersCreate(_ state: TemplateState, _ why: String) throws {
         var model = WorkspacesModel(person: Self.uday)
         let first = model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "demo", containerStatus: .known(.running), template: .known(state))], total: 1)))
         model.listed(.success(WorkspaceList(project: "demo", workspaces: [])), request: try #require(first), at: Self.at)
         let page = try #require(Self.page(model))
-        guard case let .empty(empty) = page.body else { Issue.record("\(page.body)"); return }
-        #expect(!page.canCreate && page.createWhy == why && empty.title == title && empty.action == .checkAgain)
-        #expect(!empty.body.contains("about 3 s") && !page.lede.contains("Your own copies"))
+        #expect(!page.canCreate && page.createWhy == why && !page.lede.contains("Your own copies"))
+        if state == .missing {
+            guard case let .empty(empty) = page.body else { Issue.record("\(page.body)"); return }
+            #expect(empty.title == "demo isn’t ready yet" && empty.action == .checkAgain && !empty.body.contains("about 3 s"))
+        } else {
+            #expect(page.body == .loading && page.lede == "Workspaces open once the template is ready.", "\(page.body)")
+        }
         model.beginCreate()
         #expect(model.sendCreate() == nil)
     }
@@ -743,9 +747,11 @@ extension WorkspacesModelTests {
         empty.listed(.success(WorkspaceList(project: "harbor", workspaces: [])), request: try #require(none), at: Self.at)
         let retry = empty.listAgain()
         empty.listed(.failure(.unexpected(route: "GET /v1/projects/harbor/workspaces", status: 502)), request: retry, at: Self.at)
+        #expect(Self.page(empty)?.banner?.title == "Couldn’t list harbor’s workspaces" && Self.page(empty)?.body == .loading)
+        empty.templateRead("harbor", Self.answer(.template(project: "harbor"), "template-2e-building"))
         let said = try #require(Self.page(empty))
-        guard case let .empty(state) = said.body else { Issue.record("\(said.body)"); return }
-        #expect(said.banner?.title == "Couldn’t list harbor’s workspaces" && state.title == "harbor’s template is being built" && state.action == .checkAgain)
+        guard case let .build(card) = said.body else { Issue.record("\(said.body)"); return }
+        #expect(said.banner?.title == "Couldn’t list harbor’s workspaces" && card.title == "Creating harbor")
     }
 }
 
