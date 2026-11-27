@@ -205,6 +205,39 @@ import Testing
         #expect(model.panel.chosenRow == "new")
     }
 
+    /// The Ruling: a refusal in a project left survives the relist its answer asked, landing while
+    /// the person is elsewhere, and is said when they come back.
+    @Test func aRelistWhileAwayKeepsTheRefusalForTheReturn() throws {
+        var model = WorkspacesModelTests.two()
+        let pier = try WorkspacesModelTests.asks(&model, .delete(force: false), "pier", terminals: nil)
+        _ = try WorkspacesModelTests.confirms(&model, pier)
+        let demo = model.choose("demo")
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [])), request: demo, at: Self.at)
+        let answered = model.changed(.delete(force: false), "pier", project: "harbor", try WorkspacesModelTests.holdsWork("pier"))
+        let elsewhere = try #require(answered)
+        model.listed(Self.harbor(), request: elsewhere, at: Self.at)
+        let back = model.choose("harbor")
+        model.listed(Self.harbor(), request: back, at: Self.at)
+        #expect(WorkspacesModelTests.page(model)?.banner?.title.contains("holds work") == true, "harbor's relist while away took its refusal before the return")
+    }
+
+    /// The Ruling: a create answered in a project left, listed while the person is elsewhere, chooses
+    /// nothing in the project shown, though it holds a row of that name.
+    @Test func aCreateListedWhileAwayChoosesNothingInTheProjectShown() throws {
+        var model = WorkspacesModelTests.two()
+        let demo = model.choose("demo")
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [])), request: demo, at: Self.at)
+        WorkspacesModelTests.send("pier", &model)
+        let harbor = model.choose("harbor")
+        model.listed(Self.harbor(), request: harbor, at: Self.at)
+        let timings = WorkspaceTimings(cloneMs: 0, startMs: 0, readyMs: 0, totalMs: 0, readySteps: [:])
+        let made = WorkspaceCreated(project: "demo", workspace: "pier", instance: "demo-pier", owner: "uday", template: "v1", stale: false, timings: timings)
+        let createdAgain = model.created(.success(made), project: "demo")
+        let demoAgain = try #require(createdAgain)
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [WorkspaceRow(name: "pier", instance: "demo-pier", state: .known(.running), owner: "uday")])), request: demoAgain, at: Self.at)
+        #expect(WorkspacesModelTests.table(model)?.yours.first(where: \.chosen) == nil && model.panel.chosenRow == nil, "demo's created pier was chosen in harbor")
+    }
+
     /// 5: a refresh whose projects could not be listed asks no open project, which would say the one
     /// failure again under each; the next that lists them does.
     @Test func aFailedProjectsRefreshAsksNoOpenProject() throws {
@@ -248,6 +281,14 @@ import Testing
         var model = WorkspacesModel(person: Self.uday, chosen: "harbor", expanded: ["gone", "lighthouse"])
         model.projectsListed(.success(Self.two))
         #expect(model.expanded == ["harbor", "lighthouse"])
+    }
+
+    /// 4: the listing that chooses a project just created prunes the arrangement too.
+    @Test func theListingThatChoosesACreatedProjectPrunesTheOpenOnes() throws {
+        var model = WorkspacesModel(person: Self.uday, chosen: "harbor", expanded: ["gone"])
+        model.projectCreated("lighthouse")
+        let request = model.projectsListed(.success(Self.two))
+        #expect(request.flatMap(model.project(of:)) == "lighthouse" && model.expanded == ["harbor"], "open: \(model.expanded)")
     }
 
     static let keeperShown = WorkspacesModel.Workspace(name: "keeper", state: .known(.stopped), busy: nil, primary: .startAndOpen, newSession: true)

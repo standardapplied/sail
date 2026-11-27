@@ -177,10 +177,11 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         return convert(NSPoint(x: box.midX, y: box.midY), to: nil)
     }
 
-    /// Whether a row other than `row` is under the pointer, whose hover action alone then shows.
+    /// Whether a row other than `row` is under the pointer with a hover action, which alone then
+    /// shows; one with none leaves the chosen row's.
     func hovered(besides row: NSTableRowView) -> Bool {
         var found = false
-        enumerateAvailableRowViews { view, _ in found = found || view !== row && (view as? SailRowView)?.hovered == true }
+        enumerateAvailableRowViews { view, _ in found = found || view !== row && (view as? SailRowView).map { $0.hovered && $0.hoverAction } == true }
         return found
     }
 
@@ -797,6 +798,12 @@ final class SailRowView: NSTableRowView {
         }
         mark()
         needsDisplay = true
+    }
+
+    /// Its content has a hover action to offer.
+    var hoverAction: Bool {
+        guard numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell else { return false }
+        return (cell.content as? MarkedRow)?.hoverAction == true
     }
 
     /// Its content marked as the row is now: chosen, strong, and whether it offers its hover action.
@@ -1426,5 +1433,13 @@ extension SailRowView: Marked {
 /// weight while `strong` (chosen or under the pointer), its own chosen mark, and its hover action
 /// while it `offers` one: under the pointer, or chosen while no other row is.
 @MainActor package protocol MarkedRow: AnyObject {
+    /// It has a hover action: under the pointer, it takes the chosen row's place.
+    var hoverAction: Bool { get }
     func mark(chosen: Bool, strong: Bool, offers: Bool)
+}
+
+extension MarkedRow {
+    package var hoverAction: Bool {
+        false
+    }
 }

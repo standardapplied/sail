@@ -220,6 +220,10 @@ extension SidebarRowCell.Lead {
 }
 
 extension SidebarRowCell: MarkedRow {
+    package var hoverAction: Bool {
+        plus != nil
+    }
+
     package func mark(chosen: Bool, strong: Bool, offers: Bool) {
         tile?.chosen = chosen
         self.offers = offers

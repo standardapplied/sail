@@ -201,6 +201,12 @@ import Testing
         #expect(pier.cell.plus?.isHidden == false && dock.cell.plus?.isHidden == true, "two +s, or none under the pointer")
         pointed.hovered = false
         #expect(dock.cell.plus?.isHidden == false && pier.cell.plus?.isHidden == true, "the chosen row's + did not come back")
+        for id in ["harbor", "harbor\u{0}others"] {
+            let bare = try #require(try Self.cell(id, in: view.panel).row as? SailRowView)
+            bare.hovered = true
+            #expect(dock.cell.plus?.isHidden == false, "the pointer over \(id), which has no +, hid the chosen row's")
+            bare.hovered = false
+        }
         try NewSessionPanelTests.press(dock.cell.plus)
         try #require(await RunnerTabTests.until { view.newSession.isOpen }, "the + opened nothing")
         let held = try #require(view.panel.plus("harbor", "dock") as? SailButton, "the open popover's + is not shown")
@@ -241,6 +247,32 @@ import Testing
         model.listed(.success(WorkspaceList(project: "lighthouse", workspaces: [row("beacon", "lighthouse", .running, "uday")])), request: opened, at: at)
         panel.render(model.panel)
         #expect(panel.list.fills == fills && panel.list.appliedRows == made + 1, "a shut project's answer remade rows")
+    }
+
+    /// m2: a change of the chosen workspace's row leaves the panel where the person scrolled it, the
+    /// row still chosen.
+    @Test func aStopOnTheChosenRowKeepsTheScroll() throws {
+        let row = { (name: String, state: WorkspaceState, owner: String) in WorkspaceRow(name: name, instance: "harbor-\(name)", state: .known(state), owner: owner) }
+        var model = WorkspacesModel(person: WorkspacesViewTests.uday, chosen: "harbor")
+        let ready = ["harbor", "lighthouse", "demo"].map { ProjectSummary(name: $0, containerStatus: .known(.running), template: .known(.ready)) }
+        let listed = model.projectsListed(.success(ProjectList(projects: ready, total: 3)))
+        let harbor = [row("dock", .running, "uday"), row("pier", .stopped, "uday"), row("quay", .running, "ana")]
+        model.listed(.success(WorkspaceList(project: "harbor", workspaces: harbor)), request: try #require(listed), at: Date(timeIntervalSince1970: 1_800_000_000))
+        model.chooseRow("dock")
+        let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 160), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        window.contentView = panel
+        panel.render(model.panel)
+        panel.layoutSubtreeIfNeeded()
+        let clip = panel.scroll.contentView, room = Double(panel.list.frame.height) - Double(clip.bounds.height)
+        try #require(room > 60, "the rows fit the panel: nothing to scroll")
+        clip.scroll(to: NSPoint(x: 0, y: room))
+        panel.scroll.reflectScrolledClipView(clip)
+        let scrolled = Double(clip.bounds.origin.y)
+        #expect(model.ask(.stop, "dock", terminals: 0) != nil)
+        panel.render(model.panel)
+        #expect(panel.list.chosen == "harbor/dock" && Double(clip.bounds.origin.y) == scrolled, "the stop left \(panel.list.chosen ?? "none") chosen, scrolled from \(scrolled) to \(clip.bounds.origin.y)")
     }
 
     /// 4: a project no longer listed is no longer kept open.
