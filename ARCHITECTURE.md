@@ -4499,8 +4499,8 @@ with its process. Every route declares Enter a workspace and is decided on the c
 its opener alone: any other caller, an admin included, and an id of no chat, are `404 not_found`
 "There is no chat <id> of yours here.", so an id grants nothing. Every item is logged
 (`chat_items`) before it is read; text is gathered over `LiveMembers.DELTA_WINDOW` into one item a
-block. A request is held, never answered for the person; after five minutes unanswered its turn is
-stopped (`interrupt`), saying so, and the process kept; a turn that does not stop five minutes
+block. A request is held until its person answers it or the harness withdraws it, however long that
+takes (below); a turn Sail asked to stop that has not stopped `ChatTiming.stopBound` (five minutes)
 later has its process ended. A request the harness's reader could not read whole is refused at
 once by its id, or, naming none, the turn is stopped. The sweep (every 60 seconds) erases chats
 ended more than 30 days ago, asks again after processes left over, ends a process whose chat was
@@ -4510,6 +4510,38 @@ and a turn it begins itself after is never cut. `chat_sessions` and `chat_items`
 never synced; a chat goes with its opener (the roster's cascade), its workspace
 (`WorkspaceDoors.delete`, and the command line's) and its project (`project destroy`, whether or
 not its container was left, and `Erasure`).
+
+**Answering a chat's agent** (`ChatAnswers`, reached through `ChatHost`'s one seam: the chat's lock
+and the process this sail holds for it, `live.get`, never `holder`, so none of its routes starts a
+process or waits on one). Each process holds every request a person can answer (a `permission`,
+`question` or `plan` item) as its whole step, input and the harness's own suggestions included,
+keyed by its id under the process's monitor, until it is answered, withdrawn, its turn ends or the
+process ends; an `unreadable` request is never held. `POST /v1/sessions/{id}/chat/requests/{request}`
+`{"decision", "message", "answers"}` (`allow`, `allow_always`, `deny`, `answer`; no other field)
+takes the held step out, logs `answered {request, decision, message?, answers?, by}` and only then
+writes one `control_response` (`LiveChat.reply`), and answers `{"seq"}`: an allow hands back the
+step's own input, `allow_always` its own `permission_suggestions` exactly and only when its item
+offers an `always`, a denial the person's words untrimmed (at most `CONTENT_CODE_POINTS`, else "The
+person did not allow this."), and an answer one per question by its exact text, labels of its own
+choices joined by `", "` as Claude Code reads them, or the person's own words (`chat-probe5` 02, 03).
+A request this sail's process does not hold is refused from what the log says of it
+(`ChatLog.about`): never asked here, an `unreadable` one included, `404 not_found`; answered,
+`409 request_answered` "You answered this at HH:MM:SS: <decision>."; otherwise, as when its process
+is ending, no longer read or its turn being stopped, `409 request_withdrawn`. Claude Code drops a
+second answer and one to a request it cancelled without a word (`chat-probe5` 04, 05), so this
+refusal is the person's only signal. A write the process does not take is said in the cut of the
+turn ("…did not get your answer…"), and `ChatLog.open` counts `answered` as closed, so a request is
+read pending, then answered or withdrawn, never both: a withdrawal the harness sends for a request
+already answered is not logged. `POST /v1/sessions/{id}/chat:interrupt` writes one interrupt while a
+turn is open on a process that takes it and answers `{"stopping": true}`, again while that stop is in
+flight with nothing written, and `{"stopping": false}` with no turn or no process. `PUT
+/v1/sessions/{id}/chat/mode` `{"mode"}` takes only a chat mode (`Harness.Mode.named`, so never
+`bypassPermissions`, 422) and only between turns (`409 turn_open`): with a process that takes it, it
+logs `mode_set {mode, request, by}` and writes `set_permission_mode` naming that request, which the
+harness answers with `mode_changed` or a `refused` naming it (`chat-probe5` 01); with none, or one
+ending, it logs `mode_set {mode, by}` and keeps the mode the next start launches in, and a process
+that is ending no longer sets the mode in force. Only an answer writes an allow: no time, restart,
+error or process end does.
 
 What a command the agent runs can read, measured with fake keys on Claude Code 2.1.327 (its Bash
 tool's `env`, against a stand-in API) and Codex 0.170: a run's key, in `ANTHROPIC_API_KEY`, or an
