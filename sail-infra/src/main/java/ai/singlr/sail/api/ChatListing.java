@@ -40,6 +40,12 @@ final class ChatListing {
   private static final List<String> ENDINGS =
       List.of(FAILED, ChatWire.kind(ChatItem.Interrupted.class), TURN_ENDED);
 
+  /**
+   * What a log the listing only reads wakes when it logs, which it never does: a hint and nothing
+   * more, so no reader is woken.
+   */
+  private static final Runnable WAKES_NO_ONE = Thread::onSpinWait;
+
   /** Where a chat stands, as a person is shown it. */
   enum State {
     ENDED,
@@ -117,7 +123,7 @@ final class ChatListing {
       return State.ENDED;
     }
     if (chat.turnOpen()) {
-      return new ChatLog(store, chat.id(), timing, () -> {}).open().requests().isEmpty()
+      return new ChatLog(store, chat.id(), timing, WAKES_NO_ONE).open().requests().isEmpty()
           ? State.WORKING
           : State.NEEDS_YOU;
     }

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.ChatStore;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -210,6 +211,28 @@ class ChatListingTest {
         "the oldest is past the listing, not gone");
   }
 
+  /** I1: terminals and chats are one list, newest first, then by name, whatever the form. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void terminalsAndChatsAreOneListNewestFirstThenByName() {
+    var session = bench.samsChat();
+    var at = bench.store.find(session).orElseThrow().createdAt();
+
+    var listed =
+        new WorkspaceSessionsResponse(
+                List.of(
+                    terminal("app-older", at.minusSeconds(60)),
+                    terminal("zz-tied", at),
+                    terminal("00-tied", at)),
+                as("sam", () -> listing.of("acme", "try")))
+            .toMap();
+
+    assertEquals(
+        List.of("00-tied", session, "zz-tied", "app-older"),
+        ((List<?>) listed.get("sessions"))
+            .stream().map(row -> ((Map<?, ?>) row).get("name")).toList());
+  }
+
   /** The row a client reads: its id as its name, its form, state, opener, agent and start. */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
@@ -269,6 +292,11 @@ class ChatListingTest {
   private static Map<String, Object> only(List<Map<String, Object>> rows) {
     assertEquals(1, rows.size(), rows.toString());
     return rows.getFirst();
+  }
+
+  private static WorkspaceSessionsResponse.Session terminal(String name, Instant at) {
+    return new WorkspaceSessionsResponse.Session(
+        name, true, 0, "", "sam", List.of(), PtyMessage.Agent.NONE, at, null);
   }
 
   private static ChatStore.Chat chat(String id, String opener, String workspace, Instant at) {
