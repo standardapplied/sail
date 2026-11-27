@@ -83,9 +83,28 @@ public final class AccountFlow {
         return .signedIn(handle: whoami?.fde ?? standing.fde, address: standing.controlPlane.named, whoami: whoami, unreachable: unreachable, refreshing: checks > 0)
     }
 
-    /// The API as the person signed in, nil when no one is or the vault cannot say.
+    /// The API as the person signed in, nil when no one is or the vault cannot say. Whichever of its
+    /// calls finds the session ended has who is signed in asked (``sessionEnded(since:)``).
     func client() -> SailClient? {
-        standing.flatMap { try? account.client(at: $0.controlPlane) }
+        guard let standing else { return nil }
+        let seen = shown
+        return try? account.client(at: standing.controlPlane) { [weak self] in
+            Task { @MainActor in self?.sessionEnded(since: seen) }
+        }
+    }
+
+    /// The check a call that found the session ended asked: what a test awaits.
+    package private(set) var ending: Task<Void, Never>?
+
+    /// A call asked with the sign-in shown `seen`-th found the session ended: who is signed in is
+    /// asked, once however many calls found it together, and never for a sign-in shown since. The
+    /// check's answer goes where every check's goes: an ended session to the welcome.
+    private func sessionEnded(since seen: Int) {
+        guard seen == shown, ending == nil else { return }
+        ending = Task {
+            await refresh()
+            ending = nil
+        }
     }
 
     /// Asks the server who this Mac is signed in as at the control plane it last reached, when it

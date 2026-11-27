@@ -46,8 +46,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     package private(set) var keys = AccountPage.Answered<KeyLists>()
     /// Why a removal of a row was refused, by the row's id, said under it.
     package private(set) var refusals: [String: [String]] = [:]
-    /// The groups' last load; a person's last action, or the hand-over to the check: what a test
-    /// awaits.
+    /// The groups' last load and a person's last action: what a test awaits.
     package private(set) var loading: Task<Void, Never>?
     package private(set) var acting: Task<Void, Never>?
     /// Told each time a group draws an answer: what a test awaits of one group alone.
@@ -257,25 +256,15 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         }
     }
 
-    /// A group's answer, drawn when it is the latest load's, unless it ``ends(_:)`` the session.
+    /// A group's answer, drawn when it is the latest load's.
     private func take<Value>(
         _ group: ReferenceWritableKeyPath<AccountPane, AccountPage.Answered<Value>>, in load: (number: Int, era: Int), _ work: @Sendable () async throws(SailError) -> Value
     ) async {
         let answer = await Self.result(work)
         guard isLatest(load) else { return }
-        if case let .failure(error) = answer, ends(error) { return }
         self[keyPath: group].take(answer, at: place)
         show()
         onDrawn()
-    }
-
-    /// Whether `error` finds the session ended. Then nothing of it is said where it happened: the
-    /// check is asked at once, in a task of its own that neither a hide nor a new load stops, and
-    /// says so where every check does.
-    private func ends(_ error: SailError) -> Bool {
-        guard flow.standing != nil, AccountRefusal.ends(error) else { return false }
-        acting = Task { [flow] in await flow.refresh() }
-        return true
     }
 
     private static func result<Value>(_ work: () async throws(SailError) -> Value) async -> Result<Value, SailError> {
@@ -334,7 +323,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     /// Remove on a row asks first, Cancel the default; confirmed, `remove` is sent, the row said as
     /// being removed and taking no second Remove until it answers, and its refusal said under the
-    /// row, the row kept, unless it ``ends(_:)`` the session. Either way the groups are asked again.
+    /// row, the row kept. Either way the groups are asked again.
     private func ask(_ asked: AccountPage.Question, row id: String, remove: @escaping @Sendable (SailClient) async throws(SailError) -> Void) {
         guard let window, question == nil, loginSheet == nil, !removing.contains(id), flow.client() != nil else { return }
         let sheet = Sheet(title: asked.title, body: asked.body, confirm: "Remove", kind: .destructive, look: look, titleFont: titleFont)
@@ -352,7 +341,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
                 guard let self, era == self.era else { return }
                 removing.remove(id)
                 load()
-                if case let .failure(error) = answer, !ends(error) { refusals[id] = lines(error) }
+                if case let .failure(error) = answer { refusals[id] = lines(error) }
                 show()
             }
         }

@@ -318,12 +318,13 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// A check found no one, or could not say who: the wait at launch ends.
+    /// A check found no one, or could not say who: the wait at launch ends. A session it found
+    /// ended takes the person to the welcome that says so, from whichever section they were in.
     private func checked(_ answer: Result<SignedIn?, AccountRefusal>, endedOn: Date?) {
         welcome.checked(answer, endedOn: endedOn)
-        guard flow.standing == nil, workspaces.asking else { return }
-        workspaces.signedOut()
-        if rail.selected == .workspaces { select(.workspaces) }
+        let waited = flow.standing == nil && workspaces.asking
+        if waited { workspaces.signedOut() }
+        if endedOn != nil || waited && rail.selected == .workspaces { select(.workspaces) }
     }
 
     /// What a person does on This Mac's page, done in Terminals: a row's Open shows its tab with
@@ -574,7 +575,6 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
         workspaces.onSignIn = { [weak self] in self?.select(.account) }
-        workspaces.onSessionEnded = { [weak self] in self?.askWhoIsSignedIn() }
         thisMac.onRunnerTabs = { [weak self] project, name in self?.workspaces.recount(project: project, name: name) }
         thisMac.onSessions = { [weak self] in
             guard let self else { return }

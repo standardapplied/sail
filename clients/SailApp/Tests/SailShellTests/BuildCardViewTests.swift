@@ -144,8 +144,8 @@ import Testing
     }
 
     /// The shell tells Workspaces when the window goes off screen and comes back, wherever it tells
-    /// the files; and an ended session Workspaces finds goes to the shell's own check.
-    @Test func theShellTellsWorkspacesTheWindowAndTheSession() async throws {
+    /// the files.
+    @Test func theShellTellsWorkspacesTheWindow() async throws {
         let desk = try Desk(["whoami"])
         let shell = try WelcomeViewTests.shell(desk, defaults: WelcomeViewTests.reached(), vault: OneSession(fde: "uday", lasts: AccountPaneTests.month))
         defer { shell.window.orderOut(nil) }
@@ -162,22 +162,17 @@ import Testing
         shell.applicationDidUnhide(Notification(name: NSApplication.didUnhideNotification))
         #expect(!shell.workspaces.away, "the app shown again")
         await shell.checking?.value
-        let checks = await desk.asked.filter { $0 == "GET /v1/whoami" }.count
-        shell.workspaces.onSessionEnded()
-        await shell.checking?.value
-        #expect(await desk.asked.filter { $0 == "GET /v1/whoami" }.count == checks + 1, "the ended session was not checked")
     }
 
     /// A read the server refused stops the reads where it is, never said as no answer: a refusal in
     /// the server's words on the card; a project gone lists the projects again, so the page follows
-    /// what is true; an ended session is handed to the check that says it, nothing said on the card.
+    /// what is true; an ended session says nothing on the card, and the client tells it once.
     @Test(arguments: ["refusal-forbidden", "refusal-project-not-in-catalog-sessions", "refusal-missing-bearer-token"])
     func aRefusedReadStopsTheReads(_ golden: String) async throws {
         let pauses = Pauses()
-        let (view, window, desk) = try await Self.section("building", "template-2e-building", pauses)
+        let ended = Told()
+        let (view, window, desk) = try await Self.section("building", "template-2e-building", pauses, ended: ended)
         defer { window.orderOut(nil) }
-        var ended = 0
-        view.onSessionEnded = { ended += 1 }
         #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && pauses.count == 1 }, "\(view.text)")
         let refusal = try Exchange(golden)
         await desk.answer(Exchange(method: "GET", path: "/v1/projects/lighthouse/template", status: refusal.status, body: refusal.body))
@@ -192,28 +187,27 @@ import Testing
             #expect(await RunnerTabTests.until { Self.row(view) == nil && !view.text.contains("Creating lighthouse") }, "the page kept a project gone: \(view.text)")
             #expect(await desk.asked.filter { $0 == "GET /v1/projects" }.count == lists + 1)
         default:
-            #expect(await RunnerTabTests.until { ended == 1 }, "the ended session was not handed over")
-            #expect(view.text.contains("Creating lighthouse") && !view.text.contains("Missing bearer token"), "\(view.text)")
+            #expect(await RunnerTabTests.until { ended.times == 1 }, "the ended session was not told")
+            #expect(view.text.contains("Creating lighthouse") && !view.text.lowercased().contains("bearer"), "\(view.text)")
         }
         let reads = await Self.reads(desk)
         #expect(!view.text.contains("No answer just now") && pauses.count == 1 && reads == 2, "read again after a refusal: \(view.text)")
     }
 
-    /// A first read that finds the session ended says nothing and hands it over; the check finding it
-    /// holding shows the section again, which reads the template once more, so the page does not wait
-    /// on the loading frame for ever.
+    /// A first read that finds the session ended says nothing, and the client tells it; the check
+    /// finding it holding shows the section again, which reads the template once more, so the page
+    /// does not wait on the loading frame for ever.
     @Test func aFirstReadWithAnEndedSessionIsReadOnceTheSectionIsShownAgain() async throws {
         let pauses = Pauses()
-        let (view, window, desk) = try await Self.section("building", "refusal-missing-bearer-token", pauses)
+        let ended = Told()
+        let (view, window, desk) = try await Self.section("building", "refusal-missing-bearer-token", pauses, ended: ended)
         defer { window.orderOut(nil) }
-        var ended = 0
-        view.onSessionEnded = { ended += 1 }
-        #expect(await RunnerTabTests.until { ended == 1 }, "the ended session was not handed over: \(view.text)")
+        #expect(await RunnerTabTests.until { ended.times == 1 }, "the ended session was not told: \(view.text)")
         #expect(!view.text.lowercased().contains("bearer") && !view.text.contains("Creating lighthouse") && pauses.count == 0, "\(view.text)")
         await desk.answer(try Self.template("template-2e-building"))
         view.shown()
         #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && pauses.count == 1 }, "not read again once shown: \(view.text)")
-        #expect(await Self.reads(desk) == 2 && ended == 1)
+        #expect(await Self.reads(desk) == 2 && ended.times == 1)
     }
 
     /// At the least window a stopped build's Build Again stands inside the card's frame, in view with
@@ -246,7 +240,7 @@ import Testing
 
     /// The section with lighthouse listed as `state` (and harbor, ready), its template read as `golden`,
     /// each pause between reads held by `pauses`.
-    static func section(_ state: String, _ golden: String, _ pauses: Pauses) async throws -> (WorkspacesView, KeyWindow, Desk) {
+    static func section(_ state: String, _ golden: String, _ pauses: Pauses, ended: Told = Told()) async throws -> (WorkspacesView, KeyWindow, Desk) {
         let desk = try Desk([])
         await desk.answer(try Exchange("projects").altered(at: ["projects"], to: [["name": "harbor", "container_status": "running", "template": "ready"], ["name": "lighthouse", "container_status": "not_created", "template": state]]))
         let none = try Exchange("workspaces-none")
@@ -254,7 +248,7 @@ import Testing
             await desk.answer(Exchange(method: "GET", path: "/v1/projects/\(project)/workspaces", status: none.status, body: none.body))
         }
         await desk.answer(try Self.template(golden))
-        let (view, window) = try WorkspacesViewTests.view(desk, chosenLast: "lighthouse")
+        let (view, window) = try WorkspacesViewTests.view(desk, chosenLast: "lighthouse", ended: ended)
         view.pause = { try await pauses.pause($0) }
         view.person = Self.dana
         view.shown()
@@ -318,20 +312,19 @@ import Testing
         #expect(await Self.reads(desk) == 3, "read after signing out")
     }
 
-    /// Build Again with a session that has ended says nothing on the card: the ended session is
-    /// handed to the check that says it.
+    /// Build Again with a session that has ended says nothing on the card, and the client tells it
+    /// once.
     @Test func buildAgainWithAnEndedSessionHandsItOver() async throws {
         let pauses = Pauses()
-        let (view, window, desk) = try await Self.section("failed", "template-2h-failed", pauses)
+        let ended = Told()
+        let (view, window, desk) = try await Self.section("failed", "template-2h-failed", pauses, ended: ended)
         defer { window.orderOut(nil) }
-        var ended = 0
-        view.onSessionEnded = { ended += 1 }
         #expect(await RunnerTabTests.until { view.text.contains("lighthouse’s template did not finish") }, "\(view.text)")
         let joined = try Exchange("template-2f-joined"), refusal = try Exchange("refusal-missing-bearer-token")
         await desk.answer(Exchange(method: joined.method, path: joined.path, status: refusal.status, body: refusal.body))
         let again = view.project.buildCard.again
         _ = again.sendAction(again.action, to: again.target)
-        #expect(await RunnerTabTests.until { ended == 1 }, "the ended session was not handed over: \(view.text)")
+        #expect(await RunnerTabTests.until { ended.times == 1 && !view.busy }, "the ended session was not told: \(view.text)")
         #expect(!view.text.lowercased().contains("bearer") && view.text.contains("lighthouse’s template did not finish"), "\(view.text)")
     }
 
