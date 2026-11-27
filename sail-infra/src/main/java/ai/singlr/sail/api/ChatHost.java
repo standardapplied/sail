@@ -244,30 +244,22 @@ public final class ChatHost implements AutoCloseable {
   /**
    * Ends the caller's chat {@code session}: it is marked ended, and its process, if one holds it,
    * ended; its log stays readable for {@link #RETENTION}, and its folder in the workspace goes once
-   * its process is known gone. It is marked under the chat's lock, so a process starting for it is
-   * found and ended; the end is waited for outside it.
+   * its process is known gone, or now when none holds it nor may. It is marked under the chat's
+   * lock, so a process starting for it is found and ended; the end is waited for outside it.
    */
   public void end(String session) {
     yours(session);
-    var process = markEnded(session);
-    arrived(session);
-    if (process != null) {
-      process.end().endChat(timing.grace().afterInt());
-    }
-  }
-
-  /**
-   * Marks chat {@code session} ended under its lock, and returns the process that holds it; when
-   * none does, nor may, its folder goes now.
-   */
-  private ChatProcess markEnded(String session) {
+    ChatProcess process;
     synchronized (lock(session)) {
       store.ended(session, timing.clock().get());
-      var process = live.get(session);
+      process = live.get(session);
       if (process == null) {
         store.find(session).filter(chat -> !chat.launched()).ifPresent(launch::forget);
       }
-      return process;
+    }
+    arrived(session);
+    if (process != null) {
+      process.end().endChat(timing.grace().afterInt());
     }
   }
 
