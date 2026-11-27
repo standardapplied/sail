@@ -4522,7 +4522,9 @@ logs `answered {request, decision, message?, answers?, by}`, takes the held step
 writes one `control_response` (`LiveReply.reply`), and answers `{"seq"}` (an answer whose log write
 fails leaves the step held, so its retry is the one): an allow hands back the
 step's own input, `allow_always` its own `permission_suggestions` exactly and only when its item
-offers an `always`, a denial the person's words untrimmed (at most `CONTENT_CODE_POINTS`, else "The
+offers an `always` (never for a Bash rule whose text holds `>` or `<`, inside quotes too: Claude
+Code 2.1.332 asked again for a command writing through `>` with its exact rule kept, in its own
+process and in one that read the rule at start, `chat-probe6`), a denial the person's words untrimmed (at most `CONTENT_CODE_POINTS`, else "The
 person did not allow this."), and an answer one per question by its exact text, labels of its own
 choices joined by `", "` as Claude Code reads them, or the person's own words (`chat-probe5` 02, 03).
 A request this sail's process does not hold is refused from what the log says of it
