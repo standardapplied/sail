@@ -32,7 +32,7 @@ public enum Role: String, CaseIterable, Sendable {
 }
 
 public enum Capability: String, CaseIterable, Sendable {
-    case read, write, admin
+    case read, write, admin, build
 }
 
 extension Endpoint where Response == Whoami {

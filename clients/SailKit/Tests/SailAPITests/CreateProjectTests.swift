@@ -20,15 +20,15 @@ import Testing
         return model
     }
 
-    /// No project yet, to those whose `whoami` names `write` and `admin` (who may also build its
+    /// No project yet, to those whose `whoami` names `write` and `build` (who may also build its
     /// template): the panel says there is none under the control plane's head, counting none, and the
-    /// main area says what a project is, offers Create Project and names the host. Everyone else,
+    /// main area says what a project is, offers Create Project and names the host and their role. Everyone else,
     /// whatever their role is called or while it is not confirmed, lists only what is granted to
     /// them, so both say none is open to them yet, with Check Again.
     @Test func whoIsOfferedCreateProject() throws {
         for (role, capabilities, creates) in [
-            (Role.admin, [Capability.read, .write, .admin], true), (.member, [.read, .write, .admin], true),
-            (.admin, [.read, .write], false), (.member, [.read, .write], false), (.viewer, [.read], false),
+            (Role.admin, [Capability.read, .write, .admin, .build], true), (.member, [.read, .write, .build], true),
+            (.admin, [.read, .write, .admin], false), (.member, [.read, .write], false), (.viewer, [.read], false),
         ] as [(Role, [Capability], Bool)] {
             let model = Self.none(try Self.person(role, capabilities))
             guard case let .shown(panel, .noProjects(empty)) = model.screen else { Issue.record("no empty state: \(model.screen)"); return }
@@ -38,7 +38,7 @@ import Testing
             #expect(empty.action == (creates ? .createProject : .checkAgain), "\(role) \(capabilities)")
             guard creates else { continue }
             #expect(empty.body == "A project holds the repositories, agents and size that every workspace starts from. Create one, and Sail builds its template on the runner.")
-            #expect(empty.line == "sail.example.com · you can create projects as an admin")
+            #expect(empty.line == "sail.example.com · you can create projects as \(role == .admin ? "an admin" : "a member")", "\(role)")
         }
         let plane = try ControlPlane(address: "https://sail.example.com")
         let unconfirmed = WorkspacesModel.Person(SignedIn(controlPlane: plane, fde: "mara", until: .distantFuture, whoami: .failure(AccountRefusal(.unreachable, at: plane))))
@@ -50,7 +50,7 @@ import Testing
     /// With projects listed, Create Project is offered from the panel by the same rule; with none,
     /// only while This Mac stands where the main area would offer it.
     @Test func thePanelOffersCreateProjectByTheSameRule() throws {
-        for (capabilities, offered) in [([Capability.read, .write, .admin], true), ([.read, .write], false), ([.read], false)] {
+        for (capabilities, offered) in [([Capability.read, .write, .build], true), ([.read, .write, .admin], false), ([.read, .build], false), ([.read], false)] {
             var model = WorkspacesModel(person: try Self.person(.member, capabilities))
             #expect(!model.panel.creates, "offered before any project was listed")
             model.chooseThisMac()
@@ -177,6 +177,32 @@ import Testing
         #expect(sheet.nameRefused == nil)
     }
 
+    /// A refusal naming repositories' paths stands under each path it names, the server counting only
+    /// the repositories sent (those with a URL), until that row is edited; an invalid name stands
+    /// under the name.
+    @Test func aRefusalNamingAPathStandsUnderIt() throws {
+        var sheet = NewProject(agents: Self.harnesses)
+        sheet.named("jetty")
+        sheet.typeURL("https://github.com/harbor/app.git", row: 0)
+        sheet.addRepo()
+        sheet.addRepo()
+        sheet.typeURL("https://github.com/harbor/site.git", row: 2)
+        sheet.typePath("app", row: 2)
+        let sent = sheet.send()
+        #expect(sent?.repos.map(\.path) == ["app", "app"])
+        sheet.refuse(SailJSON.refusal(response(try Exchange("refusal-project-repos-same-path")), route: "POST /v1/projects"), at: "sail.example.com")
+        let said = "More than one repository is cloned to app: give each its own path."
+        #expect(sheet.pathsRefused == [0: NewProject.Refused(said: said, remedy: nil), 2: NewProject.Refused(said: said, remedy: nil)])
+        #expect(sheet.refused.isEmpty && sheet.nameRefused == nil)
+        sheet.typePath("site", row: 2)
+        #expect(sheet.pathsRefused.keys.sorted() == [0], "an edited path kept its refusal")
+        sheet.removeRepo(1)
+        #expect(sheet.pathsRefused.isEmpty, "a refusal stayed on a row moved")
+        _ = sheet.send()
+        sheet.refuse(SailJSON.refusal(response(try Exchange("refusal-project-name-invalid")), route: "POST /v1/projects"), at: "sail.example.com")
+        #expect(sheet.nameRefused?.said == "Invalid project name: 'Harbor Docks'. Must match [a-z0-9][a-z0-9-]*, max 63 characters." && sheet.refused.isEmpty)
+    }
+
     /// A refusal that names no field of the sheet stands over its foot, in the server's words, until
     /// the next edit; one that could not reach the server says so.
     @Test func aRefusalNamingNoFieldStandsOverTheFoot() throws {
@@ -202,7 +228,7 @@ import Testing
     /// never a command; a build that got no answer is said with Try Again, which asks it again,
     /// until the build is asked.
     @Test func theCreatedProjectIsChosenOnceListed() throws {
-        var model = Self.none(try Self.person(.admin, [.read, .write, .admin]))
+        var model = Self.none(try Self.person(.admin, [.read, .write, .admin, .build]))
         model.chooseThisMac()
         model.projectCreated("lighthouse")
         let listed = ProjectList(projects: ["harbor", "lighthouse"].map { ProjectSummary(name: $0, containerStatus: .known(.notCreated), template: .known(.missing)) }, total: 2)

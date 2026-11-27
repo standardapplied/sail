@@ -26,8 +26,8 @@ public struct WorkspacesModel: Sendable {
         public let confirmed: Bool
         public let controlPlane: String
         /// Their `whoami` names the write capability, which a project's create needs (the journal
-        /// decides it), and the admin one, whose holders alone may build its template (`Policy`'s
-        /// Build template row): a project no one here could build would go nowhere.
+        /// decides it), and the build one, which its template's build needs: a project no one here
+        /// could build would go nowhere.
         public let creates: Bool
 
         public init(handle: String, admin: Bool, confirmed: Bool, controlPlane: String, creates: Bool = false) {
@@ -49,7 +49,7 @@ public struct WorkspacesModel: Sendable {
             let whoami = signedIn.flatMap { try? $0.whoami.get() }
             self.init(
                 handle: whoami?.fde ?? signedIn?.fde ?? "", admin: whoami?.role == .known(.admin), confirmed: whoami != nil,
-                controlPlane: signedIn?.controlPlane.description ?? "", creates: whoami.map { [Open<Capability>.known(.write), .known(.admin)].allSatisfy($0.capabilities.contains) } ?? false
+                controlPlane: signedIn?.controlPlane.description ?? "", creates: whoami.map { [Open<Capability>.known(.write), .known(.build)].allSatisfy($0.capabilities.contains) } ?? false
             )
         }
     }
@@ -711,7 +711,7 @@ public struct WorkspacesModel: Sendable {
                 return .shown(panel, .noProjects(Empty(
                     title: "Create your first project",
                     body: "A project holds the repositories, agents and size that every workspace starts from. Create one, and Sail builds its template on the runner.",
-                    line: "\(person.named) · you can create projects as an admin", action: .createProject, missing: false
+                    line: "\(person.named) · you can create projects as \(person.admin ? "an admin" : "a member")", action: .createProject, missing: false
                 )))
             }
             let body = person.admin

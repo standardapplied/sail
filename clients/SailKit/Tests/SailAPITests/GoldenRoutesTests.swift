@@ -151,7 +151,7 @@ func answer<Response>(
         #expect(whoami.displayName == "Uday")
         #expect(whoami.email == "uday@example.com")
         #expect(whoami.role == .known(.admin))
-        #expect(whoami.capabilities == [.known(.read), .known(.write), .known(.admin), .unknown("build")])
+        #expect(whoami.capabilities == [.known(.read), .known(.write), .known(.admin), .known(.build)])
     }
 
     @Test func aTerminalTicketReadsTheTicketWhereToPresentItAndWhenItLapses() throws {

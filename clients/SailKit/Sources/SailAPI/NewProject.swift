@@ -82,6 +82,9 @@ public struct NewProject: Equatable, Sendable {
     public private(set) var underWay = false
     /// The server's refusal of the name, said under it until the name is edited.
     public private(set) var nameRefused: Refused?
+    /// The server's refusals of repositories' paths, by row, each said under its path until that
+    /// row is edited, or any row removed.
+    public private(set) var pathsRefused: [Int: Refused] = [:]
     /// A refusal that names no field of the sheet, said over its foot, a line each, until an edit.
     public private(set) var refused: [String] = []
 
@@ -121,6 +124,7 @@ public struct NewProject: Equatable, Sendable {
         guard repos.indices.contains(row) else { return }
         repos[row].url = url
         if !repos[row].pathTyped { repos[row].path = free(Self.path(of: url), row: row) }
+        pathsRefused[row] = nil
         refused = []
     }
 
@@ -136,6 +140,7 @@ public struct NewProject: Equatable, Sendable {
         guard repos.indices.contains(row) else { return }
         repos[row].path = path
         repos[row].pathTyped = true
+        pathsRefused[row] = nil
         refused = []
     }
 
@@ -146,6 +151,7 @@ public struct NewProject: Equatable, Sendable {
     public mutating func removeRepo(_ row: Int) {
         guard repos.indices.contains(row) else { return }
         repos.remove(at: row)
+        pathsRefused = [:]
         refused = []
     }
 
@@ -198,23 +204,30 @@ public struct NewProject: Equatable, Sendable {
         guard creates else { return nil }
         underWay = true
         nameRefused = nil
+        pathsRefused = [:]
         refused = []
         return definition
     }
 
-    /// The create refused: a refusal naming the name stands under it, in the server's words, with
-    /// what to do; any other stands over the foot. What was typed stays.
+    /// The create refused: a refusal naming the name, or a repository's path (`repos[i].path`, the
+    /// i-th repository sent), stands under it, in the server's words, with what to do; any other
+    /// stands over the foot. What was typed stays.
     public mutating func refuse(_ error: SailError, at address: String) {
         underWay = false
         guard case let .refused(refusal) = error else {
             refused = [error.said(at: address)]
             return
         }
-        if let name = Self.nameRefusal(error) {
-            nameRefused = name
-        } else {
-            refused = refusal.lines
+        let sent = repos.indices.filter { !repos[$0].url.trimmingCharacters(in: .whitespaces).isEmpty }
+        for field in refusal.fieldErrors {
+            let said = Refused(said: field.message, remedy: Said.fix(refusal.remedy, otherwise: refusal.action))
+            if field.field == "name" {
+                nameRefused = said
+            } else if field.field.hasPrefix("repos["), field.field.hasSuffix("].path"), let at = Int(field.field.dropFirst(6).dropLast(6)), sent.indices.contains(at) {
+                pathsRefused[sent[at]] = said
+            }
         }
+        if nameRefused == nil, pathsRefused.isEmpty { refused = refusal.lines }
     }
 
     /// The server's refusal of the name, where `error` is one: its sentence and what to do.

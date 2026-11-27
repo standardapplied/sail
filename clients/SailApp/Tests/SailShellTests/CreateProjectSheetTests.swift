@@ -124,6 +124,28 @@ import Testing
         #expect(WorkspacesReachTests.outOfReach(in: try #require(sheet.contentView)) == [])
     }
 
+    /// Two repositories at one path: the server's refusal stands under each path, the first holding
+    /// the keys, nothing over the foot; editing a path takes its refusal away.
+    @Test func aRefusalNamingAPathStandsUnderIt() async throws {
+        let sheet = try Self.sheet(width: Self.least, room: 560)
+        defer { sheet.orderOut(nil) }
+        let refused = try Self.answer(.createProject(Self.harbor), "refusal-project-repos-same-path")
+        sheet.send = { _ in refused }
+        Self.type("jetty", into: sheet.name, of: sheet)
+        Self.type("https://github.com/harbor/app.git", into: sheet.urls[0], of: sheet)
+        Self.press(sheet.addRepo)
+        Self.type("https://github.com/harbor/site.git", into: sheet.urls[1], of: sheet)
+        Self.type("app", into: sheet.paths[1], of: sheet)
+        Self.press(sheet.create)
+        await sheet.sending?.value
+        let said = "More than one repository is cloned to app: give each its own path."
+        #expect(sheet.paths.map(\.error) == [said, said] && sheet.refusal == nil && sheet.name.error == nil)
+        #expect((sheet.firstResponder as? NSTextView)?.delegate === sheet.paths[0].field, "the keys are not in the first path refused")
+        #expect(WorkspacesReachTests.outOfReach(in: try #require(sheet.contentView)) == [])
+        Self.type("site", into: sheet.paths[1], of: sheet)
+        #expect(sheet.paths[1].error == nil && sheet.paths[0].error == said)
+    }
+
     /// An agent's check clicked off: the create sends the agents still checked.
     @Test func anAgentClickedOffIsNotInstalled() async throws {
         let sheet = try Self.sheet()

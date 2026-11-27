@@ -199,6 +199,8 @@ package final class CreateProjectSheet: NSPanel, NSTextFieldDelegate {
         for (at, repo) in model.repos.enumerated() {
             if urls[at].field.stringValue != repo.url { urls[at].field.stringValue = repo.url }
             if paths[at].field.stringValue != repo.path { paths[at].field.stringValue = repo.path }
+            paths[at].error = model.pathsRefused[at]?.said
+            paths[at].remedy = model.pathsRefused[at]?.remedy
             let top = y
             y = layout.place(urls[at], x: x, y: y, width: urlWidth)
             let pathX = wide ? x + urlWidth + Self.rowGap : x, pathTop = wide ? top : y + Self.rowGap
@@ -447,6 +449,8 @@ package final class CreateProjectSheet: NSPanel, NSTextFieldDelegate {
             show()
             if model.nameRefused != nil {
                 makeFirstResponder(name.field)
+            } else if let row = model.pathsRefused.keys.min() {
+                makeFirstResponder(paths[row].field)
             } else if let refusal {
                 body.scrollToVisible(refusal.frame)
             }
