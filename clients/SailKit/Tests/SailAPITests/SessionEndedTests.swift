@@ -112,6 +112,21 @@ actor AnsweringAll: Transport {
     /// The check of who is signed in reads the ended sign-in as the welcome says it.
     @Test func theCheckReadsAnEndedSignInAsEnded() throws {
         let refusal = AccountRefusal(.signIn(.ended), at: try ControlPlane(address: "sail.standardapplied.com"), step: .asking)
-        #expect(refusal.reason == .ended && refusal.lines == ["Your sign-in to https://sail.standardapplied.com has ended.","Sign in again with your passkey."])
+        #expect(refusal.reason == .ended && refusal.lines == ["Your sign-in to https://sail.standardapplied.com has ended.", "Sign in again with your passkey."])
+    }
+
+    /// A list that could not be had for an ended sign-in offers no Try Again, which cannot mend it
+    /// (the welcome comes by itself); for any other failure it does.
+    @Test func anEndedSignInsBannerOffersNoTryAgain() throws {
+        for (error, again) in [(SailError.signIn(.ended), false), (.unreachable("lost"), true)] {
+            var model = WorkspacesModelTests.listed(WorkspacesModelTests.ana)
+            model.projectsListed(.failure(error), request: model.askingProjects())
+            let projects = try #require(WorkspacesModelTests.page(model)?.banner)
+            model.listed(.failure(error), request: model.listAgain(), at: WorkspacesModelTests.at)
+            let workspaces = try #require(WorkspacesModelTests.page(model)?.banner)
+            let said = error.said(at: "main.acme.dev")
+            #expect(projects == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list your projects", line: said, tryAgain: again), "\(projects)")
+            #expect(workspaces == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list harbor’s workspaces", line: said, tryAgain: again), "\(workspaces)")
+        }
     }
 }

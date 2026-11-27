@@ -258,6 +258,13 @@ public struct WorkspacesModel: Sendable {
             self.line = line
             self.tryAgain = tryAgain
         }
+
+        /// A list titled `title` that could not be had, said as `error` is at `place`: Try Again,
+        /// but not for an ended sign-in, which only signing in again mends (the welcome comes by
+        /// itself).
+        static func failed(_ title: String, _ error: SailError, at place: String) -> Notice {
+            Notice(tone: .error, title: title, line: error.said(at: place), tryAgain: error != .signIn(.ended))
+        }
     }
 
     public struct Table: Equatable, Sendable {
@@ -379,7 +386,7 @@ public struct WorkspacesModel: Sendable {
     /// Every project's workspaces as listed, the panel's and the pages' alike.
     private var listing = WorkspaceListing()
     private var listedAt: [String: Date] = [:]
-    private var listFailures: [String: String] = [:]
+    private var listFailures: [String: SailError] = [:]
     /// The projects open in the panel: the person's arrangement on this Mac, never sent anywhere.
     public private(set) var expanded: Set<String>
     private var creates: [String: CreateLine] = [:]
@@ -521,7 +528,7 @@ public struct WorkspacesModel: Sendable {
             }
         case let .failure(error):
             guard let project = listing.project(of: request) else { return }
-            listFailures[project] = error.said(at: person.controlPlane)
+            listFailures[project] = error
         }
     }
 
@@ -919,7 +926,7 @@ public struct WorkspacesModel: Sendable {
 
     /// The projects' refresh that failed while projects are shown, said over the page.
     private var projectsBanner: Notice? {
-        projectsFailure.map { Notice(tone: .error, title: "Couldn’t list your projects", line: $0.said(at: person.controlPlane), tryAgain: true) }
+        projectsFailure.map { Notice.failed("Couldn’t list your projects", $0, at: person.controlPlane) }
     }
 
     /// The card when no project could be listed: what is true, in Sail's words with the address and
@@ -1022,7 +1029,7 @@ public struct WorkspacesModel: Sendable {
     /// says why it waits; only a project with none listed says what is missing in its place.
     private func page(_ project: ProjectSummary) -> Page {
         let name = project.name, listed = listing.rows[name] != nil, unready = Self.unready(project), listFailure = listFailures[name]
-        let banner = refused[name]?.notice ?? listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? unread(project) ?? projectsBanner
+        let banner = refused[name]?.notice ?? listFailure.map { Notice.failed("Couldn’t list \(name)’s workspaces", $0, at: person.controlPlane) } ?? unread(project) ?? projectsBanner
         let rows = WorkspaceList(project: name, workspaces: listing.rows[name] ?? []).rows(for: person.handle)
         if let unready, rows.isEmpty, listed, listFailure == nil {
             return Page(
