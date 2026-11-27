@@ -62,10 +62,10 @@ public final class NameValidator {
   }
 
   /**
-   * Refuses a name no new project may take: one that breaks the project-name rule, or one ending
-   * {@code --tmpl}, which names a project's template instance.
+   * {@code name}, refused when no new project may take it: one that breaks the project-name rule,
+   * or one ending {@code --tmpl}, which names a project's template instance.
    */
-  public static void requireNewProjectName(String name) {
+  public static String requireNewProjectName(String name) {
     requireValidProjectName(name);
     if (name.endsWith(TEMPLATE_SUFFIX)) {
       throw new IllegalArgumentException(
@@ -75,6 +75,7 @@ public final class NameValidator {
               + TEMPLATE_SUFFIX
               + "' is kept for a project's template; give the project another name.");
     }
+    return name;
   }
 
   /**

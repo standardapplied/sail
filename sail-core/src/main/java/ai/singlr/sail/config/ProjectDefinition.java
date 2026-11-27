@@ -5,8 +5,10 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -88,11 +90,7 @@ public record ProjectDefinition(
   @SuppressWarnings("unchecked")
   static ProjectDefinition fromMap(Map<String, Object> map) {
     Fields.only(map, "", KEYS);
-    var name = Fields.text(map, "name", "name");
-    if (name == null) {
-      throw new IllegalArgumentException("name is required: the project's name.");
-    }
-    NameValidator.requireValidProjectName(name);
+    var name = FieldsRefused.naming("name", () -> name(map));
     var resourcesRaw = Fields.map(map, "resources", "resources");
     var runtimesRaw = Fields.map(map, "runtimes", "runtimes");
     var reposRaw = Fields.list(map, "repos", "repos");
@@ -116,12 +114,49 @@ public record ProjectDefinition(
     return config;
   }
 
+  private static String name(Map<String, Object> map) {
+    var name = Fields.text(map, "name", "name");
+    if (name == null) {
+      throw new IllegalArgumentException("name is required: the project's name.");
+    }
+    NameValidator.requireValidProjectName(name);
+    return name;
+  }
+
   private static List<Repo> repos(List<Object> raw) {
     var repos = new ArrayList<Repo>();
     for (var i = 0; i < raw.size(); i++) {
       repos.add(Repo.fromMap(Fields.element(raw, i, "repos")));
     }
+    requireOwnPaths(repos);
     return List.copyOf(repos);
+  }
+
+  /**
+   * Refuses two repositories cloned to one path under the workspace, naming each of their rows: the
+   * second clone would find the first's checkout there and stop the build.
+   */
+  private static void requireOwnPaths(List<Repo> repos) {
+    var rows = new LinkedHashMap<String, List<Integer>>();
+    for (var i = 0; i < repos.size(); i++) {
+      rows.computeIfAbsent(
+              Path.of(repos.get(i).path()).normalize().toString(), path -> new ArrayList<>())
+          .add(i);
+    }
+    var fields = new LinkedHashMap<String, String>();
+    var sentences = new ArrayList<String>();
+    rows.forEach(
+        (path, held) -> {
+          if (held.size() > 1) {
+            var sentence =
+                "More than one repository is cloned to " + path + ": give each its own path.";
+            sentences.add(sentence);
+            held.forEach(row -> fields.put("repos[" + row + "].path", sentence));
+          }
+        });
+    if (!fields.isEmpty()) {
+      throw new FieldsRefused(String.join(" ", sentences), fields);
+    }
   }
 
   private static Map<String, Service> services(Map<String, Object> raw) {

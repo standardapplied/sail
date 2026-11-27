@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.TestDefinitions;
@@ -31,6 +32,7 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 @ActingAs(value = Actor.Lane.API, handle = "ada")
 class ProjectDefinitionOperationsTest {
@@ -119,6 +121,44 @@ class ProjectDefinitionOperationsTest {
     assertEquals(
         List.of(FieldError.of("name", "A project named beta already exists.")),
         taken.failure().fieldErrors());
+  }
+
+  /**
+   * An invalid name is refused under the name, as a taken one is; two repositories cloned to one
+   * path are refused under each row, at the create and at the section's write alike.
+   */
+  @Test
+  void anInvalidNameAndTwoRepositoriesAtOnePathAreRefusedUnderTheirFields() {
+    var repos =
+        List.of(
+            Map.of("url", "https://github.com/acme/app.git", "path", "app"),
+            Map.of("url", "https://github.com/acme/web.git", "path", "app"));
+
+    var name = refused(() -> operations.create(Map.of("name", "Bad_Name")));
+    var created = refused(() -> operations.create(Map.of("name", "beta", "repos", repos)));
+    var written = refused(() -> operations.writeSection("acme", "repos", repos, null));
+
+    assertEquals(ErrorCode.INVALID_REQUEST, name.errorCode());
+    assertEquals(
+        List.of(
+            FieldError.of(
+                "name",
+                "Invalid project name: 'Bad_Name'. Must match [a-z0-9][a-z0-9-]*, max 63"
+                    + " characters.")),
+        name.fieldErrors());
+    var sentence = "More than one repository is cloned to app: give each its own path.";
+    var rows =
+        List.of(FieldError.of("repos[0].path", sentence), FieldError.of("repos[1].path", sentence));
+    assertEquals(sentence, created.errorMessage());
+    assertEquals(rows, created.fieldErrors());
+    assertEquals(rows, written.fieldErrors());
+    assertTrue(projects.findByName("beta").isEmpty());
+    assertNull(projects.findByName("acme").orElseThrow().definition().repos());
+  }
+
+  private static Result.Failure<?> refused(Executable call) {
+    return ApiException.of(ErrorCode.INVALID_REQUEST, assertThrows(FieldsRefused.class, call))
+        .failure();
   }
 
   @Test

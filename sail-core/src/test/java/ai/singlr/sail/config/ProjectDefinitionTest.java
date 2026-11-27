@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.engine.KnownHosts;
 import java.time.Duration;
 import java.util.List;
@@ -767,6 +768,48 @@ class ProjectDefinitionTest {
             IllegalArgumentException.class,
             () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)))
         .getMessage();
+  }
+
+  @Test
+  void aNameRefusedIsSaidUnderTheName() {
+    var invalid =
+        assertThrows(
+            FieldsRefused.class,
+            () -> ProjectDefinition.fromMap(YamlUtil.parseMap("name: Bad_Name\n")));
+    var missing =
+        assertThrows(
+            FieldsRefused.class,
+            () -> ProjectDefinition.fromMap(YamlUtil.parseMap("description: Shop\n")));
+
+    assertEquals(
+        "Invalid project name: 'Bad_Name'. Must match [a-z0-9][a-z0-9-]*, max 63 characters.",
+        invalid.getMessage());
+    assertEquals(Map.of("name", invalid.getMessage()), invalid.fields());
+    assertEquals(Map.of("name", "name is required: the project's name."), missing.fields());
+  }
+
+  @Test
+  void twoRepositoriesClonedToOnePathAreRefusedNamingEachRow() {
+    var yaml =
+        "name: acme\nrepos:\n"
+            + "  - url: https://github.com/acme/app.git\n    path: app\n"
+            + "  - url: https://github.com/acme/docs.git\n    path: docs\n"
+            + "  - url: https://github.com/acme/web.git\n    path: app/\n"
+            + "  - url: https://github.com/acme/notes.git\n    path: docs\n";
+
+    var refused =
+        assertThrows(FieldsRefused.class, () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)));
+
+    var app = "More than one repository is cloned to app: give each its own path.";
+    var docs = "More than one repository is cloned to docs: give each its own path.";
+    assertEquals(app + " " + docs, refused.getMessage());
+    assertEquals(
+        List.of(
+            Map.entry("repos[0].path", app),
+            Map.entry("repos[2].path", app),
+            Map.entry("repos[1].path", docs),
+            Map.entry("repos[3].path", docs)),
+        List.copyOf(refused.fields().entrySet()));
   }
 
   @Test

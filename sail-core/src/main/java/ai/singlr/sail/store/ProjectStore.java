@@ -11,6 +11,7 @@ import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
@@ -114,9 +115,9 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
    * that name is already catalogued.
    */
   public ProjectRow create(ProjectDefinition definition) {
-    NameValidator.requireNewProjectName(definition.name());
+    var name =
+        FieldsRefused.naming("name", () -> NameValidator.requireNewProjectName(definition.name()));
     var document = ProjectDefinitionJson.write(ProjectDefinitionJson.validated(definition));
-    var name = definition.name();
     return db.transaction(
         () -> {
           journal.admit(name, Map.of());

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.FieldsRefused;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -22,6 +23,7 @@ import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,14 +52,37 @@ class ProjectStoreTest {
   void noProjectIsCreatedUnderANameKeptForATemplate() {
     var failure =
         assertThrows(
-            IllegalArgumentException.class,
+            FieldsRefused.class,
             () -> store.create(TestDefinitions.yaml("name: acme--tmpl\nimage: ubuntu/24.04\n")));
 
     assertEquals(
         "Invalid project name: 'acme--tmpl'. A name ending '--tmpl' is kept for a project's"
             + " template; give the project another name.",
         failure.getMessage());
+    assertEquals(Map.of("name", failure.getMessage()), failure.fields());
     assertTrue(store.findByName("acme--tmpl").isEmpty());
+  }
+
+  @Test
+  void aSectionThatClonesTwoRepositoriesToOnePathIsRefusedAndNothingIsWritten() {
+    store.upsert(TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\n"));
+    var held = store.findByName("acme").orElseThrow().document();
+    var repos =
+        "[{\"url\": \"https://github.com/acme/app.git\", \"path\": \"app\"},"
+            + " {\"url\": \"https://github.com/acme/web.git\", \"path\": \"app\"}]";
+
+    var refused =
+        assertThrows(
+            FieldsRefused.class, () -> store.writeSection("acme", Section.REPOS, repos, null));
+
+    assertEquals(
+        Map.of(
+            "repos[0].path",
+            "More than one repository is cloned to app: give each its own path.",
+            "repos[1].path",
+            "More than one repository is cloned to app: give each its own path."),
+        refused.fields());
+    assertEquals(held, store.findByName("acme").orElseThrow().document());
   }
 
   @Test
