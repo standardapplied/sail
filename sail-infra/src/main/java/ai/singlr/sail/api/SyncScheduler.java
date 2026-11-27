@@ -253,7 +253,10 @@ public final class SyncScheduler implements AutoCloseable {
 
   @Override
   public void close() {
-    if (timer != null) timer.shutdownNow();
+    if (timer != null) {
+      timer.shutdownNow();
+      timer.close();
+    }
     if (executor != null) {
       executor.close();
     }
