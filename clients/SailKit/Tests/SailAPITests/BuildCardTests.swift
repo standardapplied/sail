@@ -323,6 +323,14 @@ import Testing
         #expect(WorkspacesModelTests.page(model)?.body == .loading && model.readsAgain("lighthouse"), "the old build drawn before its first read")
         model.templateRead("lighthouse", .failure(.unreachable("lost")))
         #expect(model.readsAgain("lighthouse"), "a read with no answer said it asks again and did not")
+        var unanswered = try Self.model(Self.dana, .missing)
+        _ = unanswered.asksBuild("lighthouse")
+        unanswered.built("lighthouse", .failure(.unreachable("The request timed out.")))
+        _ = unanswered.projectsListed(.success(ProjectList(projects: [harbor], total: 1)), request: unanswered.askingProjects())
+        let missing = ProjectList(projects: [harbor, ProjectSummary(name: "lighthouse", containerStatus: .known(.notCreated), template: .known(.missing))], total: 2)
+        _ = unanswered.projectsListed(.success(missing), request: unanswered.askingProjects())
+        unanswered.listed(.success(WorkspaceList(project: "lighthouse", workspaces: [])), request: unanswered.choose("lighthouse"), at: WorkspacesModelTests.at)
+        #expect(unanswered.templateShown == nil, "a build asked before it was listed away was read for when it came back")
     }
 
     /// A read with no answer after a refused one is asked again, as the card says: the card says the
