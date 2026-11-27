@@ -452,6 +452,13 @@ class CliCommandTest {
                 new IllegalStateException("disk I/O error", new IOException("disk I/O error")))),
         "a cause the line already says adds nothing, at any depth");
     assertEquals(
+        "A sail system command failed: Cannot run program incus",
+        CliCommand.describe(
+            new IllegalStateException(
+                "A sail system command failed.",
+                new IOException("A sail system command failed: Cannot run program incus"))),
+        "a cause that repeats its wrapper and says more is said once");
+    assertEquals(
         "Dispatch failed: The roster is unsynced. Run " + OperatorCommand.here().sail("sync") + ".",
         CliCommand.describe(
             new IllegalStateException(
