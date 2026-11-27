@@ -278,6 +278,29 @@ class CiFleetTest {
   }
 
   /**
+   * A workspace whose {@code sudo} is refused fails the proof row, its log naming the refusal,
+   * before the search: the files are searched as root, and a search that never ran found nothing.
+   * The workspace's search script runs for real, with a {@code sudo} that refuses and a {@code git}
+   * that finds no repository.
+   */
+  @Test
+  void aWorkspaceThatRefusesSudoFailsTheProofRowBeforeItsSearch() throws Exception {
+    aWorkspaceOfTheReadDenySpec(refusedRead(), ANSWER);
+    Files.writeString(dir.resolve("probe"), PROBE_CONTENT);
+    var workspace = Files.createDirectories(dir.resolve("workspace-bin"));
+    executable(workspace.resolve("sudo"), "echo 'sudo: a password is required' >&2\nexit 1\n");
+    executable(workspace.resolve("git"), "exit 128\n");
+
+    var ended = Child.run(shell(SOURCED + proof(), SCRIPT.toString()));
+
+    assertEquals(1, ended.exit(), ended.stdout() + ended.stderr());
+    assertEquals(
+        List.of(HOLDS, logs(2, 0, 1), QUIET, "sudo was refused, so no file was searched"),
+        ended.stdout().strip().lines().toList(),
+        ended.stderr());
+  }
+
+  /**
    * The cleanup row runs whatever the proof row said: it deletes the workspace and the spec and
    * closes any pull request of the spec's branch, each whatever the others did, and fails when one
    * of them did; the spec's erasure takes its workspace when the workspace's own delete failed.
@@ -337,8 +360,9 @@ class CiFleetTest {
    * Eng's box as far as the read-deny row goes: spec {@code readdeny-1} has workspace {@code
    * acme-readdeny-1} until it or the spec is deleted, and one run, whose log is {@code lines};
    * {@code sail project exec} reads the probe file back when the test wrote it, writes it only when
-   * the test made it writable, and finds the canary in no other file unless the test wrote where;
-   * the spec's comments are {@code comments}.
+   * the test made it writable, and finds the canary in no other file unless the test wrote where,
+   * or runs the workspace's own search when the test gave the workspace commands in {@code
+   * workspace-bin}; the spec's comments are {@code comments}.
    */
   private void aWorkspaceOfTheReadDenySpec(List<String> lines, String comments) throws IOException {
     Files.writeString(
@@ -357,6 +381,8 @@ class CiFleetTest {
                 printf %%s %s > "$FLEET_TEST/probe" ;;
               *"project exec acme-readdeny-1 -- sh -c"*"base64 -d"*)
                 [[ -e $FLEET_TEST/leaks ]] && { cat "$FLEET_TEST/leaks"; exit 1; }
+                [[ -d $FLEET_TEST/workspace-bin ]] &&
+                  PATH=$FLEET_TEST/workspace-bin:$PATH exec bash -c "${2#sudo sail project exec acme-readdeny-1 -- }"
                 echo "the canary is in no file outside ~/.ssh and no commit" ;;
               *"spec comments readdeny-1 --no-sync"*) cat "$FLEET_TEST/comments" ;;
               *"agent sessions acme --json"*) echo '{"runs": [{"id": "run-1", "spec_id": "readdeny-1"}]}' ;;

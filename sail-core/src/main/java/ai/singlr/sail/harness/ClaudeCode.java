@@ -577,22 +577,22 @@ final class ClaudeCode implements Harness {
    * login until its wrapper reads it; and a session's login file under {@code ~/.sail/sessions},
    * which holds its person's login until its shell reads it. Each is an exact absolute path or a
    * folder's {@code **}, written from the root ({@link #readDeny}). A harness's own stored login
-   * ({@link Harness#storedLogins}) is not in the list: nothing recorded shows a harness still
-   * starts signed in with a deny on its own login file, so an agent can read it. They stop an
-   * agent's ordinary reads of these files; they are not a boundary. Recorded on Claude Code 2.1.332
-   * for {@code ~/.ssh}, in both lanes, {@code --dangerously-skip-permissions} included, since a
-   * deny rule outranks bypass (probe 3, 03a and 03b; probe 4): a rule refuses the Read tool,
-   * directly, through a symlink to the file or its folder and in a subagent, and the Bash commands
-   * whose file arguments Claude Code checks against it ({@code cat}, {@code head}, {@code tail},
-   * {@code cp}, {@code base64}, {@code od}, {@code grep -r}, {@code find -exec cat}, {@code awk},
-   * {@code sed}, {@code git diff --no-index}), the path spelled with {@code $HOME}, {@code ..} or
-   * after {@code cd} too. It does not stop {@code less} or {@code more} piped on, {@code python3 -c
-   * open()}, {@code tar}, {@code dd}, {@code xxd}, {@code sh -c} or {@code bash -lc} around a
-   * {@code cat}, {@code git hash-object} then {@code cat-file}, a hard link into the workspace then
-   * Read, or a command that only uses the file ({@code ssh-keygen -y -f}): in the full lane those
-   * run unasked, so an agent that sets out to read these files still can. Nor does a file's owner
-   * or mode keep them from it: its user has passwordless {@code sudo}. Keeping them from an agent
-   * that tries is the boundary spec's to do ({@code
+   * ({@link Harness#storedLogins}) is not in the list, since nothing recorded shows a harness still
+   * starts signed in with a deny on its own login file. An agent can read it. They stop an agent's
+   * ordinary reads of these files; they are not a boundary. Recorded on Claude Code 2.1.332 for
+   * {@code ~/.ssh}, in both lanes, {@code --dangerously-skip-permissions} included, since a deny
+   * rule outranks bypass (probe 3, 03a and 03b; probe 4): a rule refuses the Read tool, directly,
+   * through a symlink to the file or its folder and in a subagent, and the Bash commands whose file
+   * arguments Claude Code checks against it ({@code cat}, {@code head}, {@code tail}, {@code cp},
+   * {@code base64}, {@code od}, {@code grep -r}, {@code find -exec cat}, {@code awk}, {@code sed},
+   * {@code git diff --no-index}), the path spelled with {@code $HOME}, {@code ..} or after {@code
+   * cd} too. It does not stop {@code less} or {@code more} piped on, {@code python3 -c open()},
+   * {@code tar}, {@code dd}, {@code xxd}, {@code sh -c} or {@code bash -lc} around a {@code cat},
+   * {@code git hash-object} then {@code cat-file}, a hard link into the workspace then Read, or a
+   * command that only uses the file ({@code ssh-keygen -y -f}): in the full lane those run unasked,
+   * so an agent that sets out to read these files still can. Nor does a file's owner or mode keep
+   * them from it: its user has passwordless {@code sudo}. Keeping them from an agent that tries is
+   * the boundary spec's to do ({@code
    * sail-an-agent-cannot-read-what-its-workspace-holds-in-trust}), not a rule's. Written with one
    * leading slash, as Sail wrote them before, they matched nothing in either lane: a full agent
    * read all four home paths unasked (probe 3, 03d). Deny outranks every allow rule, and the
