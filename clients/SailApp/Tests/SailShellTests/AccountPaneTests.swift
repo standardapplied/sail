@@ -1141,7 +1141,9 @@ actor Desk: Transport {
         #expect(pane.planeRow.title.stringValue == "sail.standardapplied.com" && pane.planeRow.detail.stringValue == pane.ending?.said)
         let cut = rows.flatMap(Self.cut)
         #expect(cut.isEmpty, "cut short: \(cut)")
-        for row in rows {
+        for (row, group) in zip(rows, [pane.planeFrame] + [ListFrame](repeating: pane.passkeyFrame, count: 2) + [ListFrame](repeating: pane.keyFrame, count: 3)) {
+            let box = row.convert(row.bounds, to: group)
+            #expect(group.bounds.contains(box), "\(row.title.stringValue) at \(box) runs out of its group's \(group.bounds)")
             let tile = row.tileBox, title = row.title.frame, detail = row.detail.frame
             let far = rightToLeft ? title.maxX <= tile.minX && detail.maxX <= tile.minX && abs(tile.maxX - row.bounds.width) < 0.5 : title.minX >= tile.maxX && detail.minX >= tile.maxX && tile.minX == 0
             #expect(far, "\(row.title.stringValue)'s words at \(title) and \(detail), its tile at \(tile) in \(row.bounds)")

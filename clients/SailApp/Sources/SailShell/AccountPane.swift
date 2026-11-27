@@ -144,11 +144,14 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         painter.shown()
     }
 
-    /// A new width makes the lists' rows again at the height their words wrap to there.
+    /// A new width makes the lists' rows again at the height their words wrap to there, the lists
+    /// first given that width: a row is made as wide as its list is then.
     override public func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         scroll.frame = bounds
-        if listWidth != listedAt { relist() }
+        guard listWidth != listedAt else { return }
+        for list in [passkeyList, keyList] { list.setFrameSize(NSSize(width: listWidth, height: Double(list.frame.height))) }
+        relist()
     }
 
     /// Gone from view, the load under way is stopped and the refusals said are done with: shown
