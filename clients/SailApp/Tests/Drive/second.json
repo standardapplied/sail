@@ -5,7 +5,7 @@
   {"name": "no-ceremony", "asked": 0},
   {"name": "terminals", "select": "terminals"},
   {"name": "s27-the-window-as-it-was", "resize": [920, 720]},
-  {"name": "s27-the-same-tabs-names-ratios-and-focus", "arrangement": {"tabs": [1, 2, 1], "selected": 1, "focus": 0, "titles": ["This Mac", "api", "This Mac"], "frames": [[0, 0, 0.5, 1, 0, 0, 201, 0], [0.5, 0, 0.5, 1, 202, 0, -202, 0]]}, "seconds": 30},
+  {"name": "s27-the-same-tabs-names-ratios-and-focus", "arrangement": {"tabs": [1, 2, 1], "selected": 1, "focus": 0, "titles": ["This Mac", "api", "This Mac 2"], "frames": [[0, 0, 0.5, 1, 0, 0, 201, 0], [0.5, 0, 0.5, 1, 202, 0, -202, 0]]}, "seconds": 30},
   {"name": "s27-reattached-earlier-output", "line": "kept-8", "seconds": 30},
   {"name": "s28-the-order-survived", "press": "1", "modifiers": ["command"]},
   {"name": "s28-tab-1-is-the-one-dragged-first", "arrangement": {"tabs": [1, 2, 1], "selected": 0}},

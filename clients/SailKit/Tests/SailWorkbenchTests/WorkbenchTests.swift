@@ -294,6 +294,66 @@ import Testing
         #expect(place.onRunner && !Place.thisMac(folder: "/").onRunner)
     }
 
+    /// This Mac's untitled shells are told apart as two tabs in one workspace are: "This Mac", then
+    /// "This Mac 2"; a shell its program titles shows that title and keeps its number for when the
+    /// title goes, and a tab the person named gives its number up.
+    @Test func thisMacsUntitledShellsAreToldApart() {
+        var bench = Workbench()
+        _ = bench.newTab(session: "mac-1", place: Self.home)
+        bench.setTitle("vim", of: bench.newTab(session: "mac-2", place: Self.home))
+        _ = bench.newTab(session: "app-1", place: .workspace(project: "acme", name: "try"))
+        _ = bench.newTab(session: "mac-3", place: Self.home)
+        _ = bench.newTab(session: "mac-4", place: Self.home)
+        bench.rename(bench.tabs[4].id, to: "api")
+        _ = bench.newTab(session: "mac-5", place: Self.home)
+        #expect(bench.tabs.map { bench.title(of: $0.id) } == ["This Mac", "vim", "acme · try", "This Mac 3", "api", "This Mac 4"])
+        bench.setTitle("", of: bench.tabs[1].focused)
+        #expect(bench.title(of: bench.tabs[1].id) == "This Mac 2", "the program's title gone, the tab is not called as it was")
+    }
+
+    /// A title once given stays: closing, moving or naming another tab renumbers none; a new tab, or
+    /// one whose name is cleared, takes the least number no other holds.
+    @Test func aTabsNumberStaysWhatItWasGiven() {
+        var bench = Workbench()
+        let panes = (1 ... 3).map { bench.newTab(session: "mac-\($0)", place: Self.home) }
+        let titles = { bench.tabs.map { bench.title(of: $0.id) } }
+        bench.close(panes[1])
+        #expect(titles() == ["This Mac", "This Mac 3"], "closing This Mac 2 renumbered the rest")
+        bench.moveTab(bench.tabs[1].id, to: 0)
+        #expect(titles() == ["This Mac 3", "This Mac"], "moving a tab renumbered it")
+        bench.rename(bench.tabs[1].id, to: "api")
+        #expect(titles() == ["This Mac 3", "api"], "naming a tab renumbered another")
+        _ = bench.newTab(session: "mac-4", place: Self.home)
+        bench.rename(bench.tabs[1].id, to: " ")
+        #expect(titles() == ["This Mac 3", "This Mac 2", "This Mac"], "the least free number was not taken")
+    }
+
+    /// The This Mac project's sessions are this Mac's panes as they are now, a row each in the order
+    /// of their tabs and, in a split, reading order: its tab's title, its folder (where its shell
+    /// last reported it was on this Mac, else where it opened, the home folder said as ~ and a
+    /// folder beside it as it is) and how its session ended. A workspace's pane is none of them, and
+    /// a pane closed leaves the list.
+    @Test func thisMacsSessionsAreItsPanesAsTheyAreNow() throws {
+        var bench = Workbench()
+        let first = bench.newTab(session: "mac-1", place: .thisMac(folder: "/home/u/workspace/sail"))
+        _ = bench.newTab(session: "app-1", place: .workspace(project: "acme", name: "try"))
+        let second = bench.newTab(session: "mac-2", place: Self.home)
+        let split = bench.split(.sideBySide, session: "mac-3", place: .thisMac(folder: "/tmp"), in: Self.room, minimum: Self.least, scale: 2)
+        let third = try #require(split)
+        let sibling = bench.newTab(session: "mac-4", place: .thisMac(folder: "/home/u2/x"))
+        bench.setFolder("file://elsewhere/srv", of: first)
+        bench.setFolder("file://box.local/home/u/Downloads", of: third)
+        let rows = bench.localSessions(ended: [third: "exited 3 · 11:02"], hostNames: ["box.local"], home: "/home/u")
+        #expect(rows == [
+            LocalSession(pane: first, title: "This Mac", folder: "~/workspace/sail", ended: nil),
+            LocalSession(pane: second, title: "This Mac 2", folder: "~", ended: nil),
+            LocalSession(pane: third, title: "This Mac 2", folder: "~/Downloads", ended: "exited 3 · 11:02"),
+            LocalSession(pane: sibling, title: "This Mac 3", folder: "/home/u2/x", ended: nil),
+        ])
+        bench.close(second)
+        #expect(bench.localSessions(ended: [:], hostNames: ["box.local"], home: "/home/u").map(\.pane) == [first, third, sibling])
+    }
+
     /// brings back none of its panes.
     @Test func aWorkspaceTabSaysWhereItIsAndStaysOutOfThisMacs() throws {
         var bench = Self.bench()
