@@ -580,6 +580,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         account.useStored = { [weak self] stored, client in await self?.workspaces.useStored(stored, by: client) ?? false }
         workspaces.lastChosen = { [defaults] person in defaults.string(forKey: Self.chosenKey(person)) }
         workspaces.keepChosen = { [defaults] name, person in defaults.set(name, forKey: Self.chosenKey(person)) }
+        workspaces.lastExpanded = { [defaults] person in defaults.stringArray(forKey: Self.chosenKey(person, "sail.expanded")) ?? [] }
+        workspaces.keepExpanded = { [defaults] names, person in defaults.set(names, forKey: Self.chosenKey(person, "sail.expanded")) }
         workspaces.onStart = { [weak self] start, project, name in
             self?.thisMac.startSession(start, project: project, name: name)
         }
@@ -593,10 +595,11 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// Where a person's last project is kept: one person on one control plane, the parts joined by
-    /// the unit separator, which neither an address nor a handle holds.
-    static func chosenKey(_ person: WorkspacesModel.Person) -> String {
-        ["sail.project", person.controlPlane, person.handle].joined(separator: "\u{1F}")
+    /// Where a person's last project is kept, or with `kind` "sail.expanded" the projects they have
+    /// open in the left panel: one person on one control plane, the parts joined by the unit
+    /// separator, which neither an address nor a handle holds.
+    static func chosenKey(_ person: WorkspacesModel.Person, _ kind: String = "sail.project") -> String {
+        [kind, person.controlPlane, person.handle].joined(separator: "\u{1F}")
     }
 
     func menu() -> NSMenu {

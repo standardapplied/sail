@@ -5,7 +5,8 @@ import SailLook
 import SailWorkbench
 
 /// A workspace row's New Session popover (`first-impressions-mockup.html`, 3A): what its agents
-/// route answered, in a 388 pt box 4 pt under the row, its trailing edge on the row's ⋯, always
+/// route answered, in a 388 pt box 4 pt under the row, its trailing edge on the row's ⋯ (from a row of
+/// the left panel, 4 pt past the row's trailing edge, its top on the row's, over the content), always
 /// within what shows of the page less 8 pt each side (spanning that where the page is drawn narrow,
 /// as at the least window), and over the row when the window has no room under it, else covering the
 /// row whole. It is placed once, by the tallest of its kinds in each of their modes, and its top
@@ -116,8 +117,9 @@ package final class NewSessionPanel: NSObject {
     /// over the row where that fits, else covering the row whole, its top at the row's top edge,
     /// where that stays in the page, else as high as it needs within the page; never so high that
     /// the room its shadow keeps reaches over the screen's menu bar, where AppKit would push the box
-    /// down.
-    func open(_ answer: Answer, workspace: String, memory: ModeMemory, under row: NSRect, page: NSView, narrow: Bool, anchor: NSView?) {
+    /// down. `beside`, a row of the left panel: it stands past the row's trailing edge, its top on
+    /// the row's where that stays in the page, else as high as it needs.
+    func open(_ answer: Answer, workspace: String, memory: ModeMemory, under row: NSRect, page: NSView, narrow: Bool, beside: Bool = false, anchor: NSView?) {
         guard let window = page.window, !isOpen else { return }
         self.workspace = workspace
         line = nil
@@ -127,14 +129,21 @@ package final class NewSessionPanel: NSObject {
         let area = Self.shows(page, in: window), row = window.convertToScreen(row)
         let width = narrow ? Double(area.width) - 2 * Self.inset : min(Self.width, Double(area.width) - 2 * Self.inset)
         let rightToLeft = page.userInterfaceLayoutDirection == .rightToLeft, trailing = RowStyle.list.margin + RowStyle.list.trailing
-        let wanted = narrow ? Double(area.minX) + Self.inset : rightToLeft ? Double(row.minX) + trailing : Double(row.maxX) - trailing - width
+        let wanted = switch (narrow, beside, rightToLeft) {
+        case (true, _, _): Double(area.minX) + Self.inset
+        case (false, true, true): Double(row.minX) - Self.gap - width
+        case (false, true, false): Double(row.maxX) + Self.gap
+        case (false, false, true): Double(row.minX) + trailing
+        case (false, false, false): Double(row.maxX) - trailing - width
+        }
         let x = min(max(wanted, Double(area.minX) + Self.inset), Double(area.maxX) - Self.inset - width)
         let tallest = tallest(width: width)
         let ceiling = min(Double(area.maxY) - Self.inset, window.screen.map { Double($0.visibleFrame.maxY) - Popover.room } ?? .infinity)
         let under = Double(row.minY) - Self.gap, over = Double(row.maxY) + Self.gap
         lowest = Double(area.minY) + Self.inset
         let covering = Double(row.maxY)
-        top = min(under - tallest >= lowest ? under : over + tallest <= ceiling ? over + tallest : covering - tallest >= lowest && covering <= ceiling ? covering : lowest + tallest, ceiling)
+        let atRow = covering - tallest >= lowest && covering <= ceiling ? covering : lowest + tallest
+        top = min(beside ? atRow : under - tallest >= lowest ? under : over + tallest <= ceiling ? over + tallest : atRow, ceiling)
         draw(width: width)
         placed = NSRect(x: x, y: top - view.height, width: width, height: view.height)
         popover.open(over: window, anchor: anchor, at: placed, withKeys: false)
