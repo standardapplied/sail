@@ -549,6 +549,42 @@ class LiveChatTest {
         "the result says what its permission_denied line said");
   }
 
+  /**
+   * Probe 4 recorded two more ways a deny rule refuses a call, each with a {@code
+   * system/permission_denied} line of reason {@code rule} before its result: a Read through a
+   * symlink to a denied file (L, 13-symlink-file-Read-full:46-48) and a {@code cat} of a relative
+   * path after {@code cd} into a denied directory (C, 16-cd-relative-cat-full:26-27). Each is a
+   * failed row, and its {@code permission_denied} line shows nothing more.
+   */
+  @Test
+  void aRuleThatSaysPermissionDeniedBeforeItsResultIsAFailedRow() {
+    assertEquals(
+        List.of(
+            new Step.Other("system/permission_denied"), new Step.Other("system/permission_denied")),
+        List.of(
+            LiveStream.read(Recorded.line("13-symlink-file-Read-full", 46)),
+            LiveStream.read(Recorded.line("16-cd-relative-cat-full", 26))));
+    assertEquals(List.of(), shown("13-symlink-file-Read-full", 46));
+    assertEquals(List.of(), shown("16-cd-relative-cat-full", 26));
+    assertEquals(
+        List.of(
+            List.of(
+                new ChatItem.ToolDone(
+                    null,
+                    "toolu_01A7XBpoyZsMwrFxHgWyGPAr",
+                    "Permission to read /home/dev/workspace/link.txt has been denied.",
+                    true,
+                    false)),
+            List.of(
+                new ChatItem.ToolDone(
+                    null,
+                    "toolu_019GS8cW4vBPBaqm81GX3tbs",
+                    "cat from '/home/dev/.ssh/probe-secret.txt' was blocked by a deny rule.",
+                    true,
+                    false))),
+        List.of(shown("13-symlink-file-Read-full", 48), shown("16-cd-relative-cat-full", 27)));
+  }
+
   @Test
   void whatThePersonIsNotShownGivesNoItem() {
     assertEquals(List.of(), shown("01-baseline-live-flags", 8));

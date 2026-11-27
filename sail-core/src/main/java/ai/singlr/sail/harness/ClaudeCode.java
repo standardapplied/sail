@@ -170,11 +170,11 @@ final class ClaudeCode implements Harness {
    * (verified empirically). So the session reads the code it is consulting on and nothing else:
    * every container secret lives outside the workspace ({@code ~/.ssh}, {@code ~/.sail}, {@code
    * ~/.claude}, {@code /var/lib/sail}) and is unreadable by default. The {@code Read}-deny rules in
-   * {@link #readDenyRules}, which Claude applies to a Bash read of a denied path too,
-   * belt-and-suspenders the highest-value credentials on top of that; they are not the primary
-   * boundary. Git is deliberately absent: {@code git diff --output=<path>} writes through a prefix
-   * allow-rule, and git's external-diff and pager config are command-execution surfaces, which a
-   * read-only lane must not expose.
+   * {@link #readDenyRules}, which Claude applies to the Bash reads it maps to a path too, stop the
+   * ordinary reads of the highest-value credentials on top of that; they are not the boundary. Git
+   * is deliberately absent: {@code git diff --output=<path>} writes through a prefix allow-rule,
+   * and git's external-diff and pager config are command-execution surfaces, which a read-only lane
+   * must not expose.
    *
    * <p>The invocation is pinned closed against ambient configuration: {@code --setting-sources ""}
    * excludes every user/project/local settings file, so a {@code .claude/settings.json} in the
@@ -574,18 +574,24 @@ final class ClaudeCode implements Harness {
    * ~/.config/gh}, a run's {@code launch.env}, which holds its credential and its person's login
    * until its wrapper reads it, and a session's login file under {@code ~/.sail/sessions}, which
    * holds its person's login until its shell reads it. Each is an absolute path, written from the
-   * root ({@link #readDeny}). Probe 3 recorded the four home rules on Claude Code 2.1.332 (the
-   * session one came later): each refused the Read tool and a {@code cat} of its path in both
-   * lanes, {@code --dangerously-skip-permissions} included, since a deny rule outranks bypass (03a,
-   * 03b). So they bind the full lane, and in the read-only lane they hold on top of the refusal of
-   * every read outside the workspace ({@link #readOnly}). Deny outranks every allow rule, and the
+   * root ({@link #readDeny}). They stop an agent's ordinary reads of these files; they are not a
+   * boundary. Recorded on Claude Code 2.1.332 for {@code ~/.ssh}, in both lanes, {@code
+   * --dangerously-skip-permissions} included, since a deny rule outranks bypass (probe 3, 03a and
+   * 03b; probe 4): a rule refuses the Read tool, directly, through a symlink to the file or its
+   * folder and in a subagent, and the Bash commands whose file arguments Claude Code checks against
+   * it ({@code cat}, {@code head}, {@code tail}, {@code cp}, {@code base64}, {@code od}, {@code
+   * grep -r}, {@code find -exec cat}, {@code awk}, {@code sed}, {@code git diff --no-index}), the
+   * path spelled with {@code $HOME}, {@code ..} or after {@code cd} too. It does not stop {@code
+   * less} or {@code more} piped on, {@code python3 -c open()}, {@code tar}, {@code dd}, {@code
+   * xxd}, {@code sh -c} or {@code bash -lc} around a {@code cat}, {@code git hash-object} then
+   * {@code cat-file}, a hard link into the workspace then Read, or a command that only uses the
+   * file ({@code ssh-keygen -y -f}): in the full lane those run unasked, so an agent that sets out
+   * to read these files still can. Keeping them from it is the OS's to do, not a rule's. Written
+   * with one leading slash, as Sail wrote them before, they matched nothing in either lane: a full
+   * agent read all four home paths unasked (probe 3, 03d). Deny outranks every allow rule, and the
    * read-only invocation pins {@code --setting-sources ""} so no ambient settings file can shadow
-   * these. Written with one leading slash, as Sail wrote them before, they matched nothing in
-   * either lane: a full agent read all four home paths unasked (03d). Spec-CLI auth is untouched:
-   * the helper reads the credential at the OS level, not through a tool. Residual (a secret
-   * committed inside the workspace, a read by a command Claude Code does not map to the path it
-   * reads, a kernel escape, a harness-enforcement bug) is owned by the room-lane hardening
-   * follow-up, a read-only-disk sidecar, not this denylist.
+   * these. Spec-CLI auth is untouched: the helper reads the credential at the OS level, not through
+   * a tool.
    */
   private static List<String> readDenyRules() {
     return List.of(
