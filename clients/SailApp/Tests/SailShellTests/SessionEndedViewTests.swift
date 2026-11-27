@@ -2,6 +2,7 @@ import AppKit
 import SailAPI
 import SailFiles
 import SailKitTestSupport
+import SailLook
 @testable import SailShell
 import SailTerminal
 import Synchronization
