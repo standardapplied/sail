@@ -162,6 +162,11 @@ public interface Harness {
     return Optional.empty();
   }
 
+  /** How a person chats with this harness, or empty for a harness with no chat. */
+  default Optional<HarnessChat> chat() {
+    return Optional.empty();
+  }
+
   /** The command for an interactive (TTY) session. */
   String interactive(boolean fullPermissions);
 
@@ -171,7 +176,29 @@ public interface Harness {
    * own words, the {@code args} its command takes for it, empty for none, and whether it skips the
    * harness's own permission checks entirely ({@code risky}), which a client warns of.
    */
-  record Mode(String name, String label, String about, String args, boolean risky) {}
+  record Mode(String name, String label, String about, String args, boolean risky) {
+
+    /**
+     * The one of {@code offered}, the modes of the harness {@code harness} names, called {@code
+     * name}.
+     *
+     * @throws IllegalArgumentException naming the modes it takes, for any other
+     */
+    public static Mode named(List<Mode> offered, String name, String harness) {
+      return offered.stream()
+          .filter(mode -> mode.name().equals(name))
+          .findFirst()
+          .orElseThrow(
+              () ->
+                  new IllegalArgumentException(
+                      harness
+                          + " takes no mode '"
+                          + name
+                          + "' in a workspace; it takes "
+                          + String.join(", ", offered.stream().map(Mode::name).toList())
+                          + "."));
+    }
+  }
 
   /**
    * The modes an interactive session of this harness starts in inside a workspace, each distinct
@@ -194,19 +221,7 @@ public interface Harness {
    * @throws IllegalArgumentException naming the modes it takes, for any other
    */
   default String interactive(String mode) {
-    return modes().stream()
-        .filter(offered -> offered.name().equals(mode))
-        .findFirst()
-        .map(offered -> binaryName() + offered.args())
-        .orElseThrow(
-            () ->
-                new IllegalArgumentException(
-                    displayName()
-                        + " takes no mode '"
-                        + mode
-                        + "' in a workspace; it takes "
-                        + String.join(", ", modes().stream().map(Mode::name).toList())
-                        + "."));
+    return binaryName() + Mode.named(modes(), mode, displayName()).args();
   }
 
   /**

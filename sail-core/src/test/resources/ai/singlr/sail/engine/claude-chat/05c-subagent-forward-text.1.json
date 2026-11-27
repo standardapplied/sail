@@ -1,0 +1,1 @@
+{"note":"Task subagent with --forward-subagent-text","argv":["claude","--print","--input-format","stream-json","--output-format","stream-json","--verbose","--include-partial-messages","--settings","/home/dev/.sail/claude-live.json","--permission-prompts","none","--dangerously-skip-permissions","--forward-subagent-text","--model","haiku"],"cwd":"/home/dev/workspace"}

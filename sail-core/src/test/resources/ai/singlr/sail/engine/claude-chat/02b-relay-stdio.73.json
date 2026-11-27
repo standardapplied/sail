@@ -1,0 +1,1 @@
+{"type":"control_response","response":{"subtype":"success","request_id":"5c399f9f-8451-4eea-9496-521b3af32a3d","response":{"behavior":"allow","updatedInput":{"command":"echo changed-by-host > upd.txt","description":"Write original text into upd.txt"}}}}
