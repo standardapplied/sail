@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.AgentProcess;
 import java.time.Duration;
+import java.util.function.BooleanSupplier;
 
 /**
  * How a process the host drives over pipes is ended, a live member's or a chat's: its stdin is
@@ -55,6 +56,26 @@ final class ProcessEnd {
    */
   static void closeInput(AgentProcess.Handle handle, String name) {
     Thread.ofVirtual().name(name).start(handle.stdin()::close);
+  }
+
+  /**
+   * Waits on {@code monitor}, which the caller holds and notifies as what it waits for changes, up
+   * to {@code within} or until {@code done}; an interrupt ends the wait early, and is kept.
+   */
+  static void await(Object monitor, Duration within, BooleanSupplier done) {
+    var deadline = System.nanoTime() + within.toNanos();
+    while (!done.getAsBoolean()) {
+      var left = deadline - System.nanoTime();
+      if (left <= 0) {
+        return;
+      }
+      try {
+        monitor.wait(Math.max(1, left / 1_000_000));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+    }
   }
 
   /**

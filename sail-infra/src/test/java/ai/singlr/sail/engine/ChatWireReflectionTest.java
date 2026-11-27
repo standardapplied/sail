@@ -12,6 +12,7 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
@@ -19,9 +20,10 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every record a chat item is made of, each alternative of each sealed set in it included, is in
- * the native image's reflection configuration: {@link ChatWire} reads them through their
- * components, which a native image holds only for a record listed there.
+ * Every record a chat's log entry is made of, an item's or Sail's own, each alternative of each
+ * sealed set in it included, is in the native image's reflection configuration, and no other of
+ * theirs: {@link ChatWire} reads them through their components, which a native image holds only for
+ * a record listed there.
  */
 class ChatWireReflectionTest {
 
@@ -30,20 +32,33 @@ class ChatWireReflectionTest {
   private static final Pattern NAME = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]+)\"");
 
   @Test
-  void everyRecordAChatItemIsMadeOfIsInTheReflectionConfiguration() throws IOException {
+  void everyRecordAChatEntryIsMadeOfIsInTheReflectionConfiguration() throws IOException {
     var records = new TreeSet<String>();
-    reach(ChatItem.class, records, new TreeSet<>());
-
-    records.removeAll(
+    var seen = new TreeSet<String>();
+    reach(ChatItem.class, records, seen);
+    reach(ChatWire.Own.class, records, seen);
+    var listed =
         NAME.matcher(Files.readString(CONFIG))
             .results()
             .map(match -> match.group(1))
-            .collect(Collectors.toSet()));
+            .collect(Collectors.toCollection(TreeSet::new));
+
+    var missing = new TreeSet<>(records);
+    missing.removeAll(listed);
+    var stale =
+        listed.stream()
+            .filter(
+                name ->
+                    name.startsWith(ChatItem.class.getName() + "$")
+                        || name.startsWith(ChatWire.class.getName() + "$"))
+            .filter(name -> !records.contains(name))
+            .toList();
 
     assertEquals(
         Set.of(),
-        records,
+        missing,
         "add each to " + CONFIG + " with allDeclaredMethods and allRecordComponents");
+    assertEquals(List.of(), stale, "no record a chat entry is no longer made of is listed");
   }
 
   private static void reach(Type type, Set<String> records, Set<String> seen) {

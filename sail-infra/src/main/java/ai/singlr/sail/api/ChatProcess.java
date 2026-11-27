@@ -5,12 +5,15 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ChatWire;
 import ai.singlr.sail.engine.LiveChat;
 import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.engine.LiveStream.Step;
+import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.store.ChatStore;
 import java.io.IOException;
@@ -27,9 +30,11 @@ import java.util.OptionalInt;
  * thread of its own, each line's items logged before anyone is shown them, the text of one block
  * gathered for a {@link LiveMembers#DELTA_WINDOW} into one item; the person's messages handed to it
  * one a turn, in the order they were logged, a message said while a turn is open held in the log
- * until the turn ends. When it ends, however it ends, a turn it left open is closed as cut, its
- * open tool rows closed and the requests it held withdrawn: they die with it, and a resume replays
- * none. Every field a line or a message moves is guarded by it.
+ * until the turn ends. A request it cannot read whole is refused at once, or, naming nothing to
+ * answer, its turn is stopped. What a turn left open is read from the log ({@link #open}): at the
+ * turn's end its rows with no result are closed, and when the process ends, however it ends, a turn
+ * it left open is cut ({@link #cut}): its requests die with it, and a resume replays none. Every
+ * field a line or a message moves is guarded by it.
  */
 final class ChatProcess {
 
@@ -38,6 +43,24 @@ final class ChatProcess {
 
   /** What closes a tool row whose result no line carried: one too long to read, or none. */
   static final String UNREAD = "Sail did not read what this call gave back.";
+
+  private static final String TOOL = ChatWire.kind(ChatItem.Tool.class);
+  private static final String DONE = ChatWire.kind(ChatItem.ToolDone.class);
+  private static final String WITHDRAWN = ChatWire.kind(ChatItem.Withdrawn.class);
+  private static final String TURN_ENDED = ChatWire.kind(ChatItem.TurnEnded.class);
+
+  /**
+   * The kinds that open or close a row or a request: these three and every {@link
+   * ChatItem.Request}.
+   */
+  private static final List<String> OPENING =
+      List.of(
+          TOOL,
+          DONE,
+          WITHDRAWN,
+          ChatWire.kind(ChatItem.Permission.class),
+          ChatWire.kind(ChatItem.Question.class),
+          ChatWire.kind(ChatItem.Plan.class));
 
   /** What the host does for a process beside driving it. */
   interface Host {
@@ -56,6 +79,13 @@ final class ChatProcess {
     void gone(ChatProcess process);
   }
 
+  /**
+   * What a chat's open turn left open, as its log says since the turn before it ended: the tool
+   * rows with no result ({@code rows}, a row's id to the subagent it is under) and the requests
+   * nobody answered or withdrew ({@code requests}, each to when it was logged).
+   */
+  record Open(Map<String, String> rows, Map<String, Instant> requests) {}
+
   private final String session;
   private final String agent;
   private final ChatStore store;
@@ -64,14 +94,13 @@ final class ChatProcess {
   private final ChatHost.Timing timing;
   private final Duration maxIdle;
   private final Host host;
-  private final Map<String, String> open = new LinkedHashMap<>();
-  private final Map<String, Instant> held = new LinkedHashMap<>();
   private ChatItem.Session lastSession;
   private ChatItem.Text pending;
   private Instant pendingSince = Instant.MIN;
   private Instant lastActivity;
   private boolean turnOpen;
   private boolean ending;
+  private String endReason;
   private boolean over;
 
   /**
@@ -123,55 +152,80 @@ final class ChatProcess {
   private synchronized void line(String raw) {
     lastActivity = timing.clock().get();
     var step = LiveStream.read(raw);
-    var conversation = step instanceof LiveStream.Step.Init init ? init.sessionId() : null;
+    switch (step) {
+      case Step.Init init -> {
+        store.said(session, conversation(init.sessionId()), inForce(init.mode()));
+        if (!turnOpen) {
+          turnOpen = true;
+          store.turn(session, true);
+        }
+      }
+      case Step.Status status when status.mode() != null ->
+          store.said(session, null, inForce(status.mode()));
+      case Step.Unreadable unreadable -> refuseNow(unreadable.requestId());
+      default -> {}
+    }
     for (var item : LiveChat.items(step, chat)) {
-      take(item, conversation);
+      take(item);
     }
   }
 
   /**
-   * Keeps what {@code item} changes of the chat, then logs it: a turn's session only when it says
-   * something the last did not, since the harness says it whole at every turn.
+   * Refuses the request {@code requestId} at once, no person asked, so its turn goes on; when it
+   * named no id to answer, stops the turn ({@link #stopTurn}), which would otherwise wait on it.
    */
-  private void take(ChatItem item, String conversation) {
-    var shown = true;
-    switch (item) {
-      case ChatItem.Session said -> {
-        store.said(session, conversation, said.mode());
-        opened();
-        shown = !said.equals(lastSession);
-        lastSession = said;
+  private void refuseNow(String requestId) {
+    if (requestId == null) {
+      stopTurn();
+    } else {
+      write(LiveChat.refuseUnreadable(requestId));
+    }
+  }
+
+  /** Stops the open turn; the process stays, and takes the next message as a new turn. */
+  private void stopTurn() {
+    write(LiveChat.interrupt(Ids.newId().toString()));
+  }
+
+  /** The conversation the harness named, when it is one a resume may name; else none. */
+  private static String conversation(String said) {
+    return said != null && Harness.isSafeSessionId(said) ? said : null;
+  }
+
+  /**
+   * The mode the harness said it is in, which a resume launches in; its first chat mode when what
+   * it said is no mode's name a launch may pass on.
+   */
+  private String inForce(String said) {
+    try {
+      return new HarnessChat.Launch(said, null, null).mode();
+    } catch (IllegalArgumentException unsafe) {
+      return chat.modes().getFirst().name();
+    }
+  }
+
+  /**
+   * Logs {@code item}: a turn's session only when it says something the last did not, since the
+   * harness says it whole at every turn; a turn's end after the rows it left open are closed, then
+   * the next message waiting handed on.
+   */
+  private void take(ChatItem item) {
+    if (item instanceof ChatItem.Session said) {
+      if (said.equals(lastSession)) {
+        return;
       }
-      case ChatItem.ModeChanged changed -> store.said(session, null, changed.mode());
-      case ChatItem.Tool tool -> open.put(tool.id(), tool.under());
-      case ChatItem.ToolDone done -> open.remove(done.id());
-      case ChatItem.Request asked -> held.put(asked.id(), timing.clock().get());
-      case ChatItem.Withdrawn withdrawn -> held.remove(withdrawn.id());
-      case ChatItem.TurnEnded ended -> closeRows();
-      default -> {}
+      lastSession = said;
     }
-    if (shown) {
-      log(item);
+    if (item instanceof ChatItem.TurnEnded) {
+      flush();
+      closeRows(store, session, open(store, session).rows(), timing.clock().get(), host::arrived);
     }
+    log((Record) item);
     if (item instanceof ChatItem.TurnEnded) {
       turnOpen = false;
       store.turn(session, false);
       handNext(0, List.of());
     }
-  }
-
-  /** A turn is open: one the person's message began, or the agent began itself. */
-  private void opened() {
-    if (!turnOpen) {
-      turnOpen = true;
-      store.turn(session, true);
-    }
-  }
-
-  /** Closes each tool row still open as one whose result was not read. */
-  private void closeRows() {
-    open.forEach((id, under) -> log(new ChatItem.ToolDone(under, id, UNREAD, false)));
-    open.clear();
   }
 
   /**
@@ -181,12 +235,16 @@ final class ChatProcess {
    */
   synchronized ChatHost.Sent send(
       String text, List<String> attachments, List<LiveStream.Image> images) {
-    var queued = turnOpen || ending || !store.unhanded(session, ChatHost.MESSAGE).isEmpty();
-    var seq = log(new ChatItem.Message(text, attachments, queued));
+    var queued = turnOpen || ending || !unhanded().isEmpty();
+    var seq = log(new ChatWire.Message(text, attachments, queued));
     if (!turnOpen && !ending) {
       handNext(seq, images);
     }
     return new ChatHost.Sent(seq, queued);
+  }
+
+  private List<ChatStore.Item> unhanded() {
+    return store.unhanded(session, ChatWire.kind(ChatWire.Message.class));
   }
 
   /**
@@ -195,30 +253,41 @@ final class ChatProcess {
    * left out. A process that no longer reads is ended, and the message waits for the next.
    */
   private void handNext(long fresh, List<LiveStream.Image> images) {
-    var next = store.unhanded(session, ChatHost.MESSAGE).stream().findFirst();
+    var next = unhanded().stream().findFirst();
     if (next.isEmpty()) {
       return;
     }
     var message = YamlUtil.parseJsonLine(next.get().payload(), LiveStream.MAX_LINE_CHARS);
-    var text = (String) message.get("text");
     var attachments =
-        ((List<?>) message.getOrDefault("attachments", List.of()))
-            .stream().map(String.class::cast).toList();
+        ((List<?>) message.get("attachments")).stream().map(String.class::cast).toList();
     var shown = next.get().seq() == fresh ? images : again(attachments);
-    try {
-      handle.stdin().write(LiveStream.userMessage(text, shown.toArray(LiveStream.Image[]::new)));
-    } catch (IOException broken) {
-      Thread.ofVirtual()
-          .name("sail-chat-broken-" + session)
-          .start(() -> end(timing.grace().afterInt(), null));
+    var text = (String) message.get("text");
+    if (!write(LiveStream.userMessage(text, shown.toArray(LiveStream.Image[]::new)))) {
       return;
     }
     store.handed(session, next.get().seq());
     if (Boolean.TRUE.equals(message.get("queued"))) {
-      log(new ChatItem.Delivered(next.get().seq()));
+      log(new ChatWire.Delivered(next.get().seq()));
     }
     lastActivity = timing.clock().get();
-    opened();
+    turnOpen = true;
+    store.turn(session, true);
+  }
+
+  /**
+   * Writes {@code line} on the process's stdin; returns whether it took it. A process that no
+   * longer reads is ended, on a thread of its own.
+   */
+  private boolean write(String line) {
+    try {
+      handle.stdin().write(line);
+      return true;
+    } catch (IOException broken) {
+      Thread.ofVirtual()
+          .name("sail-chat-broken-" + session)
+          .start(() -> end(timing.grace().afterInt(), null));
+      return false;
+    }
   }
 
   /**
@@ -228,34 +297,38 @@ final class ChatProcess {
     try {
       return host.images(attachments);
     } catch (ApiException unreadable) {
-      log(new ChatItem.Told(unreadable.getMessage() + " The message went without its images."));
+      log(new ChatWire.Told(unreadable.getMessage() + " The message went without its images."));
       return List.of();
     }
   }
 
   /**
-   * Logs {@code item}, the text of one block gathered for a {@link LiveMembers#DELTA_WINDOW} first;
-   * returns the number it was logged as, 0 for text still being gathered.
+   * Logs {@code entry}, the text of one block gathered for a {@link LiveMembers#DELTA_WINDOW}
+   * first; returns the number it was logged as, 0 for text still being gathered.
    */
-  private long log(ChatItem item) {
+  private long log(Record entry) {
     var now = timing.clock().get();
-    if (item instanceof ChatItem.Text text
+    if (entry instanceof ChatItem.Text text
         && pending != null
         && !text.newParagraph()
         && Objects.equals(text.under(), pending.under())
         && now.isBefore(pendingSince.plus(LiveMembers.DELTA_WINDOW))) {
       pending =
-          new ChatItem.Text(pending.under(), pending.text() + text.text(), pending.newParagraph());
+          new ChatItem.Text(
+              pending.under(),
+              pending.text() + text.text(),
+              pending.newParagraph(),
+              pending.clipped() || text.clipped());
       return 0;
     }
     flush();
-    if (item instanceof ChatItem.Text text) {
+    if (entry instanceof ChatItem.Text text) {
       pending = text;
       pendingSince = now;
       Thread.ofVirtual().name("sail-chat-text-" + session).start(this::flushLater);
       return 0;
     }
-    return append(item);
+    return append(store, session, entry, now, host::arrived);
   }
 
   private void flushLater() {
@@ -274,19 +347,8 @@ final class ChatProcess {
     if (pending != null) {
       var text = pending;
       pending = null;
-      append(text);
+      append(store, session, text, timing.clock().get(), host::arrived);
     }
-  }
-
-  private long append(ChatItem item) {
-    var seq =
-        store.append(
-            session,
-            ChatWire.kind(item),
-            YamlUtil.dumpJson(ChatWire.fields(item)),
-            timing.clock().get());
-    host.arrived();
-    return seq;
   }
 
   /** Whether the process is over: nothing reads it any more. */
@@ -298,53 +360,52 @@ final class ChatProcess {
   synchronized boolean idle(Instant now) {
     return !turnOpen
         && !ending
-        && store.unhanded(session, ChatHost.MESSAGE).isEmpty()
+        && unhanded().isEmpty()
         && !now.isBefore(lastActivity.plus(maxIdle));
   }
 
-  /** Whether a request it holds has waited {@code bound} unanswered at {@code now}. */
+  /**
+   * Whether its open turn holds a request that has waited {@code bound} unanswered at {@code now}.
+   */
   synchronized boolean unanswered(Instant now, Duration bound) {
-    return !ending && held.values().stream().anyMatch(since -> !now.isBefore(since.plus(bound)));
+    return turnOpen
+        && !ending
+        && open(store, session).requests().values().stream()
+            .anyMatch(since -> !now.isBefore(since.plus(bound)));
   }
 
   /**
-   * Ends the process as {@link ProcessEnd} does, given {@code first} to end on its own, having said
-   * why in the chat when {@code told} says (null for nothing to say). Returns whether it is over.
+   * Ends the process as {@link ProcessEnd} does, given {@code first} to end on its own; a turn it
+   * leaves open is cut, Sail saying why in {@code why} (null when the person ended it, which needs
+   * no saying). Returns whether it is over.
    */
-  boolean end(Duration first, String told) {
+  boolean end(Duration first, String why) {
     synchronized (this) {
       if (over) {
         return true;
       }
       if (!ending) {
         ending = true;
-        if (told != null) {
-          log(new ChatItem.Told(told));
-        }
+        endReason = why;
         ProcessEnd.closeInput(handle, "sail-chat-end-" + session);
       }
     }
     return ProcessEnd.signalled(handle, timing.grace(), first, false, this::settled);
   }
 
-  /**
-   * The process is done: a turn it left open is cut, said as such when nobody asked it to end, its
-   * open rows closed and its held requests withdrawn.
-   */
+  /** The process is done: a turn it left open is cut, said why. */
   private void finished() {
     synchronized (this) {
       try {
         flush();
-        if (turnOpen && !ending) {
-          log(new ChatItem.Told(died(exitCode())));
-        }
-        closeRows();
-        held.keySet().forEach(id -> log(new ChatItem.Withdrawn(id)));
-        held.clear();
         if (turnOpen) {
-          log(new ChatItem.Interrupted());
+          cut(
+              store,
+              session,
+              ending ? endReason : died(exitCode()),
+              timing.clock().get(),
+              host::arrived);
           turnOpen = false;
-          store.turn(session, false);
         }
       } finally {
         over = true;
@@ -372,19 +433,70 @@ final class ChatProcess {
 
   /** Waits up to {@code within} for the process to be over; returns whether it is. */
   private synchronized boolean settled(Duration within, boolean answering) {
-    var deadline = System.nanoTime() + within.toNanos();
-    while (!over) {
-      var left = deadline - System.nanoTime();
-      if (left <= 0) {
-        break;
-      }
-      try {
-        wait(Math.max(1, left / 1_000_000));
-      } catch (InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-        break;
+    ProcessEnd.await(this, within, () -> over);
+    return over;
+  }
+
+  /**
+   * Cuts the open turn of chat {@code session}, whose process is gone: Sail says {@code why} (none
+   * when null), each row with no result is closed as unread, each request withdrawn, since it died
+   * with the process, and the turn ends interrupted.
+   */
+  static void cut(ChatStore store, String session, String why, Instant at, Runnable arrived) {
+    if (why != null) {
+      append(store, session, new ChatWire.Told(why), at, arrived);
+    }
+    var open = open(store, session);
+    closeRows(store, session, open.rows(), at, arrived);
+    open.requests()
+        .keySet()
+        .forEach(id -> append(store, session, new ChatItem.Withdrawn(id), at, arrived));
+    append(store, session, new ChatItem.Interrupted(), at, arrived);
+    store.turn(session, false);
+  }
+
+  /** What chat {@code session}'s open turn left open, read from its log. */
+  static Open open(ChatStore store, String session) {
+    var rows = new LinkedHashMap<String, String>();
+    var requests = new LinkedHashMap<String, Instant>();
+    for (var item : store.since(session, TURN_ENDED, OPENING)) {
+      var fields = YamlUtil.parseJsonLine(item.payload(), LiveStream.MAX_LINE_CHARS);
+      var id = (String) fields.get("id");
+      if (item.kind().equals(TOOL)) {
+        rows.put(id, (String) fields.get("under"));
+      } else if (item.kind().equals(DONE)) {
+        rows.remove(id);
+      } else if (item.kind().equals(WITHDRAWN)) {
+        requests.remove(id);
+      } else {
+        requests.put(id, item.at());
       }
     }
-    return over;
+    return new Open(rows, requests);
+  }
+
+  private static void closeRows(
+      ChatStore store, String session, Map<String, String> rows, Instant at, Runnable arrived) {
+    rows.forEach(
+        (id, under) ->
+            append(
+                store,
+                session,
+                new ChatItem.ToolDone(under, id, UNREAD, false, false),
+                at,
+                arrived));
+  }
+
+  /** Logs {@code entry} in chat {@code session} at {@code at}; returns its number. */
+  private static long append(
+      ChatStore store, String session, Record entry, Instant at, Runnable arrived) {
+    var seq =
+        store.append(
+            session,
+            ChatWire.kind(entry.getClass()),
+            YamlUtil.dumpJson(ChatWire.fields(entry)),
+            at);
+    arrived.run();
+    return seq;
   }
 }

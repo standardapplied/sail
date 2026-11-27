@@ -1545,19 +1545,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
      * open turn to end; returns whether it is over.
      */
     private synchronized boolean settled(Duration within, boolean answering) {
-      var deadline = System.nanoTime() + within.toNanos();
-      while (!over && !(answering && !turnOpen)) {
-        var left = deadline - System.nanoTime();
-        if (left <= 0) {
-          break;
-        }
-        try {
-          wait(Math.max(1, left / 1_000_000));
-        } catch (InterruptedException interrupted) {
-          Thread.currentThread().interrupt();
-          break;
-        }
-      }
+      ProcessEnd.await(this, within, () -> over || answering && !turnOpen);
       return over;
     }
   }

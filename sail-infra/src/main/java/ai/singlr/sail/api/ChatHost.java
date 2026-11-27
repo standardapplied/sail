@@ -13,7 +13,6 @@ import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentProcess;
-import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ChatWire;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LaunchEnv;
@@ -39,6 +38,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
@@ -55,9 +55,6 @@ import java.util.function.Supplier;
  */
 public final class ChatHost implements AutoCloseable {
 
-  /** The kind a person's message is logged as. */
-  static final String MESSAGE = ChatWire.kind(new ChatItem.Message("", List.of(), false));
-
   /** The most items one read answers. */
   static final int PAGE = 500;
 
@@ -69,6 +66,14 @@ public final class ChatHost implements AutoCloseable {
 
   /** How long a chat's log is kept once it ended. */
   static final Duration RETENTION = Duration.ofDays(30);
+
+  /** What a turn that sail stopping cut says. */
+  static final String STOPPED =
+      "Sail stopped while this turn was open, so it was cut; your next message starts it again.";
+
+  /** What a turn that a restart of sail cut says. */
+  static final String RESTARTED =
+      "Sail restarted while this turn was open, so it was cut; your next message starts it again.";
 
   /** Where a chat's process runs, and the only folder its attachments are read from. */
   static final String WORKSPACE = ContainerExec.DEV_WORKSPACE;
@@ -182,8 +187,8 @@ public final class ChatHost implements AutoCloseable {
    */
   public Opened open(
       String project, String workspace, String harness, String mode, boolean inside) {
-    var form = form(Harnesses.of(Strings.requireNonBlank(harness, "harness")));
-    form.argv(new HarnessChat.Launch(mode, null, null));
+    var agent = Harnesses.of(Strings.requireNonBlank(harness, "harness"));
+    Harness.Mode.named(form(agent).modes(), mode, agent.displayName());
     var person = person();
     admit(() -> doors.admitWorkspace(project, workspace, person));
     door(() -> doors.admitAgent(project, workspace, agent(harness, mode, inside), person));
@@ -248,18 +253,29 @@ public final class ChatHost implements AutoCloseable {
     synchronized (lock(session)) {
       chat = store.find(session).orElseThrow(() -> unknown(session));
       if (chat.ended()) {
-        throw new ApiException(
-            ErrorCode.CONFLICT,
-            "This chat has ended, so it takes no message.",
-            "Open a new chat in workspace " + chat.workspace() + ".");
+        throw ended(chat);
       }
       var images = images(chat, attachments);
       var process = live.get(session);
       if (process == null || process.over()) {
         process = start(chat);
       }
+      if (store.find(session).map(ChatStore.Chat::ended).orElse(true)) {
+        var ended = process;
+        Thread.ofVirtual()
+            .name("sail-chat-ended-" + session)
+            .start(() -> ended.end(timing.grace().afterInt(), null));
+        throw ended(chat);
+      }
       return process.send(text, List.copyOf(attachments), images);
     }
+  }
+
+  private static ApiException ended(ChatStore.Chat chat) {
+    return new ApiException(
+        ErrorCode.CONFLICT,
+        "This chat has ended, so it takes no message.",
+        "Open a new chat in workspace " + chat.workspace() + ".");
   }
 
   /**
@@ -268,12 +284,11 @@ public final class ChatHost implements AutoCloseable {
    */
   public void end(String session) {
     yours(session);
-    synchronized (lock(session)) {
-      store.ended(session, timing.clock().get());
-      var process = live.get(session);
-      if (process != null) {
-        process.end(timing.grace().afterInt(), null);
-      }
+    store.ended(session, timing.clock().get());
+    locks.remove(session);
+    var process = live.get(session);
+    if (process != null) {
+      process.end(timing.grace().afterInt(), null);
     }
     arrived();
   }
@@ -284,14 +299,8 @@ public final class ChatHost implements AutoCloseable {
    */
   public int reclaim() {
     var cut = store.openTurns();
-    for (var session : cut) {
-      store.append(
-          session,
-          ChatWire.kind(new ChatItem.Interrupted()),
-          YamlUtil.dumpJson(Map.of()),
-          timing.clock().get());
-      store.turn(session, false);
-    }
+    cut.forEach(
+        session -> ChatProcess.cut(store, session, RESTARTED, timing.clock().get(), this::arrived));
     return cut.size();
   }
 
@@ -328,8 +337,9 @@ public final class ChatHost implements AutoCloseable {
   @Override
   public void close() {
     sweepPass.close();
-    for (var process : List.copyOf(live.values())) {
-      process.end(timing.grace().afterInt(), null);
+    try (var ending = Executors.newVirtualThreadPerTaskExecutor()) {
+      live.values()
+          .forEach(process -> ending.execute(() -> process.end(timing.grace().result(), STOPPED)));
     }
   }
 

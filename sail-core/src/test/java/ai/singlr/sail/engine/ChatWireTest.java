@@ -32,40 +32,60 @@ class ChatWireTest {
   @Test
   void anItemsTypeIsItsRecordsNameInSnakeCase() {
     assertEquals(
-        List.of("turn_ended", "tool_done", "self_started", "message", "told"),
+        List.of("turn_ended", "tool_done", "self_started"),
         List.of(
-                new ChatItem.TurnEnded(null, 1, 2, 3),
-                new ChatItem.ToolDone(null, "t", "", false),
-                new ChatItem.SelfStarted(),
-                new ChatItem.Message("hi", List.of(), false),
-                new ChatItem.Told("words"))
-            .stream()
-            .map(ChatWire::kind)
-            .toList());
+            ChatWire.kind(ChatItem.TurnEnded.class),
+            ChatWire.kind(ChatItem.ToolDone.class),
+            ChatWire.kind(ChatItem.SelfStarted.class)));
+    assertEquals(
+        List.of("message", "delivered", "told"),
+        List.of(
+            ChatWire.kind(ChatWire.Message.class),
+            ChatWire.kind(ChatWire.Delivered.class),
+            ChatWire.kind(ChatWire.Told.class)));
+  }
+
+  @Test
+  void sailsOwnEntriesSayTheirFieldsAsAnItemDoes() {
+    assertEquals(
+        Map.of("text", "look", "attachments", List.of("shots/red.png"), "queued", true),
+        ChatWire.fields(new ChatWire.Message("look", List.of("shots/red.png"), true)));
+    assertEquals(Map.of("message", 7L), ChatWire.fields(new ChatWire.Delivered(7)));
+    assertEquals(
+        Map.of("words", "Sail restarted."), ChatWire.fields(new ChatWire.Told("Sail restarted.")));
   }
 
   @Test
   void aCallsRowCarriesItsKindInLowerCaseAndItsDetailWithItsOwnType() {
-    var row = ChatWire.fields(shown("01-baseline-live-flags", 13));
+    var row = ChatWire.fields((Record) shown("01-baseline-live-flags", 13));
 
     var expected = new LinkedHashMap<String, Object>();
     expected.put("id", "toolu_011VvCwXcvkemp321CMEyur6");
     expected.put("kind", "command");
     expected.put("words", "Print probe-ok");
-    expected.put("detail", Map.of("type", "command", "line", "echo probe-ok"));
+    expected.put("detail", Map.of("type", "command", "line", "echo probe-ok", "clipped", false));
+    expected.put("clipped", false);
     assertEquals(expected, row, "no under: the agent's own row");
   }
 
   @Test
   void aFailedTurnSaysItsLoginOutcomeByItsType() {
     var failed =
-        ChatWire.fields(new ChatItem.Failed("Invalid API key", new LoginOutcome.Refused()));
+        ChatWire.fields(new ChatItem.Failed("Invalid API key", new LoginOutcome.Refused(), false));
     var limited =
-        ChatWire.fields(new ChatItem.Failed("limit", new LoginOutcome.Limited("3pm (UTC)")));
+        ChatWire.fields(new ChatItem.Failed("limit", new LoginOutcome.Limited("3pm (UTC)"), false));
 
-    assertEquals(Map.of("words", "Invalid API key", "login", Map.of("type", "refused")), failed);
     assertEquals(
-        Map.of("words", "limit", "login", Map.of("type", "limited", "resets", "3pm (UTC)")),
+        Map.of("words", "Invalid API key", "login", Map.of("type", "refused"), "clipped", false),
+        failed);
+    assertEquals(
+        Map.of(
+            "words",
+            "limit",
+            "login",
+            Map.of("type", "limited", "resets", "3pm (UTC)"),
+            "clipped",
+            false),
         limited);
   }
 
@@ -80,7 +100,8 @@ class ChatWireTest {
                     new ChatItem.Asked(
                         "Which color?",
                         "Color",
-                        List.of(new ChatItem.Choice("Red", "Choose red")),
+                        List.of(new ChatItem.Choice("Red", "Choose red", false)),
+                        false,
                         false))));
 
     assertEquals(
@@ -97,8 +118,10 @@ class ChatWireTest {
                     "header",
                     "Color",
                     "choices",
-                    List.of(Map.of("label", "Red", "about", "Choose red")),
+                    List.of(Map.of("label", "Red", "about", "Choose red", "clipped", false)),
                     "multi_select",
+                    false,
+                    "clipped",
                     false))),
         question);
   }
@@ -108,7 +131,7 @@ class ChatWireTest {
     assertEquals(
         Map.of(
             "cost_usd", 0.000301485, "tokens_in", 23708L, "tokens_out", 86L, "duration_ms", 940L),
-        ChatWire.fields(shown("02b-relay-stdio", 138)));
+        ChatWire.fields((Record) shown("02b-relay-stdio", 138)));
     assertEquals(
         Map.of("tokens_in", 0L, "tokens_out", 0L, "duration_ms", 286L),
         ChatWire.fields(new ChatItem.TurnEnded(null, 0, 0, 286)));

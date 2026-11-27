@@ -6,6 +6,8 @@
 package ai.singlr.sail.store;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -117,10 +119,27 @@ public final class ChatStore {
     return db.query(
         "SELECT seq, kind, payload, at FROM chat_items WHERE session = ? AND seq > ?"
             + " ORDER BY seq LIMIT ?",
-        row -> new Item(row.integer(0), row.text(1), row.text(2), row.instant(3)),
+        ChatStore::item,
         session,
         seq,
         limit);
+  }
+
+  /**
+   * The chat's items of {@code kinds} logged after its last item of kind {@code since} (all of them
+   * when it has none), oldest first.
+   */
+  public List<Item> since(String session, String since, List<String> kinds) {
+    var params = new ArrayList<Object>(List.of(session, session, since));
+    params.addAll(kinds);
+    return db.query(
+        "SELECT seq, kind, payload, at FROM chat_items WHERE session = ? AND seq >"
+            + " (SELECT COALESCE(MAX(seq), 0) FROM chat_items WHERE session = ? AND kind = ?)"
+            + " AND kind IN ("
+            + String.join(", ", Collections.nCopies(kinds.size(), "?"))
+            + ") ORDER BY seq",
+        ChatStore::item,
+        params.toArray());
   }
 
   /** The chat's items of {@code kind} after the last message it handed, oldest first. */
@@ -129,7 +148,7 @@ public final class ChatStore {
         "SELECT i.seq, i.kind, i.payload, i.at FROM chat_items i"
             + " JOIN chat_sessions s ON s.id = i.session"
             + " WHERE i.session = ? AND i.kind = ? AND i.seq > s.handed ORDER BY i.seq",
-        row -> new Item(row.integer(0), row.text(1), row.text(2), row.instant(3)),
+        ChatStore::item,
         session,
         kind);
   }
@@ -185,6 +204,10 @@ public final class ChatStore {
   public int expire(Instant before) {
     db.execute("DELETE FROM chat_sessions WHERE ended_at IS NOT NULL AND ended_at < ?", before);
     return db.changes();
+  }
+
+  private static Item item(Sqlite.Row row) {
+    return new Item(row.integer(0), row.text(1), row.text(2), row.instant(3));
   }
 
   private static Chat chat(Sqlite.Row row) {

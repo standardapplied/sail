@@ -80,17 +80,22 @@
     "allRecordComponents": true
   },
   {
+    "name": "ai.singlr.sail.engine.ChatItem$Always",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Change",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
     "name": "ai.singlr.sail.engine.ChatItem$Choice",
     "allDeclaredMethods": true,
     "allRecordComponents": true
   },
   {
     "name": "ai.singlr.sail.engine.ChatItem$Compacted",
-    "allDeclaredMethods": true,
-    "allRecordComponents": true
-  },
-  {
-    "name": "ai.singlr.sail.engine.ChatItem$Delivered",
     "allDeclaredMethods": true,
     "allRecordComponents": true
   },
@@ -131,11 +136,6 @@
   },
   {
     "name": "ai.singlr.sail.engine.ChatItem$Interrupted",
-    "allDeclaredMethods": true,
-    "allRecordComponents": true
-  },
-  {
-    "name": "ai.singlr.sail.engine.ChatItem$Message",
     "allDeclaredMethods": true,
     "allRecordComponents": true
   },
@@ -185,11 +185,6 @@
     "allRecordComponents": true
   },
   {
-    "name": "ai.singlr.sail.engine.ChatItem$Told",
-    "allDeclaredMethods": true,
-    "allRecordComponents": true
-  },
-  {
     "name": "ai.singlr.sail.engine.ChatItem$Tool",
     "allDeclaredMethods": true,
     "allRecordComponents": true
@@ -205,7 +200,27 @@
     "allRecordComponents": true
   },
   {
+    "name": "ai.singlr.sail.engine.ChatItem$Unreadable",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
     "name": "ai.singlr.sail.engine.ChatItem$Withdrawn",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatWire$Delivered",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatWire$Message",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatWire$Told",
     "allDeclaredMethods": true,
     "allRecordComponents": true
   },
