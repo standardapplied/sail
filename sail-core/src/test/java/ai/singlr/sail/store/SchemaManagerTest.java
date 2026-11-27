@@ -59,6 +59,8 @@ class SchemaManagerTest {
             "catalog",
             "change_heads",
             "change_log",
+            "chat_items",
+            "chat_sessions",
             "chunks",
             "compacted_entries",
             "container_leases",
@@ -127,7 +129,7 @@ class SchemaManagerTest {
     var refusal = assertThrows(Remedied.State.class, schema::migrate);
 
     assertEquals(
-        "Database schema v244 was made by an earlier Sail release; this release opens only v1006"
+        "Database schema v244 was made by an earlier Sail release; this release opens only v1007"
             + " and converts none: the box is reinstalled.",
         refusal.reason());
     assertEquals(List.of(Remedy.sail("init")), refusal.remedy().commands());
@@ -142,25 +144,25 @@ class SchemaManagerTest {
   }
 
   /**
-   * The database 0.76.0 made, whose sessions name no passkey they were signed in with: refused
-   * whole, the reinstall named, nothing created or changed beside it.
+   * The database 0.77.0 made, which holds no chats: refused whole, the reinstall named, nothing
+   * created or changed beside it.
    */
   @Test
   void aDatabaseTheReleaseBeforeMadeIsRefusedNamingAReinstallAndLeftAsItWas() {
-    stageAtVersion(1005);
+    stageAtVersion(1006);
     db.execute("CREATE TABLE runs (id TEXT PRIMARY KEY)");
     var schema = new SchemaManager(db);
 
     var refusal = assertThrows(Remedied.State.class, schema::migrate);
 
     assertEquals(
-        "Database schema v1005 was made by an earlier Sail release; this release opens only v1006"
+        "Database schema v1006 was made by an earlier Sail release; this release opens only v1007"
             + " and converts none: the box is reinstalled.",
         refusal.reason());
     assertEquals(
         "Move " + tempDir.resolve("test.db") + " aside and run 'sail init' to make a fresh one.",
         refusal.remedy().plain());
-    assertEquals(1005, schema.currentVersion());
+    assertEquals(1006, schema.currentVersion());
     assertEquals(
         List.of("id"),
         db.query("SELECT name FROM pragma_table_info('runs')", row -> row.text(0)),

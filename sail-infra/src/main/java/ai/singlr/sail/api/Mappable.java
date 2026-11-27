@@ -13,12 +13,11 @@ import java.util.Map;
  * may be included — {@code ApiJson} strips them at encode time so each record's {@code toMap} stays
  * small and field-order-driven.
  *
- * <p>Why not reflection: {@code Class.getRecordComponents()} requires reflection metadata that
- * GraalVM native-image does not ship by default. Avoiding the reflection call eliminates the whole
- * class of {@code UnsupportedFeatureError: Record components not available} crashes that surface
- * only in the native binary, never on the JVM. Adding {@code toMap} per record is a few lines of
- * compile-time-safe boilerplate that the compiler enforces — far cheaper than a hand-maintained
- * {@code reflect-config.json}.
+ * <p>A route's own answer is a few records, each a few lines of {@code toMap} the compiler checks.
+ * A family of many records said one way, as a chat's items are ({@code ChatWire}), is read through
+ * its record components instead: {@code Class.getRecordComponents()} needs reflection metadata
+ * GraalVM native-image does not ship by default, so each such record is listed in {@code
+ * reflect-config.json}, and a test holds that list whole ({@code ChatWireReflectionTest}).
  */
 public interface Mappable {
 

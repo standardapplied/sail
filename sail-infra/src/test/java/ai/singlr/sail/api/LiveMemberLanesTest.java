@@ -25,10 +25,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -372,6 +374,29 @@ class LiveMemberLanesTest {
     assertEquals(1, reconciler().finishDeadSessions(Set.of()), "its turn ended and it exited");
     assertEquals("stopped", room.run(process.runId).status());
     assertEquals(NOTHING, room.live.reclaim(HANDLE));
+  }
+
+  /**
+   * A restart of the box took a member's process with it and gave its pid to another process of the
+   * person: reclaim never signals that one, and finishes the run as one whose process is gone.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aRestartNeverSignalsTheProcessTheBoxGaveItsMembersPid() {
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("Still writing"));
+    room.restart();
+    var other = room.container.pidReused(process.runId);
+
+    var reclaimed = room.live.reclaim(HANDLE);
+    room.settle();
+
+    assertEquals(new LiveMembers.Reclaimed(1, List.of()), reclaimed);
+    assertTrue(room.container.alive(other), "the process that holds the pid now is not signalled");
+    assertEquals(List.of(), room.container.commandsContaining("kill \"$1\""), "nothing signalled");
+    assertEquals("stopped", room.run(process.runId).status());
+    assertNull(
+        room.container.file(AgentUnit.live(process.runId).pidPath()), "its pid file cleaned");
   }
 
   @Test

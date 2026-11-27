@@ -117,30 +117,11 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     String post(RunStore.RunRow run, String roomId, String text, MessageStore.Mark mark);
   }
 
-  /**
-   * How long each step of ending a member waits: for a process that was only idle to exit once its
-   * stdin closes, for an open turn's result, and after each signal.
-   */
-  record Grace(Duration idleExit, Duration result, Duration afterInt, Duration afterTerm) {
-
-    static final Grace DEFAULT =
-        new Grace(
-            Duration.ofSeconds(60),
-            Duration.ofSeconds(30),
-            Duration.ofSeconds(10),
-            Duration.ofSeconds(10));
-
-    /** The longest an end can take, start to finish. */
-    Duration whole() {
-      return idleExit.plus(afterInt).plus(afterTerm);
-    }
-  }
-
   /** Time as a member reads it, injectable so tests never sleep. */
-  record Timing(Supplier<Instant> clock, RoomWakeReactor.Delay delay, Grace grace) {
+  record Timing(Supplier<Instant> clock, RoomWakeReactor.Delay delay, ProcessEnd.Grace grace) {
 
     static Timing real() {
-      return new Timing(DateTimeUtils::now, Thread::sleep, Grace.DEFAULT);
+      return new Timing(DateTimeUtils::now, Thread::sleep, ProcessEnd.Grace.DEFAULT);
     }
   }
 
@@ -792,13 +773,11 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   /** Signals {@code run}'s process through its pid file; whether it is then known gone. */
   private boolean halted(RunStore.RunRow run) {
     var unit = AgentUnit.recorded(run.id(), run.unit());
-    try {
-      return new AgentSession(shell).killAgent(run.place().instance(), unit)
-              instanceof AgentSession.Halt.Ended
-          || new AgentPresence(shell).gone(run.place(), unit);
-    } catch (Exception unanswered) {
-      return false;
-    }
+    return ProcessEnd.halted(
+        shell,
+        run.place().instance(),
+        unit,
+        () -> new AgentPresence(shell).gone(run.place(), unit));
   }
 
   /**
@@ -1535,11 +1514,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     }
 
     /**
-     * Ends the process: its stdin is closed, so it finishes what it is doing and exits; it is given
-     * {@code first} to do that, or to answer the turn it has open, and is then interrupted and, if
-     * that does not end it either, terminated. Returns whether it is over. The close is made on a
-     * thread of its own: it waits behind a write the process is not reading, and the signals that
-     * end such a process must not wait with it.
+     * Ends the process as {@link ProcessEnd} does, given {@code first} to finish on its own or to
+     * answer the turn it has open. Returns whether it is over.
      */
     private boolean end(String why, Duration first) {
       boolean answering;
@@ -1550,17 +1526,11 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         if (!ending) {
           ending = true;
           endReason = why;
-          Thread.ofVirtual().name("sail-live-end-" + runId).start(handle.stdin()::close);
+          ProcessEnd.closeInput(handle, "sail-live-end-" + runId);
         }
         answering = turnOpen;
       }
-      if (!settled(first, answering)) {
-        handle.signal(AgentProcess.Signal.INT);
-        if (!over(timing.grace().afterInt())) {
-          handle.signal(AgentProcess.Signal.TERM);
-        }
-      }
-      return over(timing.grace().afterTerm());
+      return ProcessEnd.signalled(handle, timing.grace(), first, answering, this::settled);
     }
 
     /** Whether the process is over within {@code within}. */
@@ -1573,19 +1543,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
      * open turn to end; returns whether it is over.
      */
     private synchronized boolean settled(Duration within, boolean answering) {
-      var deadline = System.nanoTime() + within.toNanos();
-      while (!over && !(answering && !turnOpen)) {
-        var left = deadline - System.nanoTime();
-        if (left <= 0) {
-          break;
-        }
-        try {
-          wait(Math.max(1, left / 1_000_000));
-        } catch (InterruptedException interrupted) {
-          Thread.currentThread().interrupt();
-          break;
-        }
-      }
+      ProcessEnd.await(this, within, () -> over || answering && !turnOpen);
       return over;
     }
   }

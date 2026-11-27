@@ -107,8 +107,23 @@ final class WorkspaceVerbs {
             new ShellExecutor(dryRun),
             WorkspaceVerbs::ownerOf,
             dryRun ? SessionYield.NONE : new PtyHostYield(),
+            dryRun ? (project, name) -> {} : WorkspaceVerbs::forgetChats,
             keeper());
     return Actor.call(SailCommandLine.operator(), () -> door.through(doors));
+  }
+
+  /** Erases the chats of workspace {@code name} of {@code project}, which this box deleted. */
+  static void forgetChats(String project, String name) {
+    try (var operations = OperationsFactory.open()) {
+      operations.chats().forgetWorkspace(project, name);
+    }
+  }
+
+  /** Erases every chat of {@code project}, whose workspaces this box destroyed. */
+  static void forgetProjectChats(String project) {
+    try (var operations = OperationsFactory.open()) {
+      operations.chats().forgetProject(project);
+    }
   }
 
   /** This box's own person when it is a node, who keeps the workspaces nobody owns; else null. */

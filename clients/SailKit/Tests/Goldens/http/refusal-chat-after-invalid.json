@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000005/chat?after=last"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "after is the seq of the last item read, 0 for none."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

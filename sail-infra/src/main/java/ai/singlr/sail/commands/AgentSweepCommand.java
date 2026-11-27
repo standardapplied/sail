@@ -14,6 +14,7 @@ import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
@@ -137,7 +138,8 @@ public final class AgentSweepCommand implements Runnable {
             Workspaces.onThisBox(shell),
             DispatchOperations.terminalLauncher(),
             listener,
-            StopOperations.Listener.NONE),
+            StopOperations.Listener.NONE,
+            new ContainerAgentProcess(shell)),
         new PtyHostYield());
   }
 

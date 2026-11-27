@@ -67,6 +67,25 @@ public record AgentUnit(
     return recorded(runId, LIVE_UNIT_PREFIX + Ids.requireUuid(runId));
   }
 
+  /**
+   * A chat's process: no unit, its files in the chat's own folder ({@link #chatDir}), which each of
+   * the chat's processes uses in turn, so a sail started later finds one left over from before it.
+   */
+  public static AgentUnit chat(String session) {
+    var dir = chatDir(session);
+    return new AgentUnit(
+        "",
+        dir + "/agent.log",
+        dir + "/agent.pid",
+        dir + "/agent-session.json",
+        dir + "/agent-task.txt");
+  }
+
+  /** Chat {@code session}'s folder: {@code ~/.sail/chats/<session>}. */
+  public static String chatDir(String session) {
+    return DIR + "/chats/" + Ids.requireUuid(session);
+  }
+
   /** Whether {@code unitName} is a live member's: what a run row's recorded unit says of it. */
   public static boolean isLive(String unitName) {
     return unitName != null && unitName.startsWith(LIVE_UNIT_PREFIX);
@@ -124,6 +143,19 @@ public record AgentUnit(
    */
   public String launchEnvPath() {
     return logPath.substring(0, logPath.lastIndexOf('/')) + "/launch.env";
+  }
+
+  /**
+   * Where the wrapper of a process over pipes records the start of the process its pid names,
+   * beside the pid file: what tells that process from a later one the box gives the same pid.
+   */
+  public String startPath() {
+    return startPath(pidPath);
+  }
+
+  /** The start record beside the pid file at {@code pidPath} ({@link #startPath()}). */
+  public static String startPath(String pidPath) {
+    return pidPath + ".start";
   }
 
   /** Where the watcher records the guardrail that ended this run, beside the run's own files. */

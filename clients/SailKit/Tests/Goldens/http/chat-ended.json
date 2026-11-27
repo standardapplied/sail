@@ -1,0 +1,9 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000005:end"
+  },
+  "response": {
+    "status": 204
+  }
+}

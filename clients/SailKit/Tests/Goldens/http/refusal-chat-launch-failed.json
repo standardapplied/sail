@@ -1,0 +1,21 @@
+{
+  "request": {
+    "body": {
+      "text": "hi"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000005/chat/messages"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Check that the workspace is running and answers, then send the message again.",
+        "code": "agent_launch_failed",
+        "field_errors": [],
+        "message": "Claude Code did not start in workspace berth."
+      },
+      "schema_version": 1
+    },
+    "status": 500
+  }
+}

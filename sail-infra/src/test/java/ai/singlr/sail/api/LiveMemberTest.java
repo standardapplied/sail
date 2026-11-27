@@ -422,16 +422,16 @@ class LiveMemberTest {
   @Test
   void theGraceEachEndWaitsWithIsPinned() {
     assertEquals(
-        new LiveMembers.Grace(
+        new ProcessEnd.Grace(
             Duration.ofSeconds(60),
             Duration.ofSeconds(30),
             Duration.ofSeconds(10),
             Duration.ofSeconds(10)),
-        LiveMembers.Grace.DEFAULT);
-    assertEquals(Duration.ofSeconds(80), LiveMembers.Grace.DEFAULT.whole());
+        ProcessEnd.Grace.DEFAULT);
+    assertEquals(Duration.ofSeconds(80), ProcessEnd.Grace.DEFAULT.whole());
     assertEquals(Duration.ofMillis(50), LiveMembers.DELTA_WINDOW);
     assertEquals(Duration.ofSeconds(30), LiveMembers.ACTIVITY_FLOOR);
-    assertEquals(LiveMembers.Grace.DEFAULT, LiveMembers.Timing.real().grace());
+    assertEquals(ProcessEnd.Grace.DEFAULT, LiveMembers.Timing.real().grace());
   }
 
   @Test

@@ -6,6 +6,9 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,10 +25,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
+import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
@@ -93,15 +98,22 @@ class ContainerAgentProcessTest {
             "--env",
             "SAIL_RUN_ID=run-1",
             "--",
+            "sh",
+            "-c",
+            "mkdir -p -- \"${1%/*}\" && cat /proc/$$/stat > \"$3\" && printf '%s\\n' \"$$\" >"
+                + " \"$1\" && shift 3 && exec \"$@\"",
+            "sh",
+            "/home/dev/.sail/runs/r/agent.pid",
+            "/home/dev/.sail/runs/r/agent.log",
+            "/home/dev/.sail/runs/r/agent.pid.start",
             "bash",
             "-lc",
             "f=/home/dev/.sail/runs/r/launch.env; set +x; while IFS= read -r kv; do export \"$kv\";"
-                + " done <"
-                + " \"$f\" || exit 1; rm -f \"$f\"; printf '%s\\n' \"$$\" > \"$1\"; exec \"${@:3}\" 2>>"
-                + " \"$2\"",
+                + " done < \"$f\" || exit 1; rm -f \"$f\"; exec \"${@:4}\" 2>> \"$2\"",
             "bash",
             "/home/dev/.sail/runs/r/agent.pid",
             "/home/dev/.sail/runs/r/agent.log",
+            "/home/dev/.sail/runs/r/agent.pid.start",
             "claude",
             "--print",
             "a b; c"),
@@ -150,6 +162,140 @@ class ContainerAgentProcessTest {
         "the pid file names the command itself: the wrapper exec'd into it");
     assertEquals("oops\n", Files.readString(logFile), "stderr is the log's, never stdout's");
     assertEquals(OptionalInt.of(4242), handle.pid());
+  }
+
+  /**
+   * The wrapper records, beside the pid, the start of the process the pid names: the command's own,
+   * which it exec'd into, read as a halt reads it.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void theWrapperRecordsTheStartOfTheProcessItsPidNames() throws Exception {
+    var pidFile = dir.resolve("agent.pid");
+    var handle =
+        held(
+            new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of("bash", "-c", "echo started; read -r line"),
+                    pidFile.toString(),
+                    dir.resolve("agent.log").toString(),
+                    launchEnv("SAIL_RUN_CREDENTIAL=c1")));
+
+    assertEquals("started", handle.stdout().read());
+    var pid = Files.readString(pidFile).strip();
+    var recorded =
+        AgentSession.parseStartTicks(
+            Files.readString(Path.of(AgentUnit.startPath(pidFile.toString()))));
+    var live = AgentSession.parseStartTicks(Files.readString(Path.of("/proc", pid, "stat")));
+
+    assertNotNull(recorded);
+    assertEquals(live, recorded);
+  }
+
+  /**
+   * The wrapper names itself before the login profile runs: a halt in the profile's while finds the
+   * process by its pid and its start and ends it, never reading it as gone while it lives.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aHaltWhileTheLoginProfileRunsEndsTheProcessItsWrapperAlreadyNamed() throws Exception {
+    var home = Files.createDirectories(dir.resolve("home"));
+    Files.writeString(home.resolve(".profile"), "echo profiling; read -r held\n");
+    var pidFile = dir.resolve("agent.pid");
+    UnaryOperator<List<String>> profiled =
+        argv ->
+            Stream.concat(Stream.of("env", "HOME=" + home), LOCALLY.apply(argv).stream()).toList();
+    var handle =
+        held(
+            new ContainerAgentProcess(new ScriptedShellExecutor(), profiled)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of("bash", "-c", "echo agent; read -r line"),
+                    pidFile.toString(),
+                    dir.resolve("agent.log").toString(),
+                    launchEnv("SAIL_RUN_CREDENTIAL=c1")));
+
+    assertEquals("profiling", handle.stdout().read());
+    var pid = Files.readString(pidFile).strip();
+    var record = AgentUnit.startPath(pidFile.toString());
+    assertEquals(
+        AgentSession.parseStartTicks(Files.readString(Path.of("/proc", pid, "stat"))),
+        AgentSession.parseStartTicks(Files.readString(Path.of(record))));
+    var halt =
+        Child.run(
+            new ProcessBuilder(
+                "sh",
+                "-c",
+                AgentSession.KILL_STARTED_SCRIPT,
+                "sh",
+                pidFile.toString(),
+                record,
+                "1",
+                "5"));
+
+    assertEquals("gone", halt.stdout(), halt.stderr());
+    assertEquals(OptionalInt.of(143), handle.waitFor(PATIENCE), "ended by SIGTERM in its profile");
+    assertNull(handle.stdout().read(), "the agent never started");
+  }
+
+  /** A start the wrapper cannot record starts nothing: no agent runs whose identity is unknown. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aStartTheWrapperCannotRecordStartsNoAgent() throws Exception {
+    var pidFile = dir.resolve("agent.pid");
+    Files.createDirectory(Path.of(AgentUnit.startPath(pidFile.toString())));
+    var handle =
+        held(
+            new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of("bash", "-c", "echo started"),
+                    pidFile.toString(),
+                    dir.resolve("agent.log").toString(),
+                    launchEnv("SAIL_RUN_CREDENTIAL=c1")));
+
+    assertNull(handle.stdout().read(), "the agent never started");
+    var exit = handle.waitFor(PATIENCE);
+    assertTrue(exit.isPresent());
+    assertNotEquals(0, exit.getAsInt(), "the wrapper failed");
+    assertFalse(Files.exists(pidFile), "and wrote no pid");
+  }
+
+  /**
+   * A chat's process has no run's folder: its wrapper makes the folder its pid file is in. A chat
+   * signed in inside the workspace is handed an empty login file, as the hand-over writes one.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void theWrapperMakesTheFolderItsPidFileIsIn() throws Exception {
+    var pidFile = dir.resolve("chats/c1/agent.pid");
+    var nothing = Files.writeString(dir.resolve("login.env"), "").toString();
+    var handle =
+        held(
+            new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of("bash", "-c", "echo started"),
+                    pidFile.toString(),
+                    dir.resolve("chats/c1/agent.log").toString(),
+                    nothing));
+
+    assertEquals("started", handle.stdout().read());
+    assertNull(handle.stdout().read());
+    assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
+    assertTrue(Files.readString(pidFile).strip().matches("[0-9]+"), "its pid is written there");
   }
 
   /** The live member's secrets reach it from its launch.env, removed before it starts. */
@@ -257,8 +403,17 @@ class ContainerAgentProcessTest {
   }
 
   private AgentProcess.Handle idle(ShellExec shell) throws IOException {
+    return client(shell, "true");
+  }
+
+  /** A client that runs until its stdin closes. */
+  private AgentProcess.Handle running(ShellExec shell) throws IOException {
+    return client(shell, "cat");
+  }
+
+  private AgentProcess.Handle client(ShellExec shell, String program) throws IOException {
     return held(
-        new ContainerAgentProcess(shell, argv -> List.of("true"))
+        new ContainerAgentProcess(shell, argv -> List.of(program))
             .start(
                 "acme",
                 "/w",
@@ -275,7 +430,7 @@ class ContainerAgentProcessTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("cat /p/agent.pid", "4242\n");
-    var handle = idle(shell);
+    var handle = running(shell);
 
     handle.signal(AgentProcess.Signal.INT);
     handle.signal(AgentProcess.Signal.TERM);
@@ -289,6 +444,26 @@ class ContainerAgentProcessTest {
         shell.arguments());
   }
 
+  /**
+   * A handle whose client has exited signals nothing: the pid file is the chat's, and may name the
+   * process started after it by then.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aHandleWhoseClientExitedSignalsNothing() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("cat /p/agent.pid", "4242\n");
+    var handle = idle(shell);
+    assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
+
+    handle.signal(AgentProcess.Signal.INT);
+    handle.signal(AgentProcess.Signal.TERM);
+
+    assertEquals(List.of(), shell.arguments());
+  }
+
   @Test
   @EnabledOnOs(OS.LINUX)
   void aPidFileThatNamesNoProcessSignalsNothing() throws Exception {
@@ -296,7 +471,7 @@ class ContainerAgentProcessTest {
       var shell =
           new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
               .onOk("cat /p/agent.pid", content);
-      var handle = idle(shell);
+      var handle = running(shell);
 
       handle.signal(AgentProcess.Signal.TERM);
 
@@ -315,7 +490,7 @@ class ContainerAgentProcessTest {
     var throwing =
         idle(new ScriptedShellExecutor().onThrow("cat", new IOException("incus not found")));
     var undelivered =
-        idle(
+        running(
             new ScriptedShellExecutor()
                 .onOk("cat /p/agent.pid", "4242")
                 .onThrow("kill", new IOException("incus not found")));

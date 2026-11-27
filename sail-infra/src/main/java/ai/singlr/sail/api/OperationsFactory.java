@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.ConnectEnvironment;
+import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
@@ -114,10 +115,15 @@ public final class OperationsFactory {
         Workspaces.onThisBox(shell),
         DispatchOperations.shellLauncher(shell),
         DispatchOperations.Listener.NONE,
-        StopOperations.Listener.NONE);
+        StopOperations.Listener.NONE,
+        new ContainerAgentProcess(shell));
   }
 
-  private static SailOperations create(
+  /**
+   * The operations over {@code db}, their lanes {@code hooks}'s, events published to {@code bus}
+   * (none when null) and sync rounds' notices to {@code notice}.
+   */
+  static SailOperations create(
       Sqlite db,
       ShellExec shell,
       EventBus bus,

@@ -130,7 +130,7 @@ import Testing
 
     @Test func everyRefusalWrittenAsJSONReadsBackAsItself() throws {
         let refusals = try Goldens.names(in: "http").filter { $0.hasPrefix("refusal-") }
-        #expect(refusals.count == 44)
+        #expect(refusals.count == 56)
         for name in refusals {
             guard case let .refused(refusal) = SailJSON.refusal(response(try Exchange(name)), route: name) else {
                 Issue.record("\(name) holds no refusal")

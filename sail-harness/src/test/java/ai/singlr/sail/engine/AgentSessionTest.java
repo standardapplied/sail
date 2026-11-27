@@ -32,6 +32,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
@@ -542,6 +543,111 @@ class AgentSessionTest {
   private static final AgentUnit FOREGROUND = AgentUnit.recorded(RUN_ID, "");
   private static final String READ_PID = "cat " + FOREGROUND.pidPath();
   private static final String HALT_PID = "bash 9999";
+
+  private static final AgentUnit CHAT = AgentUnit.chat(RUN_ID);
+  private static final String HALT_STARTED = "sh " + CHAT.pidPath() + " " + CHAT.startPath();
+
+  /**
+   * A started process's halt is one script in the container, its paths as arguments, and only the
+   * word it prints is believed: a run that failed or said nothing is unanswered, whatever it
+   * printed.
+   */
+  @Test
+  void aStartedProcessIsHaltedByOneScriptWhoseWordAloneIsBelieved() throws Exception {
+    var answers =
+        List.of(
+            new ShellExec.Result(0, "gone", ""),
+            new ShellExec.Result(0, "alive", ""),
+            new ShellExec.Result(0, "", ""),
+            new ShellExec.Result(1, "gone", "Error: websocket: close 1006"));
+    var halts = new ArrayList<AgentSession.Halt>();
+    var shells = new ArrayList<ScriptedShellExecutor>();
+    for (var answer : answers) {
+      var shell = new ScriptedShellExecutor().on(HALT_STARTED, answer);
+      shells.add(shell);
+      halts.add(new AgentSession(shell).killStarted("acme-try", CHAT));
+    }
+
+    assertEquals(
+        List.of(
+            AgentSession.Halt.Ended.class,
+            AgentSession.Halt.Survived.class,
+            AgentSession.Halt.Unanswered.class,
+            AgentSession.Halt.Unanswered.class),
+        halts.stream().map(Object::getClass).toList());
+    for (var shell : shells) {
+      assertEquals(1, shell.invocations().size(), "one script, and nothing removed beside it");
+      assertEquals(1, count(shell, HALT_STARTED + " 3 5"));
+    }
+  }
+
+  /**
+   * The halt's script on this machine's real processes: the process its wrapper recorded is ended
+   * and its pid file removed; a pid another process holds (one that started at another time: this
+   * test's own), the pid of a process gone, and a live pid with no record are never signalled, and
+   * read as gone.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void theHaltSignalsOnlyTheProcessItsWrapperRecorded(@TempDir Path dir) throws Exception {
+    var right = process("sleep", "300");
+    var reused = process("sleep", "300");
+    var dead = process("sleep", "300");
+    var deadStart = startOf(dead);
+    dead.destroy();
+    assertTrue(dead.waitFor(10, TimeUnit.SECONDS));
+    var unrecorded = process("sleep", "300");
+
+    var rightSaid = halted(dir, "right", right, startOf(right));
+    var reusedSaid =
+        halted(
+            dir,
+            "reused",
+            reused,
+            Files.readString(
+                Path.of("/proc", String.valueOf(ProcessHandle.current().pid()), "stat")));
+    var deadSaid = halted(dir, "dead", dead, deadStart);
+    var unrecordedSaid = halted(dir, "unrecorded", unrecorded, null);
+
+    assertEquals(
+        List.of("gone", "gone", "gone", "gone"),
+        List.of(rightSaid, reusedSaid, deadSaid, unrecordedSaid));
+    assertTrue(right.waitFor(10, TimeUnit.SECONDS));
+    assertEquals(143, right.exitValue(), "by SIGTERM");
+    assertTrue(reused.isAlive(), "another process at the pid is never signalled");
+    assertTrue(unrecorded.isAlive(), "a pid with no record is never signalled");
+    for (var name : List.of("right", "reused", "dead", "unrecorded")) {
+      assertFalse(Files.exists(dir.resolve(name + ".pid")), name + "'s pid file is removed");
+    }
+  }
+
+  private static String startOf(Process process) throws IOException {
+    return Files.readString(Path.of("/proc", String.valueOf(process.pid()), "stat"));
+  }
+
+  /** What the halt's script says of {@code process}, its start recorded as {@code start}. */
+  private static String halted(Path dir, String name, Process process, String start)
+      throws IOException, InterruptedException {
+    var pid = Files.writeString(dir.resolve(name + ".pid"), process.pid() + "\n");
+    var record = dir.resolve(name + ".pid.start");
+    if (start != null) {
+      Files.writeString(record, start);
+    }
+    var ran =
+        Child.run(
+            new ProcessBuilder(
+                "sh",
+                "-c",
+                AgentSession.KILL_STARTED_SCRIPT,
+                "sh",
+                pid.toString(),
+                record.toString(),
+                "1",
+                "5"));
+    assertEquals(0, ran.exit(), ran.stderr());
+    return ran.stdout();
+  }
 
   @Test
   void aUnitlessSessionIsHaltedByItsPidInOneScriptAndNeverThroughAUnit() throws Exception {

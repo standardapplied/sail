@@ -1,0 +1,23 @@
+{
+  "request": {
+    "body": {
+      "harness": "claude-code",
+      "inside": false,
+      "mode": "default"
+    },
+    "method": "POST",
+    "path": "/v1/projects/harbor/workspaces/dock/chats"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Open a shell in it, or start the agent in a workspace of your own.",
+        "code": "not_your_workspace",
+        "field_errors": [],
+        "message": "dock is uday's workspace, so an agent starts in it only as uday, with uday's login."
+      },
+      "schema_version": 1
+    },
+    "status": 403
+  }
+}

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.engine.AgentProcess;
 import java.io.IOException;
 import java.time.Duration;
@@ -23,8 +24,9 @@ import java.util.function.Consumer;
 /**
  * Stands in for the processes live members run as, beside {@link FakeContainer} for the shell: each
  * process started here has a scripted stdout and a captured stdin, and is found alive in the
- * container by its pid file until the test ends it. Nothing here sleeps: {@link Fake#settle}
- * returns once the reader has taken every line said so far and is waiting for the next.
+ * container by its pid file until the test ends it; one that names no run (a chat's) is known by an
+ * id of its own. Nothing here sleeps: {@link Fake#settle} returns once the reader has taken every
+ * line said so far and is waiting for the next.
  */
 final class FakeAgentProcess implements AgentProcess {
 
@@ -97,6 +99,11 @@ final class FakeAgentProcess implements AgentProcess {
     this.container = container;
   }
 
+  /** The container its processes run in, which finds each by its pid file. */
+  FakeContainer container() {
+    return container;
+  }
+
   /** Every start from now on fails with {@code refusal}, as a host with no incus would. */
   void refusing(IOException refusal) {
     this.refusal = refusal;
@@ -142,9 +149,9 @@ final class FakeAgentProcess implements AgentProcess {
             pidFile,
             logFile,
             container.takeLaunchEnv(launchEnvFile)));
-    var fake = new Fake(env.get("SAIL_RUN_ID"));
+    var fake = new Fake(env.getOrDefault("SAIL_RUN_ID", Ids.newId().toString()), pidFile);
     if (!slowToName) {
-      container.started(fake.runId);
+      container.startedUnderTheWrapper(fake.runId, pidFile);
     }
     processes.add(fake);
     onStart.accept(fake);
@@ -157,6 +164,7 @@ final class FakeAgentProcess implements AgentProcess {
     private static final long PATIENCE_SECONDS = 20;
 
     final String runId;
+    private final String pidFile;
     final List<String> written = new CopyOnWriteArrayList<>();
     final List<Signal> signals = new CopyOnWriteArrayList<>();
     private final ReentrantLock lock = new ReentrantLock();
@@ -166,6 +174,7 @@ final class FakeAgentProcess implements AgentProcess {
     private boolean ended;
     private boolean endSeen;
     private IOException broken;
+    private RuntimeException readerFailure;
     private Integer exitCode;
     private boolean writeBlocked;
     private volatile boolean stdinClosed;
@@ -182,8 +191,9 @@ final class FakeAgentProcess implements AgentProcess {
     private volatile Consumer<Signal> onSignal = signal -> {};
     private volatile Consumer<String> onWrite = line -> {};
 
-    private Fake(String runId) {
+    private Fake(String runId, String pidFile) {
       this.runId = runId;
+      this.pidFile = pidFile;
     }
 
     /** The process writes {@code said} to its stdout, a line each. */
@@ -201,6 +211,14 @@ final class FakeAgentProcess implements AgentProcess {
     /** The process exits with {@code code}, having written {@code log} to its stderr. */
     void exits(int code, String log) {
       container.exited(runId, log, code);
+      clientExits(code);
+    }
+
+    /**
+     * The process's client exits with {@code code}, its stdout ended, while the process it attached
+     * to lives on in the container.
+     */
+    void clientExits(int code) {
       lock.lock();
       try {
         exitCode = code;
@@ -234,6 +252,20 @@ final class FakeAgentProcess implements AgentProcess {
       lock.lock();
       try {
         ended = true;
+        moved.signalAll();
+      } finally {
+        lock.unlock();
+      }
+    }
+
+    /**
+     * The reader of the process's stdout fails with {@code failure}, as a log that could not be
+     * written fails it, while the process lives on.
+     */
+    void failsItsReader(RuntimeException failure) {
+      lock.lock();
+      try {
+        readerFailure = failure;
         moved.signalAll();
       } finally {
         lock.unlock();
@@ -301,7 +333,7 @@ final class FakeAgentProcess implements AgentProcess {
 
     /** The process's wrapper writes its pid file: the container finds the process from now on. */
     void writesPid() {
-      container.started(runId);
+      container.startedUnderTheWrapper(runId, pidFile);
     }
 
     /** What happens as the process is asked for its pid, before it answers. */
@@ -344,7 +376,9 @@ final class FakeAgentProcess implements AgentProcess {
      */
     void settle() {
       await(
-          () -> lines.isEmpty() && (ended || broken != null ? endSeen : waiting),
+          () ->
+              lines.isEmpty()
+                  && (ended || broken != null || readerFailure != null ? endSeen : waiting),
           "nothing read the fake process of run " + runId);
       Thread finishing;
       lock.lock();
@@ -483,6 +517,12 @@ final class FakeAgentProcess implements AgentProcess {
       lock.lock();
       try {
         while (lines.isEmpty()) {
+          if (readerFailure != null) {
+            reader = Thread.currentThread();
+            endSeen = true;
+            moved.signalAll();
+            throw readerFailure;
+          }
           if (broken != null) {
             reader = Thread.currentThread();
             endSeen = true;

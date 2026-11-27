@@ -1,0 +1,21 @@
+{
+  "request": {
+    "body": {
+      "harness": "codex",
+      "mode": "full-access"
+    },
+    "method": "POST",
+    "path": "/v1/projects/harbor/workspaces/berth/chats"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "Codex CLI has no chat form; start it in a terminal."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

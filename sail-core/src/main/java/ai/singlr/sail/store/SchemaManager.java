@@ -28,8 +28,10 @@ import java.util.stream.Collectors;
  * box made for each FDE's Mast), {@code project_grants} (the projects main granted each scoped
  * FDE), {@code sync_scope} (the scope main last named for this node), {@code catalog} (which
  * database this is, and which of main's a node syncs with), {@code attention} (the minutes this box
- * saw a person give a conversation), {@code session_usage} (each harness session's highest running
- * total here and what its runs were given of it, which retention never touches) and {@code
+ * saw a person give a conversation), {@code chat_sessions} and {@code chat_items} (each chat a
+ * person holds with an agent here, and every item of it, the person's: erased with them, their
+ * workspace or its project), {@code session_usage} (each harness session's highest running total
+ * here and what its runs were given of it, which retention never touches) and {@code
  * uncounted_runs} (the runs main erased before this box saw them finish). A spec's kept sums of its
  * runs ({@code runs_total} through {@code run_cost_usd}) are box-local columns: each box folds the
  * run rows it holds, so they never join a snapshot either.
@@ -40,7 +42,7 @@ public final class SchemaManager {
    * The version this release stamps and opens. It lies beyond every version a release before v1
    * stamped, so no older database is ever read as this one.
    */
-  public static final int CURRENT_VERSION = 1006;
+  public static final int CURRENT_VERSION = 1007;
 
   private static final String SCHEMA_VERSION_TABLE =
       """
@@ -703,6 +705,34 @@ public final class SchemaManager {
               PRIMARY KEY (person, conversation, minute, channel)
           ) WITHOUT ROWID""",
           "CREATE INDEX idx_attention_conversation ON attention(conversation)",
+          """
+          CREATE TABLE chat_sessions (
+              id TEXT PRIMARY KEY,
+              opener TEXT NOT NULL REFERENCES fdes(id) ON DELETE CASCADE,
+              project TEXT NOT NULL,
+              workspace TEXT NOT NULL,
+              harness TEXT NOT NULL,
+              mode TEXT NOT NULL,
+              inside INTEGER NOT NULL,
+              conversation TEXT,
+              turn_open INTEGER NOT NULL DEFAULT 0,
+              launched INTEGER NOT NULL DEFAULT 0,
+              handed INTEGER NOT NULL DEFAULT 0,
+              created_at INTEGER NOT NULL,
+              ended_at INTEGER
+          )""",
+          "CREATE INDEX idx_chat_sessions_place ON chat_sessions(project, workspace)",
+          "CREATE INDEX idx_chat_sessions_opener ON chat_sessions(opener)",
+          """
+          CREATE TABLE chat_items (
+              session TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+              seq INTEGER NOT NULL,
+              kind TEXT NOT NULL,
+              payload TEXT NOT NULL,
+              at INTEGER NOT NULL,
+              PRIMARY KEY (session, seq)
+          ) WITHOUT ROWID""",
+          "CREATE INDEX idx_chat_items_kind ON chat_items(session, kind, seq)",
           """
           CREATE TABLE session_usage (
               session_id TEXT PRIMARY KEY,

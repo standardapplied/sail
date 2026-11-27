@@ -699,7 +699,7 @@ class LiveMemberDisplacementTest {
     room.heard(Event.WellKnownTypes.AGENT_TEXT_DELTA, 2);
 
     room.grace(
-        new LiveMembers.Grace(
+        new ProcessEnd.Grace(
             Duration.ofMillis(20),
             Duration.ofMillis(20),
             Duration.ofMillis(20),
@@ -825,7 +825,7 @@ class LiveMemberDisplacementTest {
         room.elsewhere().dispatching().endLiveMember(process.runId, AgentAttachWhy.TERMINAL));
     room.settle();
     room.grace(
-        new LiveMembers.Grace(
+        new ProcessEnd.Grace(
             Duration.ofMillis(1),
             Duration.ofMillis(1),
             Duration.ofMillis(1),

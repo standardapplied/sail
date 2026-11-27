@@ -1,0 +1,20 @@
+{
+  "request": {
+    "body": {
+      "text": "mine now"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000005/chat/messages"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "not_found",
+        "field_errors": [],
+        "message": "There is no chat 00000000-0000-7000-8000-000000000005 of yours here."
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}

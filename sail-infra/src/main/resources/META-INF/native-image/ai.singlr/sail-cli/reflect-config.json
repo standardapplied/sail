@@ -73,5 +73,170 @@
     "name": "ai.singlr.sail.engine.Workspaces$Listing",
     "allDeclaredMethods": true,
     "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Asked",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Always",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Change",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Choice",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Compacted",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Detail$Command",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Detail$Edit",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Detail$Fetch",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Detail$Other",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Detail$Read",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Detail$Search",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Failed",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Interrupted",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$ModeChanged",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Permission",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Plan",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Question",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Refused",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Retrying",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$SelfStarted",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Session",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Text",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Tool",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$ToolDone",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$TurnEnded",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Unreadable",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatItem$Withdrawn",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatWire$Delivered",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatWire$Message",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.ChatWire$Told",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.harness.LoginOutcome$Limited",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.harness.LoginOutcome$Refused",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.harness.LoginOutcome$Undelivered",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
   }
 ]

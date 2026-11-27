@@ -36,6 +36,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -53,6 +54,7 @@ public final class WorkspaceDoors {
   private final WorkspaceSignIns signIns;
   private final Function<String, WorkspaceOwner> owners;
   private final SessionYield sessions;
+  private final BiConsumer<String, String> forget;
   private final String keeper;
 
   /**
@@ -60,6 +62,8 @@ public final class WorkspaceDoors {
    * @param shell runs the delete's read and the sign-ins' read in a workspace
    * @param owners the person, by handle, a workspace is given the credentials of
    * @param sessions ends the terminals of a workspace stopped or deleted with force, saying why
+   * @param forget erases what this box keeps of a workspace it deleted, by project and name: its
+   *     chats
    * @param keeper the node's own person on a node; null on main or a standalone box
    */
   public WorkspaceDoors(
@@ -67,12 +71,14 @@ public final class WorkspaceDoors {
       ShellExec shell,
       Function<String, WorkspaceOwner> owners,
       SessionYield sessions,
+      BiConsumer<String, String> forget,
       String keeper) {
     this.workspaces = Objects.requireNonNull(workspaces, "workspaces");
     this.holdings = new WorkspaceHoldings(shell);
     this.signIns = new WorkspaceSignIns(shell);
     this.owners = Objects.requireNonNull(owners, "owners");
     this.sessions = Objects.requireNonNull(sessions, "sessions");
+    this.forget = Objects.requireNonNull(forget, "forget");
     this.keeper = keeper;
   }
 
@@ -258,7 +264,8 @@ public final class WorkspaceDoors {
    * live}) lives in it, whatever {@code force}, all under the workspace's lock. Without force, what
    * the workspace holds is read first ({@link WorkspaceHoldings}, a stopped one started for the
    * read and stopped again when the delete is refused), and the delete is refused naming it, with
-   * {@code forced} as the remedy; with it, its open terminals are told who deleted it.
+   * {@code forced} as the remedy; with it, its open terminals are told who deleted it. Once it is
+   * deleted, what the box keeps of it goes too: its chats.
    */
   public Workspaces.Changed delete(
       ProjectDefinition config,
@@ -269,24 +276,27 @@ public final class WorkspaceDoors {
       Consumer<String> confirm)
       throws Exception {
     var project = config.name();
-    return workspaces.delete(
-        project,
-        name,
-        live,
-        found -> decide(project, name, found, DELETED),
-        found -> {
-          if (!force) {
-            workspaces.whileRunning(
-                found,
-                running ->
-                    holdings.requireNothingIn(
-                        config, running, whose(project, name, found), forced));
-          }
-          confirm.accept(found.name());
-          if (force) {
-            endTerminals(project, name, "deleted");
-          }
-        });
+    var deleted =
+        workspaces.delete(
+            project,
+            name,
+            live,
+            found -> decide(project, name, found, DELETED),
+            found -> {
+              if (!force) {
+                workspaces.whileRunning(
+                    found,
+                    running ->
+                        holdings.requireNothingIn(
+                            config, running, whose(project, name, found), forced));
+              }
+              confirm.accept(found.name());
+              if (force) {
+                endTerminals(project, name, "deleted");
+              }
+            });
+    forget.accept(project, name);
+    return deleted;
   }
 
   /**

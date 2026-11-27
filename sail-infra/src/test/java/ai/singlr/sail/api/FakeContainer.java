@@ -51,6 +51,7 @@ final class FakeContainer implements ShellExec {
   private final List<String> commits = new CopyOnWriteArrayList<>();
   private final Set<String> watchers = ConcurrentHashMap.newKeySet();
   private final AtomicInteger pids = new AtomicInteger(1000);
+  private final AtomicInteger starts = new AtomicInteger(5000);
   private volatile String branch = "feat/test";
   private volatile boolean running = true;
   private volatile boolean survivesKill;
@@ -68,8 +69,9 @@ final class FakeContainer implements ShellExec {
   private volatile String failingFragment = "";
   private volatile String failingWith = "";
 
-  private static final class Agent {
+  private final class Agent {
     private final int pid;
+    private final int start = starts.incrementAndGet();
     private final Map<String, String> environment;
     private volatile boolean alive = true;
     private volatile int exitCode;
@@ -77,6 +79,11 @@ final class FakeContainer implements ShellExec {
     private Agent(int pid, Map<String, String> environment) {
       this.pid = pid;
       this.environment = environment;
+    }
+
+    /** Its {@code /proc/<pid>/stat}, which says when it started. */
+    private String stat() {
+      return pid + " (bash) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 " + start + " 0 0";
     }
   }
 
@@ -118,10 +125,36 @@ final class FakeContainer implements ShellExec {
 
   /** The agent of {@code runId} started: its unit is active and its pid file names it. */
   void started(String runId) {
+    started(runId, AgentUnit.forRun(runId).pidPath());
+  }
+
+  /** The agent of {@code runId} started, its pid file at {@code pidPath}. */
+  void started(String runId, String pidPath) {
     var agent = new Agent(pids.incrementAndGet(), readLaunchEnv(runId));
     agents.put(runId, agent);
     launched.add(runId);
-    files.put(AgentUnit.forRun(runId).pidPath(), String.valueOf(agent.pid));
+    files.put(pidPath, String.valueOf(agent.pid));
+  }
+
+  /**
+   * The process of {@code runId} started under the wrapper of a process over pipes: its start
+   * recorded beside its pid file at {@code pidPath}, as {@code ContainerAgentProcess} records it.
+   */
+  void startedUnderTheWrapper(String runId, String pidPath) {
+    started(runId, pidPath);
+    files.put(AgentUnit.startPath(pidPath), agents.get(runId).stat());
+  }
+
+  /**
+   * The box was restarted, and gave the pid of {@code runId}'s process, which went with it, to
+   * another process of the person: one that started later, alive. Returns that process's name.
+   */
+  String pidReused(String runId) {
+    var left = agents.get(runId);
+    left.alive = false;
+    var name = "after-" + runId;
+    agents.put(name, new Agent(left.pid, Map.of()));
+    return name;
   }
 
   /**
@@ -436,6 +469,9 @@ final class FakeContainer implements ShellExec {
     if (ReportLines.asks(inner)) {
       return ReportLines.answer(files.get(inner.get(4)), inner);
     }
+    if (inner.get(2).startsWith("ticks() {")) {
+      return haltStarted(inner.get(4), inner.get(5));
+    }
     if (inner.get(2).startsWith("for d in")) {
       var skillsDir = inner.getLast();
       var stamped =
@@ -477,7 +513,12 @@ final class FakeContainer implements ShellExec {
       return ok(ContainerSailSetup.fingerprint());
     }
     if (path.startsWith("/proc/")) {
-      return ok(path.split("/")[2] + " (bash) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 4242 0 0");
+      var pid = path.split("/")[2];
+      var named = holder(pid);
+      if (named == null) {
+        return ok(pid + " (bash) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 4242 0 0");
+      }
+      return named.alive ? ok(named.stat()) : fail("cat: " + path + ": No such file or directory");
     }
     var content = files.get(path);
     return content == null ? fail("cat: " + path + ": No such file or directory") : ok(content);
@@ -491,9 +532,18 @@ final class FakeContainer implements ShellExec {
         : ok(content);
   }
 
+  /** The process {@code pid} names: the live one holding it, else one that did, else none. */
+  private Agent holder(String pid) {
+    var named =
+        agents.values().stream().filter(agent -> String.valueOf(agent.pid).equals(pid)).toList();
+    return named.stream()
+        .filter(agent -> agent.alive)
+        .findFirst()
+        .orElse(named.stream().findFirst().orElse(null));
+  }
+
   private Result kill(List<String> inner) {
-    var pid = Integer.parseInt(inner.get(inner.size() - 1));
-    var agent = agents.values().stream().filter(a -> a.pid == pid).findFirst().orElse(null);
+    var agent = holder(inner.getLast());
     if (inner.contains("-0")) {
       var answer = agent != null && agent.alive ? ok("") : fail("no such process");
       Optional.ofNullable(afterAliveProbe.getAndSet(null)).ifPresent(Runnable::run);
@@ -525,9 +575,26 @@ final class FakeContainer implements ShellExec {
    * is {@code gone} or still {@code alive}.
    */
   private Result halt(String pid) {
-    var agent = agents.values().stream().filter(a -> String.valueOf(a.pid).equals(pid)).findFirst();
+    var agent = Optional.ofNullable(holder(pid));
     agent.ifPresent(this::end);
     return ok(agent.filter(found -> found.alive).isPresent() ? "alive" : "gone");
+  }
+
+  /**
+   * The halt of a process a wrapper started: the process its pid file names is signalled only while
+   * it has the start its record holds, and the script says {@code alive}, or {@code gone} with the
+   * pid file removed.
+   */
+  private Result haltStarted(String pidPath, String startPath) {
+    var agent = Optional.ofNullable(files.get(pidPath)).map(String::strip).map(this::holder);
+    var mine = Optional.ofNullable(files.get(startPath));
+    var ours = agent.filter(found -> found.alive && mine.filter(found.stat()::equals).isPresent());
+    ours.ifPresent(this::end);
+    if (ours.filter(found -> found.alive).isPresent()) {
+      return ok("alive");
+    }
+    remove(pidPath);
+    return ok("gone");
   }
 
   /**
@@ -541,9 +608,7 @@ final class FakeContainer implements ShellExec {
     }
     var agent =
         named != null
-            ? agents.values().stream()
-                .filter(candidate -> String.valueOf(candidate.pid).equals(named.strip()))
-                .findFirst()
+            ? Optional.ofNullable(holder(named.strip()))
             : Optional.ofNullable(
                 agents.get(
                     service.replace(AgentUnit.RUN_UNIT_PREFIX, "").replace(SERVICE_SUFFIX, "")));

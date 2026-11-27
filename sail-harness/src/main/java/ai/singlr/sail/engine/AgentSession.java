@@ -245,9 +245,7 @@ public final class AgentSession {
    */
   public SessionInfo queryStatus(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath()));
-    var pidResult = shell.exec(pidCmd);
-    var pid = pidResult.ok() ? parsePid(pidResult.stdout()) : null;
+    var pid = pidOf(containerName, unit);
     if (pid == null && unit.systemd()) {
       pid = querySystemdPid(containerName, unit);
     }
@@ -301,6 +299,17 @@ public final class AgentSession {
   }
 
   /**
+   * Whether the process at {@code pid} in the container is the one whose start fingerprint ({@link
+   * #readProcessStartTicks}) was recorded as {@code ticks}: one recorded as nothing, or whose live
+   * fingerprint cannot be read, is never taken for it, because a signal must never proceed on an
+   * identity that cannot be verified.
+   */
+  public boolean startedAt(String containerName, int pid, Long ticks)
+      throws IOException, InterruptedException, TimeoutException {
+    return ticks != null && ticks.equals(readProcessStartTicks(containerName, pid));
+  }
+
+  /**
    * Field 22 of the stat line, located after the last {@code ')'} because the comm field may itself
    * contain spaces or parentheses.
    */
@@ -340,7 +349,10 @@ public final class AgentSession {
    */
   public sealed interface Halt {
 
-    /** A signal was delivered and the container answered that the agent is gone. */
+    /**
+     * The agent is gone: a signal was delivered and the container answered so, or the pid its file
+     * names is no longer the process it was written for ({@link #killStarted}).
+     */
     record Ended() implements Halt {}
 
     /** Every signal was sent and the container answered that the agent is still running. */
@@ -483,11 +495,75 @@ public final class AgentSession {
   static final String FORGET_PID_SCRIPT =
       "if [ \"$(cat -- \"$1\" 2>/dev/null)\" = \"$2\" ]; then rm -f -- \"$1\"; fi";
 
-  private Halt killByPidFile(String containerName, AgentUnit unit)
+  /**
+   * Halts, from inside the container, the process the pid file its first argument names, only while
+   * it is the process whose start the record its second names holds (field 22 of {@code
+   * /proc/<pid>/stat}, read as {@link #parseStartTicks} reads it), and says what became of it: by
+   * SIGTERM, the grace its third argument gives in seconds, and SIGKILL only to that same process
+   * still there, then as many asks a second apart as its fourth allows. It prints {@code gone}, the
+   * pid file removed, once no process holds that pid with that start (another process at the pid, a
+   * record missing, a pid file naming none are never signalled), and {@code alive} when the process
+   * outlived its signals; a run of it that printed neither says nothing of the process.
+   */
+  static final String KILL_STARTED_SCRIPT =
+      """
+      ticks() { set -- $(sed 's/.*) //' "$1" 2>/dev/null); printf %s "${20}"; }
+      pid=$(tr -d '[:space:]' < "$1" 2>/dev/null)
+      case "$pid" in ''|0|*[!0-9]*) printf gone; exit 0 ;; esac
+      mine=$(ticks "$2")
+      ours() { [ -n "$mine" ] && [ "$(ticks "/proc/$pid/stat")" = "$mine" ]; }
+      if ours; then
+        kill "$pid" || exit 1
+        sleep "$3"
+        if ours; then
+          kill -9 "$pid"
+          asks=0
+          while [ "$asks" -lt "$4" ] && ours; do sleep 1; asks=$((asks + 1)); done
+        fi
+      fi
+      if ours; then printf alive; else rm -f -- "$1"; printf gone; fi
+      """;
+
+  /**
+   * Halts the process {@code unit}'s pid file names, which a wrapper over pipes started and whose
+   * start it recorded beside the pid ({@link AgentUnit#startPath}), in one script in the container
+   * ({@link #KILL_STARTED_SCRIPT}) whose printed answer is the only thing believed: a pid the box
+   * has given another process since, or one whose start is not recorded, is never signalled and
+   * reads as {@link Halt.Ended}, its process gone; a script that could not be run, or came back
+   * with no answer, is {@link Halt.Unanswered}, and nothing is removed.
+   */
+  public Halt killStarted(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var halted =
+        shell.exec(
+            ContainerExec.asDevUser(
+                containerName,
+                List.of(
+                    "sh",
+                    "-c",
+                    KILL_STARTED_SCRIPT,
+                    "sh",
+                    unit.pidPath(),
+                    unit.startPath(),
+                    String.valueOf(TERM_GRACE_SECONDS),
+                    String.valueOf(KILL_SETTLE_ASKS))));
+    return switch (halted.ok() ? halted.stdout().strip() : "") {
+      case "gone" -> new Halt.Ended();
+      case "alive" -> new Halt.Survived();
+      default -> new Halt.Unanswered();
+    };
+  }
+
+  private Integer pidOf(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var pidResult =
         shell.exec(ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath())));
-    var pid = pidResult.ok() ? parsePid(pidResult.stdout()) : null;
+    return pidResult.ok() ? parsePid(pidResult.stdout()) : null;
+  }
+
+  private Halt killByPidFile(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var pid = pidOf(containerName, unit);
     if (pid == null) {
       return new Halt.Unanswered();
     }

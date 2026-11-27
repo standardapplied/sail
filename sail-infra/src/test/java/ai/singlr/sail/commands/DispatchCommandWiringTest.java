@@ -192,7 +192,8 @@ class DispatchCommandWiringTest {
                         hooks.workspaces(),
                         launched -> agent,
                         hooks.dispatchListener(),
-                        hooks.stopListener()),
+                        hooks.stopListener(),
+                        hooks.processes()),
                     SessionYield.NONE),
             () -> HANDLE);
     var all = new ArrayList<>(List.of("-p", "acme", "--spec", "auth", "--no-sync"));

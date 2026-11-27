@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
@@ -24,6 +25,8 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.TemplateBuild;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.ChatStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
@@ -94,6 +97,50 @@ class WorkspaceVerbsTest {
     assertTrue(live.test("auth"));
     assertFalse(live.test("billing"), "billing's run is another box's");
     assertFalse(live.test("docs"));
+  }
+
+  /**
+   * I11: a workspace this box deleted takes its chats with it, and a project it destroyed every
+   * chat of its; another's stay.
+   */
+  @Test
+  void aDeletedWorkspaceOrDestroyedProjectTakesItsChatsFromTheBox() {
+    var run = Ids.newId().toString();
+    var dock = "dock-" + run.substring(0, 8);
+    var quay = "quay-" + run.substring(0, 8);
+    var places = List.of(dock + "/try", dock + "/pier", quay + "/try");
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      new SchemaManager(db).migrate();
+      var sam = Acting.system(() -> new FdeStore(db).add("sam-" + run, "Sam", null, "member")).id();
+      var chats = new ChatStore(db);
+      for (var place : places) {
+        var parts = place.split("/");
+        chats.open(
+            new ChatStore.Chat(
+                place,
+                sam,
+                parts[0],
+                parts[1],
+                "claude-code",
+                "default",
+                false,
+                null,
+                false,
+                false,
+                0,
+                DateTimeUtils.now(),
+                null));
+      }
+
+      WorkspaceVerbs.forgetChats(dock, "try");
+      var afterDelete = places.stream().map(id -> chats.find(id).isPresent()).toList();
+      WorkspaceVerbs.forgetProjectChats(dock);
+
+      assertEquals(List.of(false, true, true), afterDelete);
+      assertEquals(
+          List.of(false, true),
+          places.subList(1, 3).stream().map(id -> chats.find(id).isPresent()).toList());
+    }
   }
 
   /**

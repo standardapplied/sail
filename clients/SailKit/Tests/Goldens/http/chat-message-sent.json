@@ -1,0 +1,17 @@
+{
+  "request": {
+    "body": {
+      "text": "hi"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000005/chat/messages"
+  },
+  "response": {
+    "body": {
+      "queued": false,
+      "schema_version": 1,
+      "seq": 1
+    },
+    "status": 200
+  }
+}

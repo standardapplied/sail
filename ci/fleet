@@ -18,7 +18,7 @@ readonly MAX_RUN=6h
 readonly SECRETS="fleet-anthropic-key fleet-openai-key fleet-github-token"
 readonly LOOP_REPO=standardapplied/nocaptcha
 readonly LOOP_AGENTS=${FLEET_LOOP_AGENTS:-claude-code}
-readonly SCHEMA_CHANGED_IN=0.77.0
+readonly SCHEMA_CHANGED_IN=0.78.0
 readonly CHECK_LIMIT=${FLEET_CHECK_LIMIT:-1200}
 # init downloads Incus from Zabbly, which once stalled 42 min in a run that passed.
 readonly INCUS_LIMIT=3600
@@ -809,6 +809,88 @@ sudo sail server token revoke "signed-$handle" > /dev/null 2>&1
 echo "state only: $state; empty: $empty; held: $held; removed: $gone"
 [ "$state $empty $held $gone" = "false false true false" ] && echo SAME'
 
+# A chat as the app holds one, on the API as a client calls it: the opener stores the fleet's key
+# (read from root's file, on the request's input, never a command line) and makes it her default,
+# opens a chat with Claude Code in her workspace, sends one message and reads the items to its turn's
+# end, each once and in order; a read from 0 again gives the same items, and one from the last seq
+# none; another member is told there is no such chat of theirs; the end answers 204, the chat then
+# says it ended and takes no message. The chat is ended, the login removed, the key file and both
+# tokens gone, whatever failed.
+readonly CHAT_WALK='set -u
+handle=$1 project=$2 workspace=$3 other=$4
+api=http://127.0.0.1:7070
+session=""
+token=$(sudo sail server token create "chat-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+stranger=$(sudo sail server token create "chat-$other" member --fde "$other" 2>/dev/null | sed -n 2p | tr -d " ")
+call() { curl -s -o /tmp/chat.json -w "%{http_code}" -X "$2" -H "Authorization: Bearer $1" -H "Content-Type: application/json" -d "${4:-}" "$api$3"; }
+read_from() { curl -s -o /tmp/chat.json -w "%{http_code}" -H "Authorization: Bearer $1" "$api/v1/sessions/$session/chat?after=$2"; }
+cleanup() {
+  if [ -n "$session" ]; then call "$token" POST "/v1/sessions/$session:end" > /dev/null; fi
+  call "$token" DELETE /v1/logins/claude-code/fleet-chat > /dev/null
+  sudo rm -f /root/.fleet/anthropic /tmp/chat.json /tmp/chat-items.json
+  sudo sail server token revoke "chat-$handle" > /dev/null 2>&1
+  sudo sail server token revoke "chat-$other" > /dev/null 2>&1
+}
+trap cleanup EXIT
+fail() { echo "FAIL: $1"; head -c 400 /tmp/chat.json; echo; exit 1; }
+[ -n "$token" ] && [ -n "$stranger" ] || fail "no token"
+status=$(sudo python3 -I -c "import json; print(json.dumps({\"kind\": \"api-key\", \"value\": open(\"/root/.fleet/anthropic\").read().strip()}))" |
+  curl -s -o /tmp/chat.json -w "%{http_code}" -X PUT -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary @- "$api/v1/logins/claude-code/fleet-chat")
+[ "$status" = 200 ] || fail "the key was not stored: HTTP $status"
+status=$(call "$token" POST /v1/logins/claude-code/fleet-chat:use)
+[ "$status" = 200 ] || fail "the key was not made the default: HTTP $status"
+status=$(call "$token" POST "/v1/projects/$project/workspaces/$workspace/chats" "{\"harness\":\"claude-code\",\"mode\":\"default\"}")
+[ "$status" = 201 ] || fail "the chat did not open: HTTP $status"
+session=$(python3 -I -c "import json; print(json.load(open(\"/tmp/chat.json\"))[\"session\"])")
+status=$(call "$token" POST "/v1/sessions/$session/chat/messages" "{\"text\":\"Reply with the single word pong and nothing else.\"}")
+[ "$status" = 200 ] || fail "the message was not taken: HTTP $status"
+echo "[]" > /tmp/chat-items.json
+after=0 turn=no
+for attempt in $(seq 1 12); do
+  status=$(read_from "$token" "$after")
+  [ "$status" = 200 ] || fail "a read was refused: HTTP $status"
+  read -r after turn <<< "$(python3 -I -c "
+import json, sys
+had = json.load(open(\"/tmp/chat-items.json\"))
+items = json.load(open(\"/tmp/chat.json\"))[\"items\"]
+last = int(sys.argv[1])
+seqs = [item[\"seq\"] for item in items]
+if seqs != list(range(last + 1, last + 1 + len(seqs))): print(\"-1 no\"); sys.exit()
+json.dump(had + items, open(\"/tmp/chat-items.json\", \"w\"))
+print(seqs[-1] if seqs else last, \"yes\" if any(i[\"type\"] == \"turn_ended\" for i in had + items) else \"no\")
+" "$after")"
+  [ "$after" = -1 ] && fail "a read gave an item twice, or skipped one"
+  [ "$turn" = yes ] && break
+done
+[ "$turn" = yes ] || fail "the turn did not end within twelve reads"
+python3 -I -c "
+import json, sys
+items = json.load(open(\"/tmp/chat-items.json\"))
+said = \"\".join(i[\"text\"] for i in items if i[\"type\"] == \"text\")
+print(\"items: \" + \" \".join(i[\"type\"] for i in items))
+print(\"said: \" + said.strip()[:80])
+failed = [i for i in items if i[\"type\"] == \"failed\"]
+modes = [i.get(\"mode\") for i in items if i[\"type\"] == \"session\"]
+sys.exit(0 if not failed and \"pong\" in said.casefold() and modes and modes[0] == \"default\" else 1)
+" || fail "the agent did not answer pong in Asks first, or its turn failed"
+status=$(read_from "$token" 0)
+[ "$status" = 200 ] || fail "a read from 0 again was refused: HTTP $status"
+python3 -I -c "import json, sys; sys.exit(0 if json.load(open(\"/tmp/chat.json\"))[\"items\"] == json.load(open(\"/tmp/chat-items.json\")) else 1)" ||
+  fail "a read from 0 again gave other items"
+status=$(read_from "$token" "$after")
+[ "$status" = 200 ] || fail "a read from the last seq was refused: HTTP $status"
+python3 -I -c "import json, sys; sys.exit(0 if all(i[\"seq\"] > int(sys.argv[1]) for i in json.load(open(\"/tmp/chat.json\"))[\"items\"]) else 1)" "$after" ||
+  fail "a read from the last seq gave one again"
+status=$(read_from "$stranger" 0)
+[ "$status" = 404 ] && grep -qF "There is no chat $session of yours here." /tmp/chat.json || fail "$other was not refused: HTTP $status"
+status=$(call "$token" POST "/v1/sessions/$session:end")
+[ "$status" = 204 ] || fail "the end was refused: HTTP $status"
+status=$(read_from "$token" "$after")
+[ "$status" = 200 ] && grep -q "\"ended\": true" /tmp/chat.json || fail "the chat does not say it ended"
+status=$(call "$token" POST "/v1/sessions/$session/chat/messages" "{\"text\":\"more\"}")
+[ "$status" = 409 ] || fail "an ended chat took a message: HTTP $status"
+echo "CHAT WALKED"'
+
 # The in-container credential asking the socket it holds for the caller's passkeys, its status line
 # after the body; the command fails unless the socket answered 200.
 readonly IN_CONTAINER_PASSKEYS='curl -s -w "\nHTTP %{http_code}\n" --unix-socket /var/lib/sail/run/api.sock -H "Authorization: Bearer $(cat /var/lib/sail/run/box.credential)" http://sail/v1/passkeys | tee /dev/stderr | grep -q "^HTTP 200$"'
@@ -832,6 +914,13 @@ signed_in_follows_the_file() {
   out=$(on "$run" "$box" "cat > /tmp/sail-signed-in && bash /tmp/sail-signed-in $handle $project $workspace" <<< "$SIGNED_IN_FOLLOWS")
   echo "$out"
   grep -q '^SAME$' <<< "$out"
+}
+
+chat_walks() {
+  local run=$1 box=$2 handle=$3 project=$4 workspace=$5 other=$6 out
+  out=$(on "$run" "$box" "cat > /tmp/sail-chat && bash /tmp/sail-chat $handle $project $workspace $other" <<< "$CHAT_WALK")
+  echo "$out"
+  grep -q '^CHAT WALKED$' <<< "$out"
 }
 
 modes_match_claude() {
@@ -2404,6 +2493,10 @@ storage() {
     modes_match_claude "$run" main eng acme eng-own
   check "$run" "the agents route says eng's workspace holds Claude Code's own sign-in only while its file is there and not empty, never for Claude Code's own state" \
     signed_in_follows_the_file "$run" main eng acme eng-own
+  check "$run" "main holds the fleet's Claude Code key where only root reads it, for eng's chat" \
+    place_secret "$run" main fleet-anthropic-key anthropic
+  check "$run" "eng chats with Claude Code in eng-own on main through main's API with the fleet's key: one message, its items read to the turn's end each once, a reconnect from 0 and from the last seq losing and repeating nothing, client told there is no such chat of hers, then the chat ended and taking no message; the key, the login and the tokens removed after" \
+    chat_walks "$run" main eng acme eng-own client
   check "$run" "eng's workspace commits as eng" commits_as "$run" main acme-eng-own eng@fleet.example
   check "$run" "eng's workspace holds none of main's person's forge token" holds_no_forge_token "$run" main acme-eng-own
   check "$run" "client, a member, is refused eng's workspace on main, naming her" \

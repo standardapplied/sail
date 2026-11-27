@@ -60,16 +60,16 @@ final class LiveRoom implements AutoCloseable {
   static final String HANDLE = ReviewLoop.HANDLE;
 
   /** Long enough that nothing scripted to happen is ever forced. */
-  static final LiveMembers.Grace PATIENT =
-      new LiveMembers.Grace(
+  static final ProcessEnd.Grace PATIENT =
+      new ProcessEnd.Grace(
           Duration.ofSeconds(60),
           Duration.ofSeconds(60),
           Duration.ofSeconds(60),
           Duration.ofSeconds(60));
 
   /** Short enough that a process scripted to ignore everything is forced at once. */
-  static final LiveMembers.Grace IMPATIENT =
-      new LiveMembers.Grace(
+  static final ProcessEnd.Grace IMPATIENT =
+      new ProcessEnd.Grace(
           Duration.ofMillis(20),
           Duration.ofMillis(20),
           Duration.ofMillis(20),
@@ -112,7 +112,7 @@ final class LiveRoom implements AutoCloseable {
   private final Semaphore flushes = new Semaphore(0);
   private final ReentrantLock lock = new ReentrantLock();
   private final Condition heard = lock.newCondition();
-  private volatile LiveMembers.Grace grace = PATIENT;
+  private volatile ProcessEnd.Grace grace = PATIENT;
   private volatile SessionYield terminals = SessionYield.NONE;
 
   LiveRoom(Path dir) {
@@ -191,7 +191,8 @@ final class LiveRoom implements AutoCloseable {
                 workspaces,
                 this::launch,
                 DispatchOperations.Listener.NONE,
-                StopOperations.Listener.NONE))
+                StopOperations.Listener.NONE,
+                processes))
         .useMessages(messages)
         .useRooms(rooms);
   }
@@ -215,7 +216,7 @@ final class LiveRoom implements AutoCloseable {
   }
 
   /** Ends wait with {@code grace} from now on. */
-  void grace(LiveMembers.Grace grace) {
+  void grace(ProcessEnd.Grace grace) {
     this.grace = grace;
     live.useTiming(timing());
   }

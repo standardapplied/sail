@@ -17,6 +17,7 @@ import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.RunPlace;
@@ -125,7 +126,8 @@ public final class AgentStopCommand implements Runnable {
         Workspaces.onThisBox(shell),
         DispatchOperations.shellLauncher(shell),
         DispatchOperations.Listener.NONE,
-        listener);
+        listener,
+        new ContainerAgentProcess(shell));
   }
 
   private StopOperations.Listener listener() {

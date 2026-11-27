@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -60,16 +61,19 @@ public final class ProjectDestroyCommand implements Runnable {
   private boolean json;
 
   private final Function<Boolean, ShellExec> shells;
+  private final BooleanSupplier root;
 
   public ProjectDestroyCommand() {
-    this(ShellExecutor::new);
+    this(ShellExecutor::new, ConsoleHelper::isRoot);
   }
 
   /**
    * @param shells the host shell, by whether this is a dry run
+   * @param root whether this runs as root, which a destroy that is no dry run needs
    */
-  ProjectDestroyCommand(Function<Boolean, ShellExec> shells) {
+  ProjectDestroyCommand(Function<Boolean, ShellExec> shells, BooleanSupplier root) {
     this.shells = shells;
+    this.root = root;
   }
 
   @Override
@@ -85,7 +89,7 @@ public final class ProjectDestroyCommand implements Runnable {
       Banner.printBranding(System.out, Ansi.AUTO);
     }
 
-    if (!dryRun && !ConsoleHelper.isRoot()) {
+    if (!dryRun && !root.getAsBoolean()) {
       throw RootRequired.refusal(spec);
     }
 
@@ -100,6 +104,7 @@ public final class ProjectDestroyCommand implements Runnable {
     var dirPresent = Files.exists(projectDir);
 
     if (!containerPresent && others.isEmpty() && !dirPresent && !purge) {
+      forgetChats();
       emitNothingToDo();
       return;
     }
@@ -135,9 +140,17 @@ public final class ProjectDestroyCommand implements Runnable {
               }
               new ProjectTeardown(shell, SailPaths.projectsDir()).tearDown(name, deleted);
             });
+    forgetChats();
     var destroyed = purge ? purgeFromCatalog(erases, operator) : null;
 
     emitResult(containerPresent, dirPresent, destroyed);
+  }
+
+  /** Erases the project's chats on this box, its workspaces gone: none outlives them. */
+  private void forgetChats() {
+    if (!dryRun) {
+      WorkspaceVerbs.forgetProjectChats(name);
+    }
   }
 
   /**

@@ -128,9 +128,13 @@ class ProjectVerbsTakeNoWorkspaceTest {
         Arguments.of(
             (Verb) SnapsPruneCommand::new, List.of("acme--tmpl", "--older-than", "1d"), template),
         Arguments.of(
-            (Verb) ProjectDestroyCommand::new, List.of("acme-fix", "--dry-run"), workspace),
+            (Verb) shells -> new ProjectDestroyCommand(shells, () -> false),
+            List.of("acme-fix", "--dry-run"),
+            workspace),
         Arguments.of(
-            (Verb) ProjectDestroyCommand::new, List.of("acme--tmpl", "--dry-run"), template));
+            (Verb) shells -> new ProjectDestroyCommand(shells, () -> false),
+            List.of("acme--tmpl", "--dry-run"),
+            template));
   }
 
   /** A verb made over the box's host shells. */
@@ -199,7 +203,7 @@ class ProjectVerbsTakeNoWorkspaceTest {
 
     var destroy =
         CommandRun.of(
-            new ProjectDestroyCommand(dryRun -> dryRun ? destroying : observed),
+            new ProjectDestroyCommand(dryRun -> dryRun ? destroying : observed, () -> false),
             "acme",
             "--dry-run");
     var stop =
