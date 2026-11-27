@@ -200,7 +200,8 @@ class RunCommandTest {
                   hooks.workspaces(),
                   hooks.launcher(),
                   hooks.dispatchListener(),
-                  hooks.stopListener()),
+                  hooks.stopListener(),
+                  hooks.processes()),
               SessionYield.NONE);
         },
         dryRun -> shell,

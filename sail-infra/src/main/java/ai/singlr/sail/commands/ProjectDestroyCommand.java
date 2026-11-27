@@ -135,6 +135,9 @@ public final class ProjectDestroyCommand implements Runnable {
               }
               new ProjectTeardown(shell, SailPaths.projectsDir()).tearDown(name, deleted);
             });
+    if (!dryRun) {
+      WorkspaceVerbs.forgetProjectChats(name);
+    }
     var destroyed = purge ? purgeFromCatalog(erases, operator) : null;
 
     emitResult(containerPresent, dirPresent, destroyed);

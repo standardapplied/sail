@@ -140,7 +140,10 @@ public sealed interface ChatItem {
   /** The conversation was compacted from {@code tokensBefore} tokens to {@code tokensAfter}. */
   record Compacted(String trigger, long tokensBefore, long tokensAfter) implements Notice {}
 
-  /** The turn was stopped before it finished, at a person's word. */
+  /**
+   * The turn was stopped before it finished: at a person's word, or because the process running it
+   * ended, which the host says.
+   */
   record Interrupted() implements Notice {}
 
   /**
@@ -165,4 +168,19 @@ public sealed interface ChatItem {
    */
   record TurnEnded(Double costUsd, long tokensIn, long tokensOut, long durationMs)
       implements ChatItem {}
+
+  /**
+   * What the person said: {@code text}, with the workspace files at {@code attachments} shown to
+   * the agent, held for the agent ({@code queued}) when it was said while a turn was open. The host
+   * logs it; no harness says it.
+   */
+  record Message(String text, List<String> attachments, boolean queued) implements ChatItem {}
+
+  /**
+   * The person's message logged as {@code message}, held while a turn was open, went to the agent.
+   */
+  record Delivered(long message) implements ChatItem {}
+
+  /** What Sail itself tells the person of the chat, in its own {@code words}. */
+  record Told(String words) implements Notice {}
 }

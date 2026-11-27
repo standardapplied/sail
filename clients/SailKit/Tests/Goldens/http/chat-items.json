@@ -1,0 +1,138 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000005/chat?after=0"
+  },
+  "response": {
+    "body": {
+      "ended": false,
+      "items": [
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "attachments": [],
+          "queued": false,
+          "seq": 1,
+          "text": "hi",
+          "type": "message"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "commands": [
+            "sail-portal",
+            "spec-board",
+            "deep-research",
+            "design",
+            "design-sync",
+            "dataviz",
+            "update-config",
+            "verify",
+            "debug",
+            "code-review",
+            "simplify",
+            "batch",
+            "fewer-permission-prompts",
+            "doctor",
+            "claude-approvals",
+            "loop",
+            "claude-api",
+            "workflow-authoring",
+            "run",
+            "run-skill-generator",
+            "plugin-authoring",
+            "advisor",
+            "agents",
+            "auto-mode-setup",
+            "autocompact",
+            "clear",
+            "color",
+            "compact",
+            "config",
+            "output-style",
+            "context",
+            "effort",
+            "fast",
+            "focus",
+            "heapdump",
+            "init",
+            "mcp",
+            "import",
+            "model",
+            "__remote-workflow",
+            "workflow-launch-exec",
+            "reload-plugins",
+            "reload-skills",
+            "rename",
+            "security-review",
+            "usage",
+            "insights",
+            "recap",
+            "skill-doctor",
+            "goal",
+            "design-consent",
+            "design-revoke",
+            "list-agents",
+            "team-onboarding"
+          ],
+          "mode": "default",
+          "model": "claude-haiku-5-5",
+          "seq": 2,
+          "skills": [
+            "sail-portal",
+            "spec-board",
+            "deep-research",
+            "design",
+            "design-sync",
+            "dataviz",
+            "update-config",
+            "verify",
+            "debug",
+            "code-review",
+            "simplify",
+            "batch",
+            "fewer-permission-prompts",
+            "doctor",
+            "claude-approvals",
+            "loop",
+            "claude-api",
+            "workflow-authoring",
+            "run",
+            "run-skill-generator",
+            "plugin-authoring"
+          ],
+          "type": "session"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "detail": {
+            "line": "echo probe-ok",
+            "type": "command"
+          },
+          "id": "toolu_011VvCwXcvkemp321CMEyur6",
+          "kind": "command",
+          "seq": 3,
+          "type": "tool",
+          "words": "Print probe-ok"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "failed": false,
+          "id": "toolu_011VvCwXcvkemp321CMEyur6",
+          "output": "probe-ok",
+          "seq": 4,
+          "type": "tool_done"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "cost_usd": 3.01485E-4,
+          "duration_ms": 940,
+          "seq": 5,
+          "tokens_in": 23708,
+          "tokens_out": 86,
+          "type": "turn_ended"
+        }
+      ],
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

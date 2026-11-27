@@ -23,6 +23,7 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -31,6 +32,7 @@ import ai.singlr.sail.engine.CheckedTokens;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.ConnectEnvironment;
+import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
@@ -56,6 +58,7 @@ import ai.singlr.sail.store.AttentionStore;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ChatStore;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -105,6 +108,7 @@ public final class SailOperations implements HostOperations {
   private HostCatalog catalog;
   private HostIdentity identity;
   private HostPty pty;
+  private ChatHost chats;
   private HostSchema schema;
   private TemplateBuildService templateBuildService;
   private Predicate<String> asksForCredentials = new ShellExecutor(false)::asksForCredentials;
@@ -133,6 +137,15 @@ public final class SailOperations implements HostOperations {
             ProjectReader.ofCatalog(projectStore),
             identity::workspaceOwner,
             shell);
+    this.chats =
+        new ChatHost(
+            new ChatStore(db),
+            new FdeStore(db),
+            pty,
+            ProjectReader.ofCatalog(projectStore),
+            shell,
+            chatProcesses,
+            ChatHost.Timing.real());
     projectSkills = new ProjectSkills(this::projectFiles);
     dispatchOps.useProjectSkills(projectSkills);
     return this;
@@ -200,6 +213,11 @@ public final class SailOperations implements HostOperations {
   @Override
   public HostPty pty() {
     return requireHost(pty);
+  }
+
+  @Override
+  public ChatHost chats() {
+    return requireHost(chats);
   }
 
   @Override
@@ -456,6 +474,7 @@ public final class SailOperations implements HostOperations {
   private ProjectSkills projectSkills = ProjectSkills.none();
   private final StopOperations stopOps;
   private final FdeStore fdeStore;
+  private final AgentProcess chatProcesses;
   private MessageStore messageStore;
   private RoomStore roomStore;
   private BoxCredentialStore boxCredentialStore;
@@ -704,7 +723,8 @@ public final class SailOperations implements HostOperations {
             Workspaces.onThisBox(shell),
             DispatchOperations.shellLauncher(shell),
             DispatchOperations.Listener.NONE,
-            StopOperations.Listener.NONE));
+            StopOperations.Listener.NONE,
+            new ContainerAgentProcess(shell)));
   }
 
   public SailOperations(
@@ -732,6 +752,7 @@ public final class SailOperations implements HostOperations {
     this.connectEnvironment = connectEnvironment;
     this.syncScheduler = syncScheduler;
     this.fdeStore = fdeStore;
+    this.chatProcesses = hooks.processes();
     this.projects = new ProjectLoader(shell, definitions);
     this.snapshotOps = new SnapshotOperations(shell, projects, runStore, this::publishOnBus);
     this.globalSpecOps =
@@ -1627,6 +1648,7 @@ public final class SailOperations implements HostOperations {
         shell,
         identity()::workspaceOwner,
         sessionYield,
+        new ChatStore(controlPlane)::eraseWorkspace,
         box.isNode() ? box.handle() : null);
   }
 

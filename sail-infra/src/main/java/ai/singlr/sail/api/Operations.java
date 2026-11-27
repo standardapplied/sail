@@ -19,6 +19,9 @@ public interface Operations extends LocalLaneOperations {
 
   SyncStatus syncStatus();
 
+  /** The chats this box holds ({@link ChatHost}). */
+  ChatHost chats();
+
   /**
    * The FDE this box stands for, as the role rule that resolves its credentials reads it: whom
    * operating the box answers to. Null on a box that names none.

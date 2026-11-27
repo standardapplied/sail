@@ -1,0 +1,654 @@
+/*
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
+ * SPDX-License-Identifier: MIT
+ */
+
+package ai.singlr.sail.api;
+
+import static ai.singlr.sail.api.ChatBench.as;
+import static ai.singlr.sail.api.ChatBench.line;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.engine.AgentProcess;
+import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.engine.SessionLogin;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.HarnessChat;
+import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.pty.PtyMessage;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * A chat as its host holds it: opened as a pty agent starts, one process a conversation started
+ * only by a message, every item logged before it is read and read from where a reader left off, a
+ * message held while a turn is open, a request held and withdrawn in plain words at its bound, the
+ * process ended when idle, when its chat ends and when sail stops, and the turn a restart cut
+ * closed as cut. Each process stands in, fed what Claude Code 2.1.332 wrote.
+ */
+@Timeout(value = 60, unit = TimeUnit.SECONDS)
+class ChatHostTest {
+
+  private static final String INIT = line("04b-set-permission-mode-and-background-task", 148);
+  private static final String CONVERSATION = "32c4139c-5288-4783-b817-4f6b504f696d";
+  private static final String TEXT_STARTS = line("01-baseline-live-flags", 20);
+  private static final String TEXT = line("01-baseline-live-flags", 21);
+  private static final String CALLS = line("01-baseline-live-flags", 13);
+  private static final String RETURNS = line("01-baseline-live-flags", 17);
+  private static final String ENDS = line("02b-relay-stdio", 138);
+  private static final String ASKS = line("02b-relay-stdio", 16);
+  private static final String REQUEST = "a871f652-0656-42bf-8cc8-860ad0a34b79";
+  private static final String ACCEPTS_EDITS = line("02b-relay-stdio", 103);
+  private static final String CALL = "toolu_011VvCwXcvkemp321CMEyur6";
+
+  @TempDir Path dir;
+  private ChatBench bench;
+
+  @BeforeEach
+  void setUp() {
+    bench = new ChatBench(dir);
+  }
+
+  @AfterEach
+  void tearDown() {
+    bench.close();
+  }
+
+  @Test
+  void aChatOpensInItsOpenersOwnWorkspaceAndNothingStartsUntilAMessage() {
+    var session = bench.samsChat();
+
+    var chat = bench.store.find(session).orElseThrow();
+    assertEquals(
+        List.of(bench.samId, "acme", "try", "claude-code", "default", false),
+        List.of(
+            chat.opener(), chat.project(), chat.workspace(), chat.harness(), chat.mode(), false));
+    assertEquals(List.of(), bench.processes.starts, "no process until a message");
+    assertEquals(List.of(), bench.kinds(session));
+  }
+
+  /** I1: the same refusals a pty agent start gets, in its order, word for word. */
+  @Test
+  void aChatIsRefusedAsAPtyAgentStartIsWordForWord() {
+    var refused =
+        List.of(
+            List.of("tom", "acme", "try"),
+            List.of("tom", "acme", "tom"),
+            List.of("sam", "beta", "dock"));
+    var codes = new java.util.ArrayList<String>();
+    for (var start : refused) {
+      var who = start.get(0);
+      var project = start.get(1);
+      var workspace = start.get(2);
+      var api =
+          assertThrows(
+              ApiException.class,
+              () ->
+                  as(
+                      who,
+                      () -> bench.host.open(project, workspace, "claude-code", "default", false)));
+      var pty =
+          assertThrows(
+              Remedied.Io.class,
+              () -> {
+                var person = ChatBench.personOf(who);
+                bench.door.admitWorkspace(project, workspace, person);
+                bench.door.admitAgent(
+                    project,
+                    workspace,
+                    new PtyMessage.Agent("claude-code", "default", false),
+                    person);
+              });
+      assertEquals(List.of(pty.reason(), pty.remedy()), List.of(api.reason(), api.remedy()));
+      codes.add(api.code());
+    }
+    assertEquals(List.of("forbidden", "login_not_stored", "harness_not_installed"), codes);
+    assertEquals(0, bench.chats(), "nothing is recorded of a refused chat");
+  }
+
+  @Test
+  void aPersonWhoSignsInInsideOpensAChatWithNoStoredLogin() {
+    var session =
+        as("tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true)).session();
+
+    assertTrue(bench.store.find(session).orElseThrow().inside());
+  }
+
+  @Test
+  void onlyAHarnessWithAChatFormStartsAndOnlyInAModeItsChatOffers() {
+    var codex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> as("sam", () -> bench.host.open("acme", "try", "codex", "full-access", false)));
+    var risky =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                as(
+                    "sam",
+                    () ->
+                        bench.host.open("acme", "try", "claude-code", "bypassPermissions", false)));
+
+    assertEquals("Codex CLI has no chat form; start it in a terminal.", codex.getMessage());
+    assertEquals(
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    Harnesses.of("claude-code")
+                        .chat()
+                        .orElseThrow()
+                        .argv(new HarnessChat.Launch("bypassPermissions", null, null)))
+            .getMessage(),
+        risky.getMessage());
+  }
+
+  /** I2, I10: one process, signed in through the login file, its argv a list, never a shell. */
+  @Test
+  void aMessageStartsTheProcessSignedInAndHandsItTheMessageAsALine() {
+    var session = bench.samsChat();
+
+    var sent = bench.send(session, "hi; $(rm -rf ~)");
+
+    var started = bench.processes.starts.getFirst();
+    assertEquals(new ChatHost.Sent(1, false), sent);
+    assertEquals(
+        Harnesses.of("claude-code")
+            .chat()
+            .orElseThrow()
+            .argv(new HarnessChat.Launch("default", null, null)),
+        started.command());
+    assertEquals(
+        List.of("acme-try", "/home/dev/workspace"),
+        List.of(started.container(), started.workDir()));
+    assertEquals(Map.of(), started.env(), "nothing of the person's message is in its environment");
+    assertTrue(started.pidFile().startsWith("/home/dev/.sail/chats/"), started.pidFile());
+    var handed = bench.incus.inputs().stream().filter(in -> in.contains("fake-key-sam")).toList();
+    assertEquals(1, handed.size(), "the login reaches the workspace once, as the file's input");
+    assertTrue(
+        bench.incus.invocations().stream()
+            .noneMatch(
+                command -> command.contains("fake-key-sam") || command.contains("hi; $(rm -rf ~)")),
+        "no login and no message on a command line");
+    assertEquals(
+        List.of(LiveStream.userMessage("hi; $(rm -rf ~)")), bench.processes.latest().written);
+  }
+
+  /** I3: logged in order before it is read; one block's text is one item. */
+  @Test
+  void everyLineIsLoggedInOrderAndOneBlocksTextIsOneItem() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+
+    bench.says(INIT, TEXT_STARTS, TEXT, CALLS, RETURNS, ENDS);
+
+    var items = bench.items(session);
+    assertEquals(
+        List.of("message", "session", "text", "tool", "tool_done", "turn_ended"),
+        items.stream().map(item -> item.get("type")).toList());
+    assertEquals(
+        List.of(1L, 2L, 3L, 4L, 5L, 6L),
+        items.stream().map(item -> ((Number) item.get("seq")).longValue()).toList());
+    assertEquals(
+        Map.of(
+            "seq",
+            3L,
+            "at",
+            "2026-11-27T09:00:00.000Z",
+            "type",
+            "text",
+            "text",
+            "done",
+            "new_paragraph",
+            true),
+        longs(items.get(2)));
+    assertEquals(
+        Map.of(
+            "seq",
+            6L,
+            "at",
+            "2026-11-27T09:00:00.000Z",
+            "type",
+            "turn_ended",
+            "cost_usd",
+            0.000301485,
+            "tokens_in",
+            23708L,
+            "tokens_out",
+            86L,
+            "duration_ms",
+            940L),
+        longs(items.get(5)));
+    assertEquals(CONVERSATION, bench.store.find(session).orElseThrow().conversation());
+    assertFalse(bench.store.find(session).orElseThrow().turnOpen());
+  }
+
+  @Test
+  void textAfterTheWindowIsAnItemOfItsOwn() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    bench.says(TEXT_STARTS, TEXT);
+
+    bench.clock.advance(LiveMembers.DELTA_WINDOW);
+    bench.says(TEXT, ENDS);
+
+    assertEquals(List.of("message", "text", "text", "turn_ended"), bench.kinds(session));
+  }
+
+  /** I4: a reader that reconnects with where it left off sees nothing twice and nothing lost. */
+  @Test
+  void aReaderFromWhereItLeftOffSeesEachItemOnce() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    bench.says(INIT);
+    var first = bench.read(session, 0);
+
+    bench.says(TEXT_STARTS, TEXT, ENDS);
+    var next = bench.read(session, 2);
+
+    assertEquals(List.of(1L, 2L), seqs(first));
+    assertEquals(List.of(3L, 4L), seqs(next));
+    assertFalse(next.ended());
+  }
+
+  @Test
+  void aReadHoldsUntilAnItemIsLogged() throws Exception {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    bench.readsWait();
+
+    var read = CompletableFuture.supplyAsync(() -> bench.read(session, 1));
+    assertTrue(bench.held.await(30, TimeUnit.SECONDS), "the read never waited");
+    bench.says(INIT);
+
+    assertEquals(List.of(2L), seqs(read.get(30, TimeUnit.SECONDS)));
+  }
+
+  @Test
+  void aReadWithNothingNewAnswersEmptyOnceItsBoundPasses() {
+    var session = bench.samsChat();
+
+    var read = bench.read(session, 0);
+
+    assertEquals(new ChatHost.Read(List.of(), false), read);
+    assertEquals(ChatBench.START.plusSeconds(25), bench.clock.instant(), "the bound is 25 s");
+    assertEquals(List.of(), bench.processes.starts, "reading never starts a process");
+  }
+
+  /** I5: a message said mid-turn is held, logged so, and given when the turn ends. */
+  @Test
+  void aMessageSentWhileATurnIsOpenIsQueuedAndHandedWhenTheTurnEnds() {
+    var session = bench.samsChat();
+    bench.send(session, "first");
+    bench.says(INIT);
+
+    var queued = bench.send(session, "second");
+    var fake = bench.says(ENDS);
+
+    assertEquals(new ChatHost.Sent(3, true), queued);
+    assertEquals(
+        List.of(LiveStream.userMessage("first"), LiveStream.userMessage("second")), fake.written);
+    assertEquals(
+        List.of("message", "session", "message", "turn_ended", "delivered"), bench.kinds(session));
+    assertEquals(3L, ((Number) bench.items(session).get(4).get("message")).longValue());
+    assertEquals(true, bench.items(session).get(2).get("queued"));
+  }
+
+  /** I2: idle past max_idle, the process ends; the next message resumes by id in the mode said. */
+  @Test
+  void anIdleProcessEndsAndTheNextMessageResumesItsConversationInTheModeInForce() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var fake = bench.says(INIT, ACCEPTS_EDITS, ENDS);
+
+    bench.clock.advance(Duration.ofMinutes(19));
+    bench.host.sweep();
+    assertFalse(fake.stdinClosed(), "not idle yet");
+    bench.clock.advance(Duration.ofMinutes(1));
+    bench.host.sweep();
+    fake.settle();
+    bench.send(session, "again");
+
+    assertTrue(fake.stdinClosed());
+    assertEquals(2, bench.processes.starts.size());
+    assertEquals(
+        Harnesses.of("claude-code")
+            .chat()
+            .orElseThrow()
+            .argv(new HarnessChat.Launch("acceptEdits", null, CONVERSATION)),
+        bench.processes.starts.getLast().command());
+  }
+
+  @Test
+  void aProcessWithATurnOpenIsNeverIdle() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var fake = bench.says(INIT);
+
+    bench.clock.advance(Duration.ofHours(1));
+    bench.host.sweep();
+
+    assertFalse(fake.stdinClosed());
+  }
+
+  @Test
+  void twoMessagesAtOnceStartOneProcess() throws Exception {
+    var session = bench.samsChat();
+
+    var one = CompletableFuture.supplyAsync(() -> bench.send(session, "one"));
+    var two = CompletableFuture.supplyAsync(() -> bench.send(session, "two"));
+
+    assertEquals(
+        List.of(false, true),
+        List.of(one.get(), two.get()).stream()
+            .sorted((a, b) -> Long.compare(a.seq(), b.seq()))
+            .map(ChatHost.Sent::queued)
+            .toList());
+    assertEquals(1, bench.processes.starts.size());
+  }
+
+  /** I7: what the harness does on its own, said truthfully. */
+  @Test
+  void aTurnTheAgentBeginsItselfIsATurnAndAMessageWaitsForItsEnd() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    bench.says(INIT, ENDS);
+
+    bench.says(INIT);
+    var sent = bench.send(session, "later");
+    bench.says(line("04b-set-permission-mode-and-background-task", 159));
+
+    assertTrue(sent.queued());
+    assertEquals(
+        List.of(
+            "message",
+            "session",
+            "turn_ended",
+            "message",
+            "self_started",
+            "turn_ended",
+            "delivered"),
+        bench.kinds(session));
+  }
+
+  @Test
+  void openToolRowsAreClosedWhenTheTurnEnds() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+
+    bench.says(INIT, CALLS, ENDS);
+
+    var closed = bench.items(session).get(3);
+    assertEquals(
+        Map.of("type", "tool_done", "id", CALL, "output", ChatProcess.UNREAD, "failed", false),
+        Map.of(
+            "type", closed.get("type"),
+            "id", closed.get("id"),
+            "output", closed.get("output"),
+            "failed", closed.get("failed")));
+  }
+
+  @Test
+  void aProcessThatDiesMidTurnIsSaidItsTurnCutAndItsRequestWithdrawn() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var fake = bench.says(INIT, CALLS, ASKS);
+
+    fake.exits(1);
+    fake.settle();
+
+    var items = bench.items(session);
+    assertEquals(
+        List.of(
+            "message",
+            "session",
+            "tool",
+            "permission",
+            "told",
+            "tool_done",
+            "withdrawn",
+            "interrupted"),
+        items.stream().map(item -> item.get("type")).toList());
+    assertEquals(
+        "Claude Code's process ended before its turn did (exit code 1); your next message starts"
+            + " it again.",
+        items.get(4).get("words"));
+    assertEquals(REQUEST, items.get(6).get("id"));
+    assertFalse(bench.store.find(session).orElseThrow().turnOpen());
+  }
+
+  /** I9: a request is logged and held, then withdrawn at its bound, never answered. */
+  @Test
+  void aRequestIsHeldAndWithdrawnInPlainWordsAtItsBoundNeverAnswered() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var fake = bench.says(INIT, ASKS);
+
+    bench.clock.advance(Duration.ofMinutes(4));
+    bench.host.sweep();
+    assertFalse(fake.stdinClosed(), "held within its bound");
+    bench.clock.advance(Duration.ofMinutes(1));
+    bench.host.sweep();
+    fake.settle();
+
+    var items = bench.items(session);
+    assertEquals(
+        List.of("message", "session", "permission", "told", "withdrawn", "interrupted"),
+        items.stream().map(item -> item.get("type")).toList());
+    assertEquals(
+        "Nobody can answer the agent's request in this version of Sail, so after 5 minutes Sail"
+            + " ended its turn and withdrew the request. Your next message starts it again.",
+        items.get(3).get("words"));
+    assertEquals(List.of(LiveStream.userMessage("hi")), fake.written, "nothing answered it");
+  }
+
+  /** I6: an end ends the process and the chat; the log stays, and takes no message. */
+  @Test
+  void endingAChatEndsItsProcessKeepsItsLogAndRefusesAMessage() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var fake = bench.says(INIT, ENDS);
+
+    as(
+        "sam",
+        () -> {
+          bench.host.end(session);
+          return null;
+        });
+    fake.settle();
+    var refused = assertThrows(ApiException.class, () -> bench.send(session, "more"));
+
+    assertTrue(fake.stdinClosed());
+    assertTrue(bench.read(session, 0).ended());
+    assertEquals(List.of("message", "session", "turn_ended"), bench.kinds(session));
+    assertEquals(
+        List.of("conflict", "This chat has ended, so it takes no message."),
+        List.of(refused.code(), refused.reason()));
+  }
+
+  @Test
+  void anEndedChatsLogIsErasedOnceItsRetentionPasses() {
+    var session = bench.samsChat();
+    as(
+        "sam",
+        () -> {
+          bench.host.end(session);
+          return null;
+        });
+
+    bench.clock.advance(Duration.ofDays(30).minusSeconds(1));
+    bench.host.sweep();
+    assertTrue(bench.store.find(session).isPresent());
+    bench.clock.advance(Duration.ofSeconds(2));
+    bench.host.sweep();
+
+    assertTrue(bench.store.find(session).isEmpty());
+  }
+
+  /** I8: a restart cut the open turn: it is told so, and the next message resumes by id. */
+  @Test
+  void aRestartClosesTheTurnsItCutAndTheNextMessageResumesThem() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    bench.says(INIT);
+    var restarted = bench.restarted();
+
+    var cut = restarted.reclaim();
+    var again = bench.restarted().reclaim();
+    as("sam", () -> restarted.send(session, "again", List.of()));
+
+    assertEquals(1, cut);
+    assertEquals(List.of("message", "session", "interrupted", "message"), bench.kinds(session));
+    assertEquals(
+        Harnesses.of("claude-code")
+            .chat()
+            .orElseThrow()
+            .argv(new HarnessChat.Launch("default", null, CONVERSATION)),
+        bench.processes.starts.getLast().command());
+    assertEquals(0, again, "a turn is closed once");
+  }
+
+  /** I10: a chat is its opener's alone; any other caller finds no chat at all. */
+  @Test
+  void aChatIsItsOpenersAloneAndAnIdSaysNothingOfAnotherPersonsChat() {
+    var session = bench.samsChat();
+    var none = "00000000-0000-4000-8000-000000000000";
+
+    var tom = assertThrows(ApiException.class, () -> as("tom", () -> bench.host.read(session, 0)));
+    var ada = assertThrows(ApiException.class, () -> as("ada", () -> bench.host.read(session, 0)));
+    var absent = assertThrows(ApiException.class, () -> as("sam", () -> bench.host.read(none, 0)));
+    var malformed = assertThrows(IllegalArgumentException.class, () -> bench.read("../../etc", 0));
+
+    assertEquals(
+        List.of("not_found", "There is no chat " + session + " of yours here."),
+        List.of(tom.code(), tom.reason()));
+    assertEquals(tom.reason(), ada.reason());
+    assertEquals("There is no chat " + none + " of yours here.", absent.reason());
+    assertTrue(malformed.getMessage().contains("../../etc"), malformed.getMessage());
+  }
+
+  /** I10: an attachment is an image read within the workspace by the files door's rules. */
+  @Test
+  void anAttachmentIsAnImageReadWithinTheWorkspaceItsPathOnTheReadsInput() {
+    var session = bench.samsChat();
+
+    as("sam", () -> bench.host.send(session, "what is this?", List.of("shots/red.png")));
+
+    assertEquals(
+        List.of(
+            LiveStream.userMessage(
+                "what is this?", new LiveStream.Image("image/png", ChatBench.IMAGE))),
+        bench.processes.latest().written);
+    assertTrue(bench.incus.inputs().contains("shots/red.png\0"));
+    assertTrue(
+        bench.incus.invocations().stream().noneMatch(command -> command.contains("red.png")));
+  }
+
+  @Test
+  void anAttachmentOutsideTheWorkspaceTooLargeOrNoImageIsRefusedBeforeAnythingIsLogged() {
+    var session = bench.samsChat();
+    var outside = refusal(session, 22, List.of("../secret.png"));
+    var large = refusal(session, 49, List.of("big.png"));
+    var missing = refusal(session, 20, List.of("gone.png"));
+    var notImage = refusal(session, 0, List.of("notes.txt"));
+    var many = refusal(session, 0, java.util.Collections.nCopies(9, "a.png"));
+
+    assertEquals(
+        List.of(
+            "Attachment ../secret.png is outside workspace try.",
+            "Attachment big.png is larger than 3840 KiB.",
+            "Attachment gone.png is not a file Sail may read in workspace try.",
+            "Attachment notes.txt is not an image: a chat attaches png, jpeg, gif or webp.",
+            "A message attaches at most 8 files."),
+        List.of(outside, large, missing, notImage, many));
+    assertEquals(List.of(), bench.kinds(session));
+  }
+
+  private String refusal(String session, int exit, List<String> attachments) {
+    bench.incus.on("sail-files", new ShellExec.Result(exit, ChatBench.IMAGE, ""));
+    try {
+      as("sam", () -> bench.host.send(session, "look", attachments));
+      throw new AssertionError("not refused: " + attachments);
+    } catch (ApiException refused) {
+      return refused.reason();
+    } catch (IllegalArgumentException refused) {
+      return refused.getMessage();
+    }
+  }
+
+  /** Sail stopping ends every process; their chats stay open, to resume. */
+  @Test
+  void sailStoppingEndsEveryProcessAndLeavesItsChatOpen() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var fake = bench.says(INIT, ENDS);
+
+    bench.host.close();
+    fake.settle();
+
+    assertTrue(fake.stdinClosed());
+    assertFalse(bench.store.find(session).orElseThrow().ended());
+  }
+
+  @Test
+  void aProcessThatWillNotStartIsRefusedAndItsLoginWithdrawn() {
+    var session = bench.samsChat();
+    bench.processes.refusing(new IOException("no incus"));
+
+    var refused = assertThrows(ApiException.class, () -> bench.send(session, "hi"));
+
+    assertEquals(
+        List.of("agent_launch_failed", "Claude Code did not start in workspace try."),
+        List.of(refused.code(), refused.reason()));
+    assertTrue(
+        bench.incus.invocations().stream()
+            .anyMatch(
+                command ->
+                    command.contains(SessionLogin.REMOVE)
+                        && command.contains(SessionLogin.DIR + "/")),
+        String.valueOf(bench.incus.invocations()));
+  }
+
+  @Test
+  void aProcessThatEndsOnlyWhenSignalledIsInterruptedThenTerminated() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    var fake = bench.says(INIT, ENDS);
+    fake.onClose(() -> {});
+    fake.onSignal(
+        signal -> {
+          if (signal == AgentProcess.Signal.TERM) {
+            fake.exits(143);
+          }
+        });
+
+    bench.host.close();
+
+    assertEquals(List.of(AgentProcess.Signal.INT, AgentProcess.Signal.TERM), fake.signals);
+  }
+
+  private static List<Long> seqs(ChatHost.Read read) {
+    return read.items().stream().map(item -> ((Number) item.get("seq")).longValue()).toList();
+  }
+
+  private static Map<String, Object> longs(Map<String, Object> item) {
+    var copy = new java.util.LinkedHashMap<String, Object>();
+    item.forEach(
+        (key, value) ->
+            copy.put(key, value instanceof Integer whole ? Long.valueOf(whole) : value));
+    return copy;
+  }
+}

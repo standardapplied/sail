@@ -54,6 +54,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private static final String DELETE = "DELETE";
 
   private static final String PROJECT = "/v1/projects/{project}";
+  private static final String SESSION = "/v1/sessions/{session}";
 
   private static final String SPEC = "spec";
   private static final String ROOM = "room";
@@ -238,6 +239,10 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(POST, "/v1/reviews/{review}/dismiss/{finding}", journal, this::dismissFinding),
         route(POST, "/v1/terminal/tickets", Gate.TERMINAL, this::terminalTicket),
         route(Route.ANY, "/v1/terminal/tickets", unserved, ApiRouter::absent),
+        route(GET, SESSION + "/chat", enterWorkspace, this::readChat),
+        route(POST, SESSION + "/chat/messages", enterWorkspace, this::sendChat),
+        route(POST, SESSION + ":end", enterWorkspace, this::endChat),
+        route(Route.ANY, "/v1/sessions/{rest...}", unserved, ApiRouter::absent),
         route(GET, "/v1/runs", reads, this::runs),
         route(
             GET,
@@ -297,6 +302,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
                 ApiResponse.from(
                     operations.startWorkspace(call.project(), call.param("workspace")))),
         route(GET, PROJECT + "/workspaces/{workspace}/sessions", Gate.TERMINAL, this::sessions),
+        route(POST, PROJECT + "/workspaces/{workspace}/chats", enterWorkspace, this::openChat),
         route(
             GET,
             PROJECT + "/workspaces/{workspace}/agents",
@@ -788,6 +794,52 @@ public final class ApiRouter implements HttpHandler, RouteTable {
                     () -> ApiException.of(ErrorCode.NOT_FOUND, Workspaces.absent(project, name)));
     return ApiResponse.ok(
         tickets.sessions(ApiAuth.credentialOf(call.exchange()), project, name, row.started()));
+  }
+
+  /**
+   * {@code POST …/workspaces/{w}/chats} with {@code {"harness", "mode", "inside"}}: a chat of the
+   * caller's in their workspace, started as a pty agent is.
+   */
+  private ApiResponse openChat(Call call) throws IOException {
+    var body = call.body();
+    return ApiResponse.created(
+        operations
+            .chats()
+            .open(
+                call.project(),
+                call.param("workspace"),
+                text(body, "harness"),
+                text(body, "mode"),
+                Boolean.TRUE.equals(body.get("inside"))));
+  }
+
+  /** {@code GET /v1/sessions/{id}/chat?after=<seq>}: the items after {@code seq}, long-polled. */
+  private ApiResponse readChat(Call call) {
+    var after = Objects.requireNonNullElse(call.query().get("after"), "0");
+    return ApiResponse.ok(operations.chats().read(call.param("session"), Long.parseLong(after)));
+  }
+
+  /** {@code POST /v1/sessions/{id}/chat/messages} with {@code {"text", "attachments"?}}. */
+  private ApiResponse sendChat(Call call) throws IOException {
+    var body = call.body();
+    var attachments = body.getOrDefault("attachments", List.of());
+    if (!(attachments instanceof List<?> paths)
+        || !paths.stream().allMatch(String.class::isInstance)) {
+      throw new IllegalArgumentException("attachments must be a list of paths");
+    }
+    return ApiResponse.ok(
+        operations
+            .chats()
+            .send(
+                call.param("session"),
+                text(body, "text"),
+                paths.stream().map(String.class::cast).toList()));
+  }
+
+  /** {@code POST /v1/sessions/{id}:end}: the chat's process ended and the chat marked ended. */
+  private ApiResponse endChat(Call call) {
+    operations.chats().end(call.param("session"));
+    return ApiResponse.noContent();
   }
 
   /** This runner's terminal door, refused on a runner that offers none over the network. */

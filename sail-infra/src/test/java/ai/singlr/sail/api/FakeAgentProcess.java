@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.engine.AgentProcess;
 import java.io.IOException;
 import java.time.Duration;
@@ -23,8 +24,9 @@ import java.util.function.Consumer;
 /**
  * Stands in for the processes live members run as, beside {@link FakeContainer} for the shell: each
  * process started here has a scripted stdout and a captured stdin, and is found alive in the
- * container by its pid file until the test ends it. Nothing here sleeps: {@link Fake#settle}
- * returns once the reader has taken every line said so far and is waiting for the next.
+ * container by its pid file until the test ends it; one that names no run (a chat's) is known by an
+ * id of its own. Nothing here sleeps: {@link Fake#settle} returns once the reader has taken every
+ * line said so far and is waiting for the next.
  */
 final class FakeAgentProcess implements AgentProcess {
 
@@ -142,7 +144,7 @@ final class FakeAgentProcess implements AgentProcess {
             pidFile,
             logFile,
             container.takeLaunchEnv(launchEnvFile)));
-    var fake = new Fake(env.get("SAIL_RUN_ID"));
+    var fake = new Fake(env.getOrDefault("SAIL_RUN_ID", Ids.newId().toString()));
     if (!slowToName) {
       container.started(fake.runId);
     }

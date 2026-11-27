@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -144,7 +145,8 @@ class OperationsFactoryTest {
               Workspaces.onThisBox(shell),
               DispatchOperations.shellLauncher(shell),
               DispatchOperations.Listener.NONE,
-              StopOperations.Listener.NONE);
+              StopOperations.Listener.NONE,
+              new ContainerAgentProcess(shell));
       try (var operations = OperationsFactory.open(shell, hooks, SessionYield.NONE)) {
         assertEquals("test", operations.identity().tokens().getFirst().name());
         assertNotNull(operations.syncStatus());

@@ -1,0 +1,18 @@
+{
+  "request": {
+    "body": {
+      "harness": "claude-code",
+      "inside": false,
+      "mode": "default"
+    },
+    "method": "POST",
+    "path": "/v1/projects/harbor/workspaces/berth/chats"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "session": "00000000-0000-7000-8000-000000000005"
+    },
+    "status": 201
+  }
+}

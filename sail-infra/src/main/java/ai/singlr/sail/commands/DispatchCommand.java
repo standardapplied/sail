@@ -18,6 +18,7 @@ import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -160,7 +161,8 @@ public final class DispatchCommand implements Runnable {
                 Workspaces.onThisBox(shell),
                 DispatchOperations.terminalLauncher(),
                 renderer(sync, operator),
-                StopOperations.Listener.NONE))) {
+                StopOperations.Listener.NONE,
+                new ContainerAgentProcess(shell)))) {
       render(dispatchAsOperator(operations, name, request, localHandle), shell, operator);
     }
   }
@@ -184,7 +186,13 @@ public final class DispatchCommand implements Runnable {
         db,
         shell,
         new OperationHooks(
-            events, watcherSpawner, workspaces, launcher, listener, StopOperations.Listener.NONE),
+            events,
+            watcherSpawner,
+            workspaces,
+            launcher,
+            listener,
+            StopOperations.Listener.NONE,
+            new ContainerAgentProcess(shell)),
         sessionYield);
   }
 

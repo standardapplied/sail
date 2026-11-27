@@ -23,6 +23,7 @@ import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailWatcher;
@@ -339,7 +340,8 @@ public final class RunCommand implements Runnable {
             Workspaces.onThisBox(shell),
             terminal,
             listener(launchCommand),
-            StopOperations.Listener.NONE));
+            StopOperations.Listener.NONE,
+            new ContainerAgentProcess(shell)));
   }
 
   /**

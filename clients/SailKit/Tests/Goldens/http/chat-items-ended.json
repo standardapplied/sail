@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000005/chat?after=10"
+  },
+  "response": {
+    "body": {
+      "ended": true,
+      "items": [],
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

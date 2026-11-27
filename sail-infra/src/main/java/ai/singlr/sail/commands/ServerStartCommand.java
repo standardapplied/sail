@@ -242,7 +242,7 @@ public final class ServerStartCommand implements Runnable {
             operations.liveMembers());
     bus.subscribe(roomWake);
     roomWake.startSweep(Duration.ofSeconds(60));
-    shutdown.register(roomWake).register(operations.liveMembers());
+    shutdown.register(roomWake).register(operations.liveMembers()).register(operations.chats());
     bus.subscribe(
         whileNarrating(
             SlackReactor.withDefaults(notifications, new SlackThreadStore(db), specStore),
@@ -355,6 +355,15 @@ public final class ServerStartCommand implements Runnable {
                     + " once the container answers that its process is gone."));
       }
       operations.liveMembers().startSweep(LIVE_MEMBER_SWEEP);
+      var cut = operations.chats().reclaim();
+      if (cut > 0) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|green ✓|@ Closed "
+                    + cut
+                    + " chat turn(s) the restart cut; each resumes on its next message"));
+      }
+      operations.chats().startSweep(LIVE_MEMBER_SWEEP);
       var replayed = missedStops.sweep();
       if (replayed > 0) {
         System.out.println(

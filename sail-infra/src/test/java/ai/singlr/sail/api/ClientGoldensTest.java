@@ -31,12 +31,15 @@ import ai.singlr.sail.engine.ContainerConfig;
 import ai.singlr.sail.engine.HeldLocks;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ProjectProvisioner;
+import ai.singlr.sail.engine.Recorded;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.TemplateBuild;
 import ai.singlr.sail.engine.TemplateRecord;
+import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.LoginOutcome;
 import ai.singlr.sail.harness.RunReport;
@@ -434,6 +437,7 @@ class ClientGoldensTest {
           workspace("new", "Running", "uday", box.idOf("uday")));
       box.record(http, "workspaces-made", "GET", workspaces, dana, null);
       box.recordAgents(http, ana, dana);
+      box.recordChats(http, ana, dana);
       box.recordDriveAgents(http);
       box.recordLogins(http);
       box.recordTemplates(
@@ -941,6 +945,7 @@ class ClientGoldensTest {
     private final EventBus bus;
     private final SailOperations operations;
     private final ScriptedShellExecutor incus;
+    private final FakeAgentProcess chats = new FakeAgentProcess(new FakeContainer(PROJECT));
     private final HttpServer server;
 
     /**
@@ -971,8 +976,23 @@ class ClientGoldensTest {
               .onOk("incus snapshot list harbor--tmpl --format json", TestWorkspaces.V1)
               .onOk("incus list --format json", "[" + TEMPLATE + "]")
               .onOk("sail-left", "changes app\n");
+      chats.onStart(fake -> fake.onClose(fake::exitsIfRunning));
       this.operations =
-          OperationsFactory.create(db, incus, bus, SyncScheduler.disabled(), SessionYield.NONE)
+          OperationsFactory.create(
+                  db,
+                  incus,
+                  bus,
+                  SyncScheduler.disabled(),
+                  SessionYield.NONE,
+                  new OperationHooks(
+                      bus::publish,
+                      new WatcherSpawner(incus, WatcherSpawner::spawnProcess),
+                      Workspaces.onThisBox(incus),
+                      DispatchOperations.shellLauncher(incus),
+                      DispatchOperations.Listener.NONE,
+                      StopOperations.Listener.NONE,
+                      chats),
+                  SyncOperations.PLAIN_NOTICES)
               .useControlPlane(
                   db,
                   dir,
@@ -1676,6 +1696,77 @@ class ClientGoldensTest {
           ana,
           null);
       Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
+    }
+
+    /**
+     * Records a chat's every answer and refusal as the app meets them: dana opens one in berth, her
+     * running workspace, sends a message, reads the turn Claude Code took (a call and its result),
+     * sends again, and while that turn is open sends once more, held; then ends it, and it takes no
+     * message. A chat in another person's workspace, of a harness with no chat form, read by
+     * another person, or named by no id, is refused.
+     */
+    void recordChats(Map<String, String> goldens, String ana, String dana) throws Exception {
+      Acting.system(
+          () ->
+              new ProjectStore(db)
+                  .upsert(
+                      TestDefinitions.yaml(
+                          "name: harbor\nagent:\n  type: claude-code\n  install: [claude-code]\n")));
+      lists(
+          workspace("dock", "Running", "uday", idOf("uday")),
+          workspace("berth", "Running", "dana", idOf("dana")));
+      var chats = "/v1/projects/" + PROJECT + "/workspaces/%s/chats";
+      var claude =
+          Map.<String, Object>of("harness", "claude-code", "mode", "default", "inside", false);
+      var opened = record(goldens, "chat-opened", "POST", chats.formatted("berth"), dana, claude);
+      record(
+          goldens,
+          "refusal-chat-not-your-workspace",
+          "POST",
+          chats.formatted("dock"),
+          dana,
+          claude);
+      record(
+          goldens,
+          "refusal-chat-no-chat-form",
+          "POST",
+          chats.formatted("berth"),
+          dana,
+          Map.of("harness", "codex", "mode", "full-access"));
+      var session = "/v1/sessions/" + opened.get("session");
+      var messages = session + "/chat/messages";
+      record(goldens, "chat-message-sent", "POST", messages, dana, Map.of("text", "hi"));
+      said(
+          Recorded.line("04b-set-permission-mode-and-background-task", 148),
+          Recorded.line("01-baseline-live-flags", 13),
+          Recorded.line("01-baseline-live-flags", 17),
+          Recorded.line("02b-relay-stdio", 138));
+      record(goldens, "chat-items", "GET", session + "/chat?after=0", dana, null);
+      record(goldens, "chat-message-again", "POST", messages, dana, Map.of("text", "again"));
+      said(Recorded.line("04b-set-permission-mode-and-background-task", 148));
+      record(goldens, "chat-message-queued", "POST", messages, dana, Map.of("text", "and this"));
+      said(Recorded.line("02b-relay-stdio", 138));
+      record(goldens, "chat-items-after", "GET", session + "/chat?after=5", dana, null);
+      record(goldens, "refusal-chat-not-found", "GET", session + "/chat", ana, null);
+      record(goldens, "refusal-chat-invalid-id", "GET", "/v1/sessions/nobody/chat", dana, null);
+      record(
+          goldens,
+          "refusal-chat-attachments-invalid",
+          "POST",
+          messages,
+          dana,
+          Map.of("text", "look", "attachments", "shot.png"));
+      record(goldens, "chat-ended", "POST", session + ":end", dana, null);
+      record(goldens, "chat-items-ended", "GET", session + "/chat?after=10", dana, null);
+      record(goldens, "refusal-chat-ended", "POST", messages, dana, Map.of("text", "more"));
+      Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
+    }
+
+    /** The chat process started last says {@code lines}, and its reader has taken them. */
+    private void said(String... lines) {
+      var process = chats.latest();
+      process.says(lines);
+      process.settle();
     }
 
     /**

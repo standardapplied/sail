@@ -25,16 +25,21 @@ import java.util.function.UnaryOperator;
 /**
  * {@link AgentProcess} over {@code incus exec}: one host-side client process whose pipes are the
  * container process's. The wrapper first reads the run's {@code launch.env} into its environment
- * and removes it ({@link LaunchEnv#read}), then writes its own pid to the run's pid file and {@code
- * exec}s into the command, so the pid file names the agent itself and the run probes alive exactly
- * as a unit's does; the agent's stderr is appended to the run's log, which leaves stdout to carry
- * nothing but its lines. A Java {@code Process} can only signal the host-side client, so a signal
- * is a {@code kill} run in the container against the pid the file names, as an argument.
+ * and removes it ({@link LaunchEnv#read}), then makes the pid file's folder, writes its own pid to
+ * the run's pid file and {@code exec}s into the command, so the pid file names the agent itself and
+ * the run probes alive exactly as a unit's does; the agent's stderr is appended to the run's log,
+ * which leaves stdout to carry nothing but its lines. A Java {@code Process} can only signal the
+ * host-side client, so a signal is a {@code kill} run in the container against the pid the file
+ * names, as an argument.
  */
 public final class ContainerAgentProcess implements AgentProcess {
 
-  /** {@code $1} the pid file, {@code $2} the log file, the rest the command. */
-  private static final String WRAP = "; printf '%s\\n' \"$$\" > \"$1\"; exec \"${@:3}\" 2>> \"$2\"";
+  /**
+   * {@code $1} the pid file, {@code $2} the log file beside it, the rest the command: the folder
+   * that holds them is made first, for a process that has no run's folder made for it (a chat's).
+   */
+  private static final String WRAP =
+      "; mkdir -p -- \"${1%/*}\"; printf '%s\\n' \"$$\" > \"$1\"; exec \"${@:3}\" 2>> \"$2\"";
 
   private final ShellExec shell;
   private final UnaryOperator<List<String>> transport;

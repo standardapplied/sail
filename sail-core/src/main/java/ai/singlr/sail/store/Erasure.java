@@ -120,6 +120,7 @@ public final class Erasure {
   private final FdeStore fdes;
   private final SlackThreadStore slackThreads;
   private final AttentionStore attention;
+  private final ChatStore chats;
   private final Map<String, SyncedStore> stores = new LinkedHashMap<>();
 
   public Erasure(Sqlite db) {
@@ -133,6 +134,7 @@ public final class Erasure {
     this.fdes = new FdeStore(db);
     this.slackThreads = new SlackThreadStore(db);
     this.attention = new AttentionStore(db);
+    this.chats = new ChatStore(db);
     for (var entity : SyncedEntities.all()) {
       stores.put(entity.type(), entity.store(db));
     }
@@ -431,6 +433,7 @@ public final class Erasure {
       case PROJECT -> {
         runs.eraseLeases(target.id());
         fdes.revokeFromEveryone(target.id());
+        chats.eraseProject(target.id());
         yield events.eraseByProject(target.id());
       }
       default -> 0;

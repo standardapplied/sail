@@ -18,7 +18,7 @@ readonly MAX_RUN=6h
 readonly SECRETS="fleet-anthropic-key fleet-openai-key fleet-github-token"
 readonly LOOP_REPO=standardapplied/nocaptcha
 readonly LOOP_AGENTS=${FLEET_LOOP_AGENTS:-claude-code}
-readonly SCHEMA_CHANGED_IN=0.77.0
+readonly SCHEMA_CHANGED_IN=0.78.0
 readonly CHECK_LIMIT=${FLEET_CHECK_LIMIT:-1200}
 # init downloads Incus from Zabbly, which once stalled 42 min in a run that passed.
 readonly INCUS_LIMIT=3600

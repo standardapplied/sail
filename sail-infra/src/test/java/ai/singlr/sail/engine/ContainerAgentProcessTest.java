@@ -97,7 +97,8 @@ class ContainerAgentProcessTest {
             "-lc",
             "f=/home/dev/.sail/runs/r/launch.env; set +x; while IFS= read -r kv; do export \"$kv\";"
                 + " done <"
-                + " \"$f\" || exit 1; rm -f \"$f\"; printf '%s\\n' \"$$\" > \"$1\"; exec \"${@:3}\" 2>>"
+                + " \"$f\" || exit 1; rm -f \"$f\"; mkdir -p -- \"${1%/*}\"; printf '%s\\n' \"$$\" > \"$1\";"
+                + " exec \"${@:3}\" 2>>"
                 + " \"$2\"",
             "bash",
             "/home/dev/.sail/runs/r/agent.pid",
@@ -150,6 +151,29 @@ class ContainerAgentProcessTest {
         "the pid file names the command itself: the wrapper exec'd into it");
     assertEquals("oops\n", Files.readString(logFile), "stderr is the log's, never stdout's");
     assertEquals(OptionalInt.of(4242), handle.pid());
+  }
+
+  /** A chat's process has no run's folder: its wrapper makes the folder its pid file is in. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void theWrapperMakesTheFolderItsPidFileIsIn() throws Exception {
+    var pidFile = dir.resolve("chats/c1/agent.pid");
+    var handle =
+        held(
+            new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of("bash", "-c", "echo started"),
+                    pidFile.toString(),
+                    dir.resolve("chats/c1/agent.log").toString(),
+                    launchEnv("")));
+
+    assertEquals("started", handle.stdout().read());
+    assertNull(handle.stdout().read());
+    assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
+    assertTrue(Files.readString(pidFile).strip().matches("[0-9]+"), "its pid is written there");
   }
 
   /** The live member's secrets reach it from its launch.env, removed before it starts. */

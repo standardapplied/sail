@@ -30,6 +30,8 @@ import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChatStore;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -107,8 +109,23 @@ final class WorkspaceVerbs {
             new ShellExecutor(dryRun),
             WorkspaceVerbs::ownerOf,
             dryRun ? SessionYield.NONE : new PtyHostYield(),
+            dryRun ? (project, name) -> {} : WorkspaceVerbs::forgetChats,
             keeper());
     return Actor.call(SailCommandLine.operator(), () -> door.through(doors));
+  }
+
+  /** Erases the chats of workspace {@code name} of {@code project}, which this box deleted. */
+  static void forgetChats(String project, String name) {
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      new ChatStore(db).eraseWorkspace(project, name);
+    }
+  }
+
+  /** Erases every chat of {@code project}, whose workspaces this box destroyed. */
+  static void forgetProjectChats(String project) {
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      new ChatStore(db).eraseProject(project);
+    }
   }
 
   /** This box's own person when it is a node, who keeps the workspaces nobody owns; else null. */

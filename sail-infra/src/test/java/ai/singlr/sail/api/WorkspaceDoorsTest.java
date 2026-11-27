@@ -54,6 +54,8 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class WorkspaceDoorsTest {
 
+  private final List<String> forgotten = new java.util.concurrent.CopyOnWriteArrayList<>();
+
   private static final ProjectDefinition ACME =
       new ProjectDefinition(
           "acme",
@@ -161,7 +163,13 @@ class WorkspaceDoorsTest {
 
   private WorkspaceDoors doors(
       ShellExec box, Function<String, WorkspaceOwner> owners, String keeper) {
-    return new WorkspaceDoors(over(box), box, owners, sessions, keeper);
+    return new WorkspaceDoors(
+        over(box),
+        box,
+        owners,
+        sessions,
+        (project, name) -> forgotten.add(project + "/" + name),
+        keeper);
   }
 
   private Workspaces over(ShellExec box) {
@@ -262,6 +270,7 @@ class WorkspaceDoorsTest {
         "Take what it holds first, or delete it anyway: delete it with force",
         refused.failure().remedy().plain());
     assertEquals(List.of("start", "read", "stop"), changes(box));
+    assertEquals(List.of(), forgotten, "a refused delete keeps its chats");
   }
 
   /** A read that fails cannot tell, and needs force too; the owner's own is not named. */
@@ -359,6 +368,7 @@ class WorkspaceDoorsTest {
         () -> doors(box).delete(ACME, "try", spec -> false, false, FORCED, i -> {}));
 
     assertEquals(List.of("read", "delete"), changes(box));
+    assertEquals(List.of("acme/try"), forgotten, "its chats go with it");
     var asked = box.invocations().indexOf("incus operation list --format json");
     var deleted =
         box.invocations()
@@ -382,7 +392,8 @@ class WorkspaceDoorsTest {
     var reads = new AtomicInteger();
     var box = box(trying("Stopped", "ada"));
     var workspaces = TestWorkspaces.over(box, () -> reads.getAndIncrement() * deadline, locks);
-    var doors = new WorkspaceDoors(workspaces, box, TestOwners::of, sessions, null);
+    var doors =
+        new WorkspaceDoors(workspaces, box, TestOwners::of, sessions, (project, name) -> {}, null);
     var holding = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var other =
@@ -488,6 +499,7 @@ class WorkspaceDoorsTest {
             box,
             TestOwners::of,
             sessions,
+            (project, name) -> {},
             null);
     var holding = new CountDownLatch(1);
     var release = new CountDownLatch(1);
@@ -926,7 +938,8 @@ class WorkspaceDoorsTest {
       Actor.call(
           Actors.OWNER_API,
           () ->
-              new WorkspaceDoors(over(box), box, TestOwners::of, untold, null)
+              new WorkspaceDoors(
+                      over(box), box, TestOwners::of, untold, (project, name) -> {}, null)
                   .stop("acme", "try", spec -> false));
     } finally {
       System.setErr(before);

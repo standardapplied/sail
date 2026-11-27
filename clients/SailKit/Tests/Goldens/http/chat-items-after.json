@@ -1,0 +1,46 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000005/chat?after=5"
+  },
+  "response": {
+    "body": {
+      "ended": false,
+      "items": [
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "attachments": [],
+          "queued": false,
+          "seq": 6,
+          "text": "again",
+          "type": "message"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "attachments": [],
+          "queued": true,
+          "seq": 7,
+          "text": "and this",
+          "type": "message"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "cost_usd": 3.01485E-4,
+          "duration_ms": 940,
+          "seq": 8,
+          "tokens_in": 23708,
+          "tokens_out": 86,
+          "type": "turn_ended"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "message": 7,
+          "seq": 9,
+          "type": "delivered"
+        }
+      ],
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

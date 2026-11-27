@@ -36,6 +36,11 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public ChatHost chats() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
   public List<SyncConflicts.Conflict> conflicts() {
     throw new UnsupportedOperationException();
   }
