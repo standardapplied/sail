@@ -16,6 +16,8 @@ import java.util.OptionalInt;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -23,15 +25,22 @@ import org.junit.jupiter.api.Timeout;
 class ChatEndTest {
 
   /**
-   * I7, M4: a turn the process begins itself after its idle end closed its stdin is never cut: the
-   * end waits on that turn however short its grace, and the process ends on its own.
+   * I7, M4: a turn the process begins itself after its idle end closed its stdin is never cut:
+   * however short its grace, the end waits on that turn, and signals only once it has ended.
    */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
-  void anIdleEndNeverSignalsWhileATurnTheProcessBeganItselfIsOpen() throws Exception {
+  void anIdleEndSignalsOnlyOnceATurnTheProcessBeganItselfHasEnded() throws Exception {
     var guard = new Object();
-    var signals = new CopyOnWriteArrayList<AgentProcess.Signal>();
-    var end = new ChatEnd(guard, "chat", "Claude Code", handle(signals), timing());
+    var open = new AtomicBoolean(true);
+    var signals = new CopyOnWriteArrayList<String>();
+    var end =
+        new ChatEnd(
+            guard,
+            "chat",
+            "Claude Code",
+            handle(signal -> signals.add(signal + (open.get() ? " in the turn" : " after it"))),
+            timing());
     var asked = new CountDownLatch(3);
 
     var idle =
@@ -41,13 +50,16 @@ class ChatEndTest {
                     end.awaitIdle(
                         () -> {
                           asked.countDown();
-                          return true;
+                          return open.get();
                         }));
     assertTrue(asked.await(20, TimeUnit.SECONDS), "it waits on the turn the process began");
-    end.done();
+    synchronized (guard) {
+      open.set(false);
+      guard.notifyAll();
+    }
     idle.join(Duration.ofSeconds(20));
 
-    assertEquals(List.of(), signals);
+    assertEquals(List.of("INT after it", "TERM after it"), signals);
   }
 
   /** Time whose every grace is a millisecond: one that waits on nothing would signal at once. */
@@ -62,8 +74,8 @@ class ChatEndTest {
         new ProcessEnd.Grace(instant, instant, instant, instant));
   }
 
-  /** A process that never exits on its own, its signals kept in {@code signals}. */
-  private static AgentProcess.Handle handle(List<AgentProcess.Signal> signals) {
+  /** A process that never exits on its own, each signal it is sent told to {@code signalled}. */
+  private static AgentProcess.Handle handle(Consumer<AgentProcess.Signal> signalled) {
     return new AgentProcess.Handle() {
       @Override
       public AgentProcess.LineWriter stdin() {
@@ -88,7 +100,7 @@ class ChatEndTest {
 
       @Override
       public void signal(AgentProcess.Signal signal) {
-        signals.add(signal);
+        signalled.accept(signal);
       }
 
       @Override

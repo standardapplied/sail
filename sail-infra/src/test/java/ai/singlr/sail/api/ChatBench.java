@@ -146,17 +146,6 @@ final class ChatBench implements AutoCloseable {
     host = restarted();
   }
 
-  /** This box's chat launch, its workspaces asked after through {@code shell}. */
-  ChatLaunch launchOver(ShellExec shell) {
-    return new ChatLaunch(
-        door,
-        fdes,
-        ProjectReader.ofCatalog(new ProjectStore(db)),
-        processes,
-        shell,
-        TestAuth.roles(db, new SyncConfig("main", null, "ada", "box")));
-  }
-
   /** A host over this box's chats, as sail starts one: what a restart leaves. */
   ChatHost restarted() {
     return restarted(new ProcessEnd.Grace(GRACE, GRACE, GRACE, GRACE));

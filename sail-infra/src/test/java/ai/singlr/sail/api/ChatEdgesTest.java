@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -236,10 +237,21 @@ class ChatEdgesTest {
   void aChatsFolderItsWorkspaceCannotRemoveStaysAndAnInterruptIsKept() {
     var chat = bench.store.find(bench.samsChat()).orElseThrow();
 
-    bench.launchOver(failing(new IOException("incus is down"))).forget(chat);
-    bench.launchOver(failing(new InterruptedException("stopping"))).forget(chat);
+    launchOver(failing(new IOException("incus is down"))).forget(chat);
+    launchOver(failing(new InterruptedException("stopping"))).forget(chat);
 
     assertTrue(Thread.interrupted(), "the interrupt is kept");
+  }
+
+  /** The bench's chat launch, its workspaces asked after through {@code shell}. */
+  private ChatLaunch launchOver(ShellExec shell) {
+    return new ChatLaunch(
+        bench.door,
+        bench.fdes,
+        ProjectReader.ofCatalog(new ProjectStore(bench.db)),
+        bench.processes,
+        shell,
+        TestAuth.roles(bench.db));
   }
 
   /** A shell whose every command fails with {@code failure}. */
