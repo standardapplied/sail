@@ -1544,7 +1544,7 @@ class FdeCommandTest {
     assertEquals(
         "Could not remove "
             + workstationKey()
-            + ", which may hold ada's key (IOException). Its login is revoked, and its token and"
+            + ", which may hold ada's key (Is a directory). Its login is revoked, and its token and"
             + " record are kept until the key is gone: check that "
             + workstationKey()
             + " and its directory are readable and writable by root, then run the command again.",

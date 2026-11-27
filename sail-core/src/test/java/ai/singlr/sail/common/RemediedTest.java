@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.FileSystemException;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -88,5 +90,18 @@ class RemediedTest {
         told(new IllegalStateException("Reading the roster failed", new IOException("  "))),
         "blank words are no words");
     assertEquals("IllegalStateException", told(new IllegalStateException()));
+  }
+
+  @Test
+  void aFilesFailureSaysItsReasonNotThePathTheLineAlreadyNames() {
+    assertEquals(
+        "Is a directory",
+        Remedied.fileReasonOf(new FileSystemException("/k.pub", null, "Is a directory")));
+    assertEquals("Input/output error", Remedied.fileReasonOf(new IOException("Input/output error")));
+    assertEquals(
+        "AccessDeniedException",
+        Remedied.fileReasonOf(new AccessDeniedException("/k.pub")),
+        "a reason the platform does not give is said by its type, never by its path");
+    assertEquals("IOException", Remedied.fileReasonOf(new IOException(" ")));
   }
 }

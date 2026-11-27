@@ -11,13 +11,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.engine.FileMutex;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -30,6 +32,8 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -446,7 +450,8 @@ class SyncSchedulerTest {
   }
 
   @Test
-  void anOwnedHealthSourceClosesWithTheSchedulerAndAFailedCloseIsAWarningThatNamesItsCause() {
+  void anOwnedHealthSourceClosesWithTheSchedulerAndAFailedCloseIsAWarningThatNamesItsCause()
+      throws Throwable {
     var closed = new AtomicBoolean();
     var scheduler = scheduler(new QueueExecutor(), rounds::incrementAndGet);
     scheduler.useHealth(() -> SyncStatus.unattempted("node", "main"), () -> closed.set(true));
@@ -482,39 +487,109 @@ class SyncSchedulerTest {
 
   @Test
   @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-  void closeInterruptsADrainWaitingOutItsBackoffAndTheWritesRoundStillRuns() throws Exception {
-    var waiting = new CountDownLatch(1);
+  void aCloseEndsADrainsBackoffWithNoRoundAndTheNextStartsRoundOffersTheWrite(@TempDir Path dir)
+      throws Throwable {
+    var lock = dir.resolve("rounds.lock");
+    var told = new CopyOnWriteArrayList<String>();
+    var backingOff = new CountDownLatch(1);
     var never = new CountDownLatch(1);
     var scheduler =
         new SyncScheduler(
-            rounds::incrementAndGet,
+            journaledRound(lock, told),
             Duration.ZERO,
             TTL,
             Executors.newVirtualThreadPerTaskExecutor(),
             nanos::get,
             wait -> {
-              waiting.countDown();
+              backingOff.countDown();
               never.await();
             });
-    scheduler.useHealth(
-        () ->
-            new SyncStatus(
-                "node",
-                "main",
-                null,
-                "stale",
-                Instant.EPOCH,
-                null,
-                1,
-                "unreachable",
-                Remedy.of("offline"),
-                Instant.EPOCH));
+    scheduler.useHealth(SyncSchedulerTest::failedOnce);
 
-    scheduler.afterWrite();
-    waiting.await();
-    scheduler.close();
+    var warned =
+        warnings(
+            () -> {
+              scheduler.afterWrite();
+              backingOff.await();
+              scheduler.close();
+            });
 
-    assertEquals(1, rounds.get(), "the write's round ran as the close cut its wait short");
+    assertEquals(List.of(), told, "a round began after the close woke the drain from its backoff");
+    assertEquals(List.of(), warned, "the stop was said as a failed sync");
+
+    var nextStart = scheduler(new QueueExecutor(), journaledRound(lock, told));
+    nextStart.useHealth(SyncSchedulerTest::failedOnce);
+    nextStart.syncNow();
+    assertEquals(List.of("began", "offered [spec ada-1]"), told);
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aCloseInADrainsDebounceSendsTheWriteBeforeItReturnsAndInterruptsNoRound(@TempDir Path dir)
+      throws Throwable {
+    var told = new CopyOnWriteArrayList<String>();
+    var inDebounce = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var scheduler =
+        new SyncScheduler(
+            journaledRound(dir.resolve("rounds.lock"), told),
+            DEBOUNCE,
+            TTL,
+            Executors.newVirtualThreadPerTaskExecutor(),
+            nanos::get,
+            wait -> {
+              inDebounce.countDown();
+              release.await();
+              advanceBy(wait);
+            });
+    scheduler.useHealth(() -> SyncStatus.unattempted("node", "main"));
+
+    var warned =
+        warnings(
+            () -> {
+              scheduler.afterWrite();
+              inDebounce.await();
+              closeWhileHeld(scheduler, release);
+            });
+
+    assertEquals(
+        List.of("began", "offered [spec ada-1]"),
+        told,
+        "the write went to main before the close returned");
+    assertEquals(List.of(), warned);
+  }
+
+  /** A node whose last round failed just now, so its next round waits out a backoff. */
+  private static SyncStatus failedOnce() {
+    return new SyncStatus(
+        "node",
+        "main",
+        null,
+        "stale",
+        Instant.EPOCH,
+        null,
+        1,
+        "unreachable",
+        Remedy.of("offline"),
+        Instant.EPOCH);
+  }
+
+  /**
+   * A round as production runs one: it says it began, as its health row's begin does, then takes
+   * the box's round lock, which refuses a thread whose interrupt is set as {@code FileChannel.lock}
+   * does, and offers the write the journal holds; a failure is said and thrown, as the round
+   * records it.
+   */
+  private static SyncScheduler.Reconcile journaledRound(Path lock, List<String> told) {
+    return () -> {
+      told.add("began");
+      try (var held = FileMutex.acquire(lock)) {
+        told.add("offered [spec ada-1]");
+      } catch (IOException e) {
+        told.add("failed " + e.getClass().getSimpleName());
+        throw e;
+      }
+    };
   }
 
   @Test
@@ -642,9 +717,9 @@ class SyncSchedulerTest {
   }
 
   /** The warnings the scheduler logs while {@code work} runs, each as its level and message. */
-  private static List<String> warnings(Runnable work) {
+  private static List<String> warnings(Executable work) throws Throwable {
     var log = Logger.getLogger(SyncScheduler.class.getName());
-    var said = new ArrayList<String>();
+    var said = new CopyOnWriteArrayList<String>();
     var listening =
         new Handler() {
           @Override
@@ -660,7 +735,7 @@ class SyncSchedulerTest {
         };
     log.addHandler(listening);
     try {
-      work.run();
+      work.execute();
     } finally {
       log.removeHandler(listening);
     }

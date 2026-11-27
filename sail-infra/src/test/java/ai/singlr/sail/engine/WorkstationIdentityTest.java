@@ -40,7 +40,7 @@ class WorkstationIdentityTest {
 
     var remedied = assertInstanceOf(Remedied.class, refused);
     assertEquals(
-        "This box's workstation key (" + unreadable + ") could not be read (IOException).",
+        "This box's workstation key (" + unreadable + ") could not be read (Input/output error).",
         remedied.reason());
     assertEquals("Check that the account sail runs as can read it.", remedied.remedy().plain());
   }
