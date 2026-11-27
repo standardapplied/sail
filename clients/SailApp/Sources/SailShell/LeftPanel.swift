@@ -16,6 +16,8 @@ package final class LeftPanel: NSView {
     static let remembered = "leftPanel.width"
 
     var onChoose: @MainActor (String) -> Void = { _ in }
+    /// Create Project, at the header's end beside the projects listed.
+    var onCreate: @MainActor () -> Void = {}
     /// Try Again under the control plane's head, which could list no project.
     var onTryAgain: @MainActor () -> Void = {}
     /// Its look; a change redraws its words and rows in it.
@@ -28,11 +30,13 @@ package final class LeftPanel: NSView {
     /// drag edge, so a reach for the thumb never resizes the panel.
     package let scroll: QuietScrollView
     let heading = NSTextField(labelWithString: "Workspaces")
-    /// "No project is open to you yet.", with none listed, or why none could be.
+    /// "No projects yet.", with none listed, or why none could be.
     let emptyLine = NSTextField(labelWithString: "")
     /// Under the empty line while no project could be listed and This Mac's page is shown, where
     /// no card offers its own: the projects asked again.
     package let tryAgain: SailButton
+    /// Create Project, offered to those who may write once projects are listed.
+    package let createProject: SailButton
     /// Skeleton rows, each a tile and a name, before any project is listed.
     private let skeletons: [(tile: Skeleton, name: Skeleton)]
     private let mono: LabelFont
@@ -54,7 +58,13 @@ package final class LeftPanel: NSView {
         scroll = QuietScrollView(look: look)
         skeletons = [70.0, 52, 88, 60, 74].map { (tile: Skeleton(width: TilePaint.side, height: TilePaint.side, look: look), name: Skeleton(width: $0, look: look)) }
         tryAgain = SailButton("Try Again", kind: .quiet, size: .small, look: look, target: nil, action: nil)
+        createProject = SailButton(icon: .plus, label: "Create Project", kind: .quiet, size: .small, look: look, target: nil, action: nil)
         super.init(frame: .zero)
+        createProject.isHidden = true
+        createProject.target = self
+        createProject.action = #selector(create(_:))
+        createProject.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(createProject)
         emptyLine.isHidden = true
         addSubview(emptyLine)
         tryAgain.isHidden = true
@@ -80,6 +90,8 @@ package final class LeftPanel: NSView {
         NSLayoutConstraint.activate([
             widthConstraint, heading.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             heading.centerYAnchor.constraint(equalTo: topAnchor, constant: Self.header / 2),
+            createProject.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            createProject.centerYAnchor.constraint(equalTo: heading.centerYAnchor),
         ])
         list.onChoose = { [weak self] name in if let name { self?.onChoose(name) } }
     }
@@ -107,6 +119,7 @@ package final class LeftPanel: NSView {
         scroll.look = look
         list.barInset = look.cardEdge == nil ? 0 : Look.hairline
         tryAgain.look = look
+        createProject.look = look
         for (tile, name) in skeletons {
             tile.look = look
             name.look = look
@@ -126,6 +139,7 @@ package final class LeftPanel: NSView {
         let failed = !panel.listed && panel.emptyLine != nil
         loading(!panel.listed && !failed)
         tryAgain.isHidden = !failed || panel.chosen != WorkspacesModel.thisMac
+        createProject.isHidden = !panel.creates
         emptyLine.isHidden = panel.emptyLine == nil
         emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),
@@ -146,6 +160,10 @@ package final class LeftPanel: NSView {
 
     @objc private func askAgain(_: Any?) {
         onTryAgain()
+    }
+
+    @objc private func create(_: Any?) {
+        onCreate()
     }
 
     private func loading(_ loading: Bool) {

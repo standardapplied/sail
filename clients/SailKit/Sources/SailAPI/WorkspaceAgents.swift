@@ -115,3 +115,29 @@ extension Endpoint where Response == WorkspaceAgents {
         Self(.get, Route.workspace(name, project: project) + ["agents"])
     }
 }
+
+/// A harness the server knows, as its list of harnesses names it: its declaration and its own
+/// sign-in, which a person makes inside a session (none where it has no such way in).
+public struct KnownAgent: Codable, Equatable, Sendable {
+    public let name: String
+    public let displayName: String
+    public let kinds: [AgentLoginKind]
+    public let signIn: AgentSignIn?
+
+    private enum CodingKeys: String, CodingKey {
+        case name, kinds
+        case displayName = "display_name"
+        case signIn = "sign_in"
+    }
+}
+
+/// Every harness the server knows, in its order.
+public struct KnownAgents: Codable, Equatable, Sendable {
+    public let agents: [KnownAgent]
+}
+
+extension Endpoint where Response == KnownAgents {
+    public static var knownAgents: Self {
+        Self(.get, Route.agents)
+    }
+}

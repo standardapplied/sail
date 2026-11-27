@@ -7,6 +7,11 @@ import Testing
 let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "whoami": { _ = try await $0.send(.whoami) },
     "projects": { _ = try await $0.send(.projects) },
+    "projects-none": { _ = try await $0.send(.projects) },
+    "agents": { _ = try await $0.send(.knownAgents) },
+    "project-created": { _ = try await $0.send(.createProject(marina)) },
+    "template-2f-joined": { _ = try await $0.send(.buildTemplate(project: "lighthouse")) },
+    "template-2g-current": { _ = try await $0.send(.buildTemplate(project: "lighthouse")) },
     "rooms": { _ = try await $0.send(.rooms(project: "harbor")) },
     "room": { _ = try await $0.send(.room("harbor-design")) },
     "room-bare": { _ = try await $0.send(.room("harbor-quay")) },
@@ -76,6 +81,13 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "board-rooms": { _ = try await $0.send(.rooms(project: "harbor")) },
     "refusal-resync-required": { _ = try await $0.send(.changes(since: "999999999")) },
 ]
+
+/// The project the server's golden `project-created` creates, whole.
+let marina = ProjectDefinition(
+    name: "marina",
+    repos: [ProjectDefinition.Repo(url: "https://github.com/harbor/app.git", path: "app"), ProjectDefinition.Repo(url: "https://github.com/harbor/docs.git", path: "docs")],
+    agent: ProjectDefinition.Agent(install: ["claude-code", "codex"]), resources: ProjectDefinition.Resources(cpu: 4, memory: "8GB", disk: "50GB")
+)
 
 /// The obvious fake the server's goldens store as a login's value.
 let goldenKey = "sk-ant-api03-golden-fake-key"
@@ -576,9 +588,8 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
 let answersOfRoutesNotYetCalled: Set<String> = [
     "spec-measures", "specs-measures",
     "template-2c-missing", "template-2d-missing", "template-2e-building", "template-2f-building",
-    "template-2f-joined", "template-2g-built", "template-2g-current", "template-2h-failed",
-    "template-2h-interrupted", "template-2h-cut-pending",
-    "agents", "passkeys", "passkey-removed", "project-created", "projects-none",
+    "template-2g-built", "template-2h-failed", "template-2h-interrupted", "template-2h-cut-pending",
+    "passkeys", "passkey-removed",
 ]
 
 /// The member the golden writer seats in the room.

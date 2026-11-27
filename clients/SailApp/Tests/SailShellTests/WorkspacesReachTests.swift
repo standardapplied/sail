@@ -150,7 +150,7 @@ import Testing
                 return faults
             case .noProject:
                 let none = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [], "total": 0, "schema_version": 1}"#.utf8))
-                let (view, window) = try await WorkspacesReachTests.shown(RecordedServer([none]), width: width, panel: panel, saying: "No project is open")
+                let (view, window) = try await WorkspacesReachTests.shown(RecordedServer([none]), width: width, panel: panel, saying: "Create your first project")
                 defer { window.orderOut(nil) }
                 return WorkspacesReachTests.outOfReach(in: view)
             case .unreachable:

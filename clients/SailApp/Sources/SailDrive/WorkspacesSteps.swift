@@ -58,6 +58,15 @@ actor GoldenDesk: Transport {
         held[route] = after
     }
 
+    /// From now on `route` is answered as the golden `name` was, every `from` in its answer `to`:
+    /// another project's recorded answer given to this one.
+    func answer(_ route: String, as name: String, renaming from: String, to: String) throws {
+        let exchange = try Exchange(name)
+        let said = String(decoding: exchange.body, as: UTF8.self).replacingOccurrences(of: from, with: to)
+        answers[route] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: Data(said.utf8))
+        held[route] = .zero
+    }
+
     /// From now on the projects are listed as the golden `projects` lists them, but these: each a
     /// name and its template's state.
     func answerProjects(_ projects: [[String]]) throws {
@@ -226,6 +235,7 @@ extension Driver {
     }
 
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
+        if let created = await performCreateProject(step) { return created }
         if let files = await performFiles(step) { return files }
         if let started = await performNewSession(step) { return started }
         if let stored = await performLoginSheet(step) { return stored }
@@ -1162,7 +1172,7 @@ extension Driver {
         return true
     }
 
-    private func waitUntilAsync(_ seconds: Double, _ condition: () async -> Bool) async -> Bool {
+    func waitUntilAsync(_ seconds: Double, _ condition: () async -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(failedSoFar ? min(seconds, Self.afterAFailure) : seconds)
         while !(await condition()) {
             guard ContinuousClock.now < deadline else { return false }

@@ -15,7 +15,7 @@ import SailWorkbench
 package final class ProjectView: NSView, NSTextFieldDelegate {
     enum Act: Equatable {
         case open(String), startAndOpen(String), newSession(String), startLast(String), copyName(String), stop(String), delete(String)
-        case newWorkspace, listAgain, checkAgain, typed(String), create, cancelCreate, chose(String?), show(String)
+        case newWorkspace, listAgain, checkAgain, typed(String), create, cancelCreate, chose(String?), show(String), createProject
     }
 
     static let padding = (top: 26.0, sides: 32.0, bottom: 20.0), listGap = 18.0, footGap = 12.0, actionsColumn = 214.0
@@ -526,11 +526,22 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     private func emptyState(_ empty: WorkspacesModel.Empty) -> NSView {
-        let action = empty.action == .newWorkspace
-            ? SailButton("New Workspace", kind: .primary, icon: .plus, look: look, target: self, action: #selector(beginCreate(_:)))
-            : SailButton("Check Again", kind: .secondary, look: look, target: self, action: #selector(askAgain(_:)))
-        action.shortcut(empty.action == .newWorkspace ? "n" : "r", modifiers: .command, mono: mono)
-        return EmptyState(icon: empty.missing ? .layers : .box, title: empty.title, body: empty.body, actions: [action], line: empty.line, lineFirst: true, missing: empty.missing, look: look, titleFont: titleFont, mono: mono)
+        let action: SailButton? = switch empty.action {
+        case .newWorkspace?: SailButton("New Workspace", kind: .primary, icon: .plus, look: look, target: self, action: #selector(beginCreate(_:)))
+        case .checkAgain?: SailButton("Check Again", kind: .secondary, look: look, target: self, action: #selector(askAgain(_:)))
+        case .createProject?: SailButton("Create Project", kind: .primary, icon: .plus, look: look, target: self, action: #selector(createProject(_:)))
+        case nil: nil
+        }
+        if empty.action != .createProject { action?.shortcut(empty.action == .newWorkspace ? "n" : "r", modifiers: .command, mono: mono) }
+        return EmptyState(
+            icon: empty.missing ? .layers : .box, title: empty.title, body: empty.body, actions: action.map { [$0] } ?? [], line: empty.line, missing: empty.missing, look: look,
+            titleFont: titleFont, mono: mono
+        )
+    }
+
+    /// Create Project, in the empty state of a control plane with no project.
+    @objc private func createProject(_: Any?) {
+        on(.createProject)
     }
 
     /// Words in mono 11, tertiary: the foot's.

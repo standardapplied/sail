@@ -28,7 +28,9 @@ public final class WorkspacesView: NSView {
             guard person != oldValue else { return }
             if person.handle == oldValue.handle, person.controlPlane == oldValue.controlPlane {
                 model.person = person
+                render()
             } else {
+                projectSheet?.withdraw()
                 model = WorkspacesModel(person: person, chosen: lastChosen(person))
                 memory = remembered(person)
                 model.lastStarted = memory.last?.display
@@ -159,6 +161,7 @@ public final class WorkspacesView: NSView {
         contentLeading.isActive = true
         panel.onChoose = { [weak self] name in self?.choose(name) }
         panel.onTryAgain = { [weak self] in self?.askAgain(nil) }
+        panel.onCreate = { [weak self] in self?.createProject() }
         project.on = { [weak self] act in self?.act(act) }
         newSession.onStart = { [weak self] start, memory in self?.started(start, memory) }
         newSession.onStoreKey = { [weak self] offer in self?.storeKey(offer) }
@@ -184,6 +187,7 @@ public final class WorkspacesView: NSView {
         panel.look = look
         panelShadow.look = look
         question?.sheet.look = look
+        projectSheet?.look = look
         project.look = look
         local.look = look
         newSession.look = look
@@ -225,7 +229,7 @@ public final class WorkspacesView: NSView {
         switch model.screen {
         case .loading: return "Workspaces"
         case .unreachable: return (["Workspaces"] + cardSaid).joined(separator: "\n")
-        case let .shown(_, .noProjects(empty)): return (["Workspaces", empty.title, empty.body] + (empty.line.map { [$0] } ?? [])).joined(separator: "\n")
+        case let .shown(panel, .noProjects(empty)): return (["Workspaces", panel.emptyLine, empty.title, empty.body, empty.line].compactMap { $0 }).joined(separator: "\n")
         case let .shown(panel, .thisMac):
             let lede = WorkspacesModel.thisMacLede(host: local.macName, controlPlane: panel.controlPlane)
             return (["Workspaces", WorkspacesModel.thisMac, lede] + (LocalProjectView.instead(sessions).map { [$0] } ?? sessions.rows.map(LocalProjectView.said))).joined(separator: "\n")
@@ -386,6 +390,7 @@ public final class WorkspacesView: NSView {
 
     private func act(_ act: ProjectView.Act) {
         guard let client else { return }
+        if act == .createProject { return createProject() }
         guard let projectName = model.chosen else {
             if act == .checkAgain || act == .listAgain { askProjects() }
             return
@@ -433,6 +438,57 @@ public final class WorkspacesView: NSView {
             render()
         case .listAgain, .checkAgain:
             askProjects()
+        case .createProject: break
+        }
+    }
+
+    /// The New project sheet while it shows.
+    package private(set) var projectSheet: CreateProjectSheet?
+
+    /// Create Project: the server's harnesses asked, then the sheet on the window with each one
+    /// checked; harnesses that could not be listed leave AGENTS saying why, the rest of the sheet
+    /// working. Its Create sends the definition once, and a project created has its template built.
+    private func createProject() {
+        guard let client, projectSheet == nil, model.person.creates else { return }
+        let era = self.era
+        byAPerson { [weak self] in
+            guard let self else { return }
+            let agents = await Self.result { () async throws(SailError) in try await client.send(.knownAgents) }
+            guard era == self.era, projectSheet == nil, let window, !isHiddenOrHasHiddenAncestor else { return }
+            let address = model.person.controlPlane
+            let asked: NewProject = switch agents {
+            case let .success(known): NewProject(agents: known.agents.map { NewProject.Agent(name: $0.name, display: $0.displayName) })
+            case let .failure(error): NewProject(agents: [], unlisted: "Sail could not list the agents: \(error.said(at: address))")
+            }
+            let (width, room) = Self.sheetRoom(window)
+            let sheet = CreateProjectSheet(asked, width: width, room: room, direction: userInterfaceLayoutDirection, address: address, look: look, titleFont: titleFont, mono: mono)
+            sheet.send = { definition in await Self.result { () async throws(SailError) in try await client.send(.createProject(definition)) } }
+            sheet.onCreated = { [weak self] name in self?.created(name, era: era) }
+            sheet.onEnd = { [weak self] in self?.projectSheet = nil }
+            projectSheet = sheet
+            window.beginSheet(sheet) { _ in }
+        }
+    }
+
+    /// The sheet's width and the most it may be tall on `window`: 600 pt, or the window less 12 pt
+    /// each side.
+    private static func sheetRoom(_ window: NSWindow) -> (width: Double, room: Double) {
+        let content = window.contentLayoutRect
+        return (min(CreateProjectSheet.width, Double(content.width) - 2 * CreateProjectSheet.inset), Double(content.height) - CreateProjectSheet.inset)
+    }
+
+    /// Project `name` created: its template's build asked at once, then the projects listed and it
+    /// chosen; a build refused is said over its page.
+    private func created(_ name: String, era: Int) {
+        guard let client, era == self.era else { return }
+        byAPerson { [weak self] in
+            guard let self else { return }
+            let built = await Self.result { () async throws(SailError) in try await client.send(.buildTemplate(project: name)) }
+            guard era == self.era else { return }
+            if case let .failure(error) = built { model.buildRefused(name, error) }
+            model.projectCreated(name)
+            await askProjects().value
+            if model.chosen == name, !model.thisMacChosen { keepChosen(name, person) }
         }
     }
 
@@ -843,6 +899,10 @@ public final class WorkspacesView: NSView {
     override public func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         arrange()
+        if let window, let projectSheet {
+            let (width, room) = Self.sheetRoom(window)
+            projectSheet.fit(width: width, room: room)
+        }
     }
 
     /// The panel beside the content, put away by ⌃⌘S, or hidden under a narrow card unless shown

@@ -331,6 +331,28 @@ struct Step: Decodable {
     /// The Workspaces section laid out right to left (true), as a right-to-left Mac lays it out,
     /// or left to right again (false).
     var workspacesRightToLeft: Bool?
+    /// `[field, text]`: the New project sheet's field ("name", "url N", "path N" from 1, "cores",
+    /// "memory", "disk") clicked, its text selected and `text` typed one key at a time.
+    var projectSheetType: [String]?
+    /// The New project sheet's button or link of this title, size of this name, or agent's check of
+    /// this harness clicked with a real mouse-down and mouse-up through the sheet's window.
+    var projectSheetClick: String?
+    /// The New project sheet reads as these facts among its own ("open", "Create on", "path 1
+    /// harbor-api", "name refused …", "nothing over the foot", "inside the window"), or "closed",
+    /// within `seconds` (5 by default).
+    var projectSheetIs: [String]?
+    /// Return pressed twice at once in the New project sheet, which then goes within `seconds`.
+    var projectSheetReturnTwice: Bool?
+    /// Create Project is shown somewhere in the Workspaces section (true) or nowhere (false).
+    var projectCreateOffered: Bool?
+    /// The same session shown again with its `whoami` a viewer's ("viewer") or the golden's ("admin").
+    var signedInAs: String?
+    /// `[route, golden, from, to]`: from now on `route` is answered as `golden` was, every `from` in
+    /// its answer `to`.
+    var goldenRenamed: [String]?
+    /// `[count, definition, build]`: `count` creates asked in all, the last sending `definition`
+    /// (JSON), then the route `build` asked once after it, within `seconds` (10 by default).
+    var createAsked: [String]?
     /// The Workspaces row of this name clicked: chosen, with the list holding the keys (its Open
     /// says ⏎), within `seconds` (5 by default).
     var chooseRow: String?

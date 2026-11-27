@@ -30,6 +30,7 @@ package enum Route {
     package static let terminalTickets = ["v1", "terminal", "tickets"]
     package static let attention = ["v1", "attention"]
     package static let logins = ["v1", "logins"]
+    package static let agents = ["v1", "agents"]
     package static let registerStart = ["v1", "auth", "register", "start"]
     package static let registerFinish = ["v1", "auth", "register", "finish"]
     package static let loginStart = ["v1", "auth", "login", "start"]

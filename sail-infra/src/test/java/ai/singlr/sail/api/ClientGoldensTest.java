@@ -1508,7 +1508,7 @@ class ClientGoldensTest {
         throws Exception {
       Acting.system(() -> new ProjectStore(db).upsert(LIGHTHOUSE));
       var lighthouse = "/v1/projects/lighthouse/template";
-      var build = lighthouse + ":build";
+      var build = lighthouse + "%3Abuild";
       record(goldens, "template-2c-missing", "GET", lighthouse, ana, null);
       record(goldens, "template-2d-missing", "GET", lighthouse, dana, null);
       record(goldens, "refusal-template-admin-only", "POST", build, ana, null);
@@ -1523,7 +1523,7 @@ class ClientGoldensTest {
           goldens,
           "refusal-template-2d-no-resources",
           "POST",
-          "/v1/projects/harbor/template:build",
+          "/v1/projects/harbor/template%3Abuild",
           dana,
           null);
       record(goldens, "refusal-template-2d-runner-not-ready", "POST", build, dana, null);
