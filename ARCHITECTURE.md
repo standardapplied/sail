@@ -4398,6 +4398,46 @@ harness has exactly two ways in, its own sign-in or one stored key (`HarnessCont
 later harness is one adapter and no client change. Each refusal is the API's error shape (`code`,
 `message`, `action`, `remedy`).
 
+**A chat** (`ChatHost`, `ChatProcess`, `ChatStore`) is a session the server holds for a person
+with an agent in their own workspace, with no pty. `POST /v1/projects/{p}/workspaces/{w}/chats`
+`{"harness", "mode", "inside"}` answers `201 {"session"}`, an id from `Ids`; it is admitted as a
+pty `Create` of an agent is, through the same `HostPty.admitWorkspace` and `admitAgent`
+(`AgentStarts`, `RunLogins`), so its refusals are theirs word for word, and only a harness with a
+chat form (`Harness.chat`), in one of its chat `modes` (`Harness.Mode.named`). Nothing starts then.
+`POST /v1/sessions/{id}/chat/messages` `{"text", "attachments"?}` logs the message and answers
+`{"seq", "queued"}`: with no process holding the chat's conversation, it starts one as an agent
+start is signed in (`admitAgent`, `enterWorkspace`, `handOver` of the login file the launch reads
+and removes, `withdraw` when the process ends), `AgentProcess` over pipes in `~/workspace` with the
+argv `HarnessChat.argv` gives (never a shell), resuming the conversation the harness last named in
+the mode it last said (its first chat mode when what it said is no mode's name a launch may pass);
+a message said while a turn is open, or while an earlier one waits, is `queued`, held in the log
+past the chat's `handed` mark, and handed when the turn ends (a `delivered` item names it). At most
+one process holds a chat: a message is sent under the chat's lock, and only a message starts one.
+An attachment is a path the files door wrote in the workspace, read as the dev user by
+`FileScripts.image` (the path on its input, resolved inside `~/workspace`, a link's target
+included, at most 3,840 KiB, a png, jpeg, gif or webp by name) into the harness's image block.
+`GET /v1/sessions/{id}/chat?after=<seq>` answers `{"items", "ended"}`, each item `{"seq", "at",
+"type", ...its fields}` as `ChatWire` writes a `ChatItem` or Sail's own (`message`, `delivered`,
+`told`), at most 500 after `seq` at once, else as soon as one is logged or 25 seconds pass; it never
+starts a process. `POST /v1/sessions/{id}:end` answers 204: the chat is marked ended (it takes no
+message, `409 conflict`) and its process ended (`ProcessEnd`: stdin closed, then INT and TERM, each
+under `ProcessEnd.Grace`, which the live member's end uses too). Every route declares Enter a
+workspace and is decided on the chat's workspace for its opener alone: any other caller, an admin
+included, and an id of no chat, are `404 not_found` "There is no chat <id> of yours here.", so an
+id grants nothing. Every item is logged (`chat_items`) before it is read; text is gathered over
+`LiveMembers.DELTA_WINDOW` into one item a block. What a turn left open is read from the log since
+the last `turn_ended`: at a turn's end its tool rows with no result are closed as unread; when the
+process ends, sail stops (`ChatHost.close`) or, at its start, finds a turn a restart cut
+(`ChatHost.reclaim`), the turn is cut: `told` why, rows closed, every request `withdrawn` (it died
+with the process; a resume replays none), `interrupted`. A request is held, never answered for the
+person; after five minutes unanswered the process is ended and the turn cut, saying so. A request
+the harness's reader could not read whole is refused at once by its id, or, naming none, the turn
+is stopped (`interrupt`). The sweep (every 60 seconds) ends a process idle past the project's
+`max_idle` with no turn open, and erases chats ended more than 30 days ago. `chat_sessions` and
+`chat_items` are box-local and never synced; a chat goes with its opener (the roster's cascade),
+its workspace (`WorkspaceDoors.delete`, and the command line's) and its project (`project destroy`,
+`Erasure`).
+
 What a command the agent runs can read, measured with fake keys on Claude Code 2.1.327 (its Bash
 tool's `env`, against a stand-in API) and Codex 0.170: a run's key, in `ANTHROPIC_API_KEY`, or an
 `ANTHROPIC_AUTH_TOKEN`, is in none of Claude Code's commands' environments, but the interactive
