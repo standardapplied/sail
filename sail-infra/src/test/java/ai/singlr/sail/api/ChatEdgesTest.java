@@ -153,6 +153,25 @@ class ChatEdgesTest {
     fake.settle();
   }
 
+  /**
+   * An end is over once the process is: one that exits as its stdin closes is never waited out for
+   * its grace, here five minutes a step, nor signalled.
+   */
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void aProcessThatEndsOnItsOwnIsNotWaitedOutForItsGrace() {
+    var patient = Duration.ofMinutes(5);
+    var host = bench.restarted(new ProcessEnd.Grace(patient, patient, patient, patient));
+    var session = bench.samsChat();
+    as("sam", () -> host.send(session, "hi", List.of()));
+    var fake = bench.says(INIT, ENDS);
+
+    host.close();
+
+    assertTrue(fake.stdinClosed());
+    assertEquals(List.of(), fake.signals);
+  }
+
   @Test
   void aReadInterruptedWhileItWaitsAnswersNothing() {
     var session = bench.samsChat();
