@@ -147,6 +147,9 @@ public final class EventStreamClient implements AutoCloseable {
       if (!stopped) {
         System.err.println("  [event-stream] Stream ended: " + e.getMessage());
       }
+    } catch (Error fatal) {
+      System.err.println("  [event-stream] Reader failed: " + fatal);
+      throw fatal;
     }
   }
 
@@ -205,7 +208,6 @@ public final class EventStreamClient implements AutoCloseable {
       lineStream.close();
     } catch (Exception ignored) {
     }
-    reader.cancel(true);
     client.close();
   }
 

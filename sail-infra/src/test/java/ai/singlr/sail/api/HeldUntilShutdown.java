@@ -27,6 +27,7 @@ public final class HeldUntilShutdown extends AbstractExecutorService {
       Executors.newCachedThreadPool(
           task -> {
             var thread = new Thread(task);
+            thread.setDaemon(true);
             made.add(thread);
             return thread;
           });

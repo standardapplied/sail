@@ -31,7 +31,9 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import picocli.CommandLine;
@@ -160,6 +162,7 @@ class AgentStreamCommandTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
   void theApiDroppingAStreamEndsTheCommandOnlyOnceEveryTaskOfItsClientHasEnded() throws Exception {
     var before = ClosesWhatItOpens.baseline();
     try (var work = new HeldUntilShutdown();

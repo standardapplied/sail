@@ -29,7 +29,9 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import picocli.CommandLine;
@@ -200,6 +202,7 @@ class EventsCommandTest {
   }
 
   @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
   void theApiDroppingAStreamEndsSailEventsOnlyOnceEveryTaskOfItsClientHasEnded() throws Exception {
     var before = ClosesWhatItOpens.baseline();
     var token = System.getProperty("SAIL_TOKEN");

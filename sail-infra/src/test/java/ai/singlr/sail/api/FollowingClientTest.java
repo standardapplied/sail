@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,8 +21,11 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
+@Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class FollowingClientTest {
 
   @Test
@@ -43,5 +47,27 @@ class FollowingClientTest {
       assertTrue(aborted.getCause() instanceof IOException, aborted.toString());
     }
     ClosesWhatItOpens.assertClosed("a closed client", before);
+  }
+
+  @Test
+  void aCloseFromOneOfItsOwnNamedThreadsIsRefusedInsteadOfWaitingForItself() throws Exception {
+    var client = FollowingClient.of(HttpClient.newBuilder());
+    var named = new AtomicReference<String>();
+    var closing =
+        client.follow(
+            () -> {
+              named.set(Thread.currentThread().getName());
+              client.close();
+            });
+
+    var refused = assertThrows(ExecutionException.class, () -> closing.get(10, TimeUnit.SECONDS));
+    client.close();
+
+    assertEquals(IllegalStateException.class, refused.getCause().getClass());
+    assertEquals(
+        "A followed client was closed from a thread of its own work, which would wait for"
+            + " itself: close it from the thread that opened it.",
+        refused.getCause().getMessage());
+    assertTrue(named.get().matches("sail-follow-[0-9]+"), named.get());
   }
 }
