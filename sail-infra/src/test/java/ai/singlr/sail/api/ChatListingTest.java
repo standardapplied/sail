@@ -191,7 +191,8 @@ class ChatListingTest {
   void aChatIsListedToItsOpenerAloneInItsOwnWorkspace() {
     var sams = bench.samsChat();
     var toms =
-        as("tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true)).session();
+        as("tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true, true))
+            .session();
     var tomId = bench.fdes.byHandle("tom").orElseThrow().id();
     var at = Instant.parse("2026-11-27T09:00:00Z");
     bench.store.open(chat("toms-in-try", "acme", tomId, "try", at));

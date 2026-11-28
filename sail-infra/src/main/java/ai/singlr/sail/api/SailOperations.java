@@ -1619,13 +1619,14 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public Result<AgentOffersResponse> workspaceAgents(String project, String name) {
+  public Result<AgentOffersResponse> workspaceAgents(
+      String project, String name, boolean terminal) {
     return safe(
         () ->
             WorkspaceDoors.answered(
                 () ->
                     workspaceDoors()
-                        .agents(projects.definition(readable(project)), name, fdeStore)));
+                        .agents(projects.definition(readable(project)), name, fdeStore, terminal)));
   }
 
   @Override

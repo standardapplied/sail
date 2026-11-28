@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.SessionForm;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyAdmission;
@@ -97,12 +98,19 @@ final class ChatLaunch {
    * Admits the caller's chat with {@code harness} in {@code mode} in their workspace {@code
    * workspace} of {@code project}, signed in with their stored login or, {@code inside}, the
    * harness's own there: only a harness with a chat form, in one of its chat modes, inside only
-   * where its chat signs in inside, and as a pty agent start of it is admitted. Returns the
-   * caller's FDE id, the chat's opener.
+   * where its chat signs in inside, and as a pty agent start of it is admitted; one with no chat
+   * form is sent to a terminal only on a runner with a terminal door ({@code terminal}). Returns
+   * the caller's FDE id, the chat's opener.
    */
-  String admit(String project, String workspace, String harness, String mode, boolean inside) {
+  String admit(
+      String project,
+      String workspace,
+      String harness,
+      String mode,
+      boolean inside,
+      boolean terminal) {
     var agent = harnesses.apply(Strings.requireNonBlank(harness, "harness"));
-    Harness.Mode.named(form(agent, inside).modes(), mode, agent.displayName());
+    Harness.Mode.named(form(agent, inside, terminal).modes(), mode, agent.displayName());
     var person = person();
     act(() -> doors.admitWorkspace(project, workspace, person));
     ask(
@@ -151,11 +159,12 @@ final class ChatLaunch {
    * however the last one's client ended, and the start refused while it is not proved gone: one
    * conversation, one process. {@code launched} is told {@code true} as the process is about to
    * start, and {@code false} when it then did not, or that {@code true} failed; nothing after the
-   * start can fail it, so a process that started is always held.
+   * start can fail it, so a process that started is always held. A start has no request to say
+   * whether this runner has a terminal door, so a harness that lost its chat form is sent nowhere.
    */
   Started start(ChatStore.Chat chat, Consumer<Boolean> launched) {
     var harness = harnesses.apply(chat.harness());
-    var form = form(harness, chat.inside());
+    var form = form(harness, chat.inside(), false);
     var person = person();
     var project = chat.project();
     var workspace = chat.workspace();
@@ -252,24 +261,27 @@ final class ChatLaunch {
         Guardrails.parseDuration(idle), Guardrails.parseDuration(Guardrails.defaults().maxIdle()));
   }
 
-  private static HarnessChat form(Harness harness) {
-    return harness
-        .chat()
-        .orElseThrow(
-            () ->
-                new IllegalArgumentException(
-                    harness.displayName() + " has no chat form; start it in a terminal."));
+  /**
+   * Why {@code harness} has no chat: sent to a terminal only where this runner opens one for it, by
+   * the rule its offer keeps its forms by ({@link AgentOffer#opens}), and to nothing else.
+   */
+  private static String noChat(Harness harness, boolean terminal) {
+    return AgentOffer.opens(harness, terminal).contains(SessionForm.TERMINAL)
+        ? harness.displayName() + " has no chat form; start it in a terminal."
+        : harness.displayName() + " has no chat form.";
   }
 
   /**
    * {@code harness}'s chat form, for a chat signed in {@code inside} the workspace only when that
-   * form signs in inside ({@link HarnessChat#signsInInside}).
+   * form signs in inside ({@link HarnessChat#signsInInside}), on a runner with a terminal door or
+   * not ({@code terminal}).
    *
    * @throws IllegalArgumentException for a harness with no chat form, or an inside sign-in its chat
    *     does not take
    */
-  static HarnessChat form(Harness harness, boolean inside) {
-    var form = form(harness);
+  static HarnessChat form(Harness harness, boolean inside, boolean terminal) {
+    var form =
+        harness.chat().orElseThrow(() -> new IllegalArgumentException(noChat(harness, terminal)));
     if (inside && !form.signsInInside()) {
       throw new IllegalArgumentException(
           harness.displayName()

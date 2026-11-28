@@ -16,6 +16,7 @@
       },
       "running": true,
       "schema_version": 1,
+      "terminal": true,
       "workspace": "quay"
     },
     "status": 200

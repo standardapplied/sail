@@ -155,6 +155,7 @@
       "project": "harbor",
       "running": true,
       "schema_version": 1,
+      "terminal": true,
       "workspace": "dock"
     },
     "status": 200

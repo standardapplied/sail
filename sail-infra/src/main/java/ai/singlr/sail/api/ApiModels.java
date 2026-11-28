@@ -2197,15 +2197,16 @@ record TemplateResponse(TemplateBuildService.Status status) implements Mappable 
 
 /**
  * What can start in a workspace for the person asking ({@code GET
- * .../workspaces/{workspace}/agents}): whose it is and whether it runs, and either why no agent
- * starts in it ({@code refusal}, with nothing offered) or each harness Sail knows, offered as
- * {@link AgentOffer} says.
+ * .../workspaces/{workspace}/agents}): whose it is and whether it runs, whether this runner opens a
+ * terminal at all ({@code terminal}, its door), and either why no agent starts in it ({@code
+ * refusal}, with nothing offered) or each harness Sail knows, offered as {@link AgentOffer} says.
  */
 record AgentOffersResponse(
     String project,
     String workspace,
     String owner,
     boolean running,
+    boolean terminal,
     ApiError refusal,
     List<AgentOffer> offered)
     implements Mappable {
@@ -2218,11 +2219,37 @@ record AgentOffersResponse(
       m.put("owner", owner);
     }
     m.put("running", running);
+    m.put("terminal", terminal);
     if (refusal != null) {
       m.put("refusal", refusal.toMap());
     }
     m.put("offered", offered.stream().map(AgentOffer::toMap).toList());
     return m;
+  }
+
+  /**
+   * What starts in workspace {@code workspace} of {@code project}, {@code owner}'s, on a runner
+   * with a terminal door or not ({@code terminal}): each of {@code offers} that keeps a form this
+   * runner opens; and, with none left, nothing, said once why. An offer keeps no form only where
+   * this runner has no terminal door, so the words are the terminal open's own ({@link
+   * TerminalTickets#notOffered}).
+   */
+  static AgentOffersResponse opening(
+      String project,
+      String workspace,
+      String owner,
+      boolean running,
+      boolean terminal,
+      List<AgentOffer> offers) {
+    var open = offers.stream().filter(offer -> !offer.forms().isEmpty()).toList();
+    return new AgentOffersResponse(
+        project,
+        workspace,
+        owner,
+        running,
+        terminal,
+        open.isEmpty() ? TerminalTickets.notOffered().error() : null,
+        open);
   }
 }
 
@@ -2234,17 +2261,36 @@ record AgentOffersResponse(
  * inside it ({@code inside}), its own sign-in ({@code sign_in}) and whether the workspace holds it
  * ({@code signed_in}), said only when that was read ({@code signedIn} null when not); and why it
  * does not start at all ({@code refusal}), with the few words a list row says of it ({@code
- * unavailable}); and the forms a session of it takes ({@link Harness#forms}), with, when it chats,
- * its chat's modes, the one a chat starts in, and whether a chat may take its sign-in inside
- * ({@code chat}), the same {@link Harness#chat} a chat's open reads.
+ * unavailable}); and the forms a session of it takes that this runner opens ({@link #forms}, a
+ * terminal only where it has a terminal door, {@code terminal}), with, when it chats, its chat's
+ * modes, the one a chat starts in, and whether a chat may take its sign-in inside ({@code chat}),
+ * the same {@link Harness#chat} a chat's open reads.
  */
 record AgentOffer(
     Harness harness,
     LoginStore.Row login,
     boolean inside,
     Boolean signedIn,
-    AgentStarts.OfferRefusal refusal)
+    AgentStarts.OfferRefusal refusal,
+    boolean terminal)
     implements Mappable {
+
+  /** The forms of its harness's this runner opens now ({@link #opens}). */
+  List<SessionForm> forms() {
+    return opens(harness, terminal);
+  }
+
+  /**
+   * The forms of {@code harness}'s ({@link Harness#forms}) a runner opens now, with a terminal door
+   * or not ({@code terminal}): a terminal only with its door. The one rule the offers and a chat
+   * open's refusal read.
+   */
+  static List<SessionForm> opens(Harness harness, boolean terminal) {
+    return harness.forms().stream()
+        .filter(form -> terminal || form != SessionForm.TERMINAL)
+        .toList();
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -2270,7 +2316,7 @@ record AgentOffer(
       m.put("refusal", refusal.why().error().toMap());
       m.put("unavailable", refusal.unavailable());
     }
-    m.put("forms", harness.forms().stream().map(SessionForm::wire).toList());
+    m.put("forms", forms().stream().map(SessionForm::wire).toList());
     harness
         .chat()
         .ifPresent(

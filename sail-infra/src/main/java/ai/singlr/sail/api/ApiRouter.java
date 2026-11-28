@@ -326,7 +326,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             enterWorkspace,
             call ->
                 ApiResponse.from(
-                    operations.workspaceAgents(call.project(), call.param("workspace")))),
+                    operations.workspaceAgents(
+                        call.project(), call.param("workspace"), terminal.isPresent()))),
         route(
             POST,
             PROJECT + "/workspaces/{workspace}/stop",
@@ -823,7 +824,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
 
   /**
    * {@code POST …/workspaces/{w}/chats} with {@code {"harness", "mode", "inside"}}: a chat of the
-   * caller's in their workspace, started as a pty agent is.
+   * caller's in their workspace, started as a pty agent is; a harness with no chat is sent to a
+   * terminal only where this runner has its door.
    */
   private ApiResponse openChat(Call call) throws IOException {
     var body = call.body();
@@ -838,7 +840,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
                 call.param("workspace"),
                 text(body, "harness"),
                 text(body, "mode"),
-                inside));
+                inside,
+                terminal.isPresent()));
   }
 
   /** {@code GET /v1/sessions/{id}/chat?after=<seq>}: the items after {@code seq}, long-polled. */
@@ -888,11 +891,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
 
   /** This runner's terminal door, refused on a runner that offers none over the network. */
   private TerminalTickets offered() {
-    return terminal.orElseThrow(
-        () ->
-            new ApiException(
-                ErrorCode.TERMINAL_NOT_OFFERED,
-                "This runner offers no terminal over the network; ask an admin."));
+    return terminal.orElseThrow(TerminalTickets::notOffered);
   }
 
   private ApiResponse dispatch(Call call) throws IOException {
