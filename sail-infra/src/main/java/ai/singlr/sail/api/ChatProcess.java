@@ -71,6 +71,7 @@ final class ChatProcess {
   private boolean turnOpen;
   private boolean took;
   private boolean reading = true;
+  private boolean breaking;
   private long handing;
 
   /**
@@ -349,9 +350,10 @@ final class ChatProcess {
 
   /**
    * Hands the oldest message waiting to the process, its turn open from then on. Once the harness
-   * took it, it is marked handed, and the turn is said open unless the harness already ended it;
-   * one it did not take is said open nowhere, and waits for the next process. Returns the place of
-   * its last line in the writer, 0 for none.
+   * took it, the turn is said open unless the harness already ended it, then it is marked handed,
+   * so a turn whose message could not be marked is open to be cut; one it did not take is said open
+   * nowhere, and waits for the next process. Returns the place of its last line in the writer, 0
+   * for none.
    */
   private long handNext() {
     var next = log.unhanded(handing).stream().findFirst();
@@ -366,12 +368,12 @@ final class ChatProcess {
     Runnable taken =
         () -> {
           took = true;
+          if (turnOpen) {
+            log.turn(true);
+          }
           log.handed(seq);
           if (queued) {
             log.log(new ChatWire.Delivered(seq));
-          }
-          if (turnOpen) {
-            log.turn(true);
           }
         };
     var lines = wire.message((String) message.get("text"));
@@ -388,9 +390,10 @@ final class ChatProcess {
 
   /**
    * Hands {@code line} to the writer: once the harness took it, {@code taken} runs; once it did
-   * not, {@code refused} runs and the process begins its end at once, so the turn it cuts says
-   * {@code why} however soon its output ends, and is ended on a thread of its own. Each runs under
-   * the monitor. Returns the line's place. Called under the monitor.
+   * not, or its taking could not be recorded, {@code refused} runs and the process begins its end
+   * at once, so the turn it cuts says why ({@code why} when the harness did not take it) however
+   * soon its output ends, and is ended on a thread of its own, started once however many lines are
+   * refused. Each runs under the monitor. Returns the line's place. Called under the monitor.
    */
   private long hand(String line, String why, Runnable taken, Runnable refused) {
     return writer.offer(
@@ -404,10 +407,13 @@ final class ChatProcess {
           if (!end.ending()) {
             end.begin(said);
           }
+          if (!breaking) {
+            breaking = true;
+            Thread.ofVirtual()
+                .name("sail-chat-broken-" + session)
+                .start(() -> end.end(timing.grace().afterInt(), said));
+          }
           refused.run();
-          Thread.ofVirtual()
-              .name("sail-chat-broken-" + session)
-              .start(() -> end.end(timing.grace().afterInt(), said));
         });
   }
 
