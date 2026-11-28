@@ -67,9 +67,20 @@ class CiFleetTest {
 
   /**
    * A check limit whose timer, the stand-in {@code sleep}, runs out only once the check's remote
-   * command writes to the FIFO {@code go}; a minute's grace after it runs out at once.
+   * command writes to the FIFO {@code go}; a minute's grace after it runs out at once. Each of the
+   * two adds its own pid and its parent's, the timer's shell, to {@code timers}.
    */
   private static final String LIMIT = "1000";
+
+  /**
+   * {@code wait} shadowed, as a check calls it, by one that lets it go on only once the check's
+   * timer has started and its body has ended and been reaped, and a foreground command has run
+   * after that, at which bash -c drops the ended job from its job table: the order a busy runner
+   * gives at random, every time.
+   */
+  private static final String WAITS_ONCE_THE_BODY_HAS_ENDED =
+      "wait() { until [[ -s $FLEET_TEST/timers ]]; do :; done;"
+          + " while kill -0 \"$job\" 2> /dev/null; do :; done; env true; builtin wait \"$@\"; } && ";
 
   @TempDir Path dir;
   private Path runs;
@@ -100,12 +111,15 @@ class CiFleetTest {
         bin.resolve("sleep"),
         """
         case $1 in
+          %s | 60) echo "$$ $PPID" >> "$FLEET_TEST/timers" ;;
+        esac
+        case $1 in
           %s) exec cat "$FLEET_TEST/go" ;;
           60) exit 0 ;;
         esac
         PATH=${PATH#*:} exec sleep "$@"
         """
-            .formatted(LIMIT));
+            .formatted(LIMIT, LIMIT));
     remote(READS_ITS_INPUT);
   }
 
@@ -714,6 +728,7 @@ class CiFleetTest {
       assertFalse(
           ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
           "the remote command outlived its check");
+      assertNoTimerRunning();
     }
   }
 
@@ -742,6 +757,7 @@ class CiFleetTest {
       assertFalse(
           ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
           "the check that ignored TERM outlived its grace");
+      assertNoTimerRunning();
     }
   }
 
@@ -831,6 +847,59 @@ class CiFleetTest {
 
     assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
     assertEquals(List.of("PASS goes on"), report("body-run"));
+  }
+
+  @Test
+  void aCheckWhoseBodyEndedBeforeItsWaitPassesAtOnceAndLeavesNoTimerRunning() throws Exception {
+    var ended = beforeItsWait("ended before its wait", "true");
+
+    assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
+    assertEquals(List.of("PASS ended before its wait"), report("early"));
+  }
+
+  @Test
+  void aCheckWhoseBodyFailedBeforeItsWaitFailsByItsBodyNotByItsTimer() throws Exception {
+    var ended = beforeItsWait("failed before its wait", "bash -c 'echo said; exit 3'");
+
+    assertEquals(1, ended.exit(), ended.stdout() + ended.stderr());
+    var log = runs.resolve("early").resolve(logOf("failed before its wait"));
+    assertEquals(List.of("FAIL failed before its wait (see " + log + ")"), report("early"));
+    assertEquals("said\n", Files.readString(log));
+  }
+
+  /**
+   * The check {@code name} of {@code body} at {@link #LIMIT}, its body over before its wait is
+   * reached; then nothing of its timer is left running. The test holds the timer's FIFO open
+   * meanwhile, so a timer left running waits on it, and its close ends that timer, also when the
+   * check never returns.
+   */
+  private Child.Ended beforeItsWait(String name, String body) throws Exception {
+    var go = dir.resolve("go");
+    run("mkfifo", go.toString());
+    try (var held = new RandomAccessFile(go.toFile(), "rw")) {
+      var ended =
+          Child.run(
+              shell(
+                  SOURCED
+                      + WAITS_ONCE_THE_BODY_HAS_ENDED
+                      + "check_within %s early '%s' %s".formatted(LIMIT, name, body),
+                  SCRIPT.toString()));
+      assertNoTimerRunning();
+      return ended;
+    }
+  }
+
+  /** Every timer a check started, its shell and its {@code sleep}, has ended. */
+  private void assertNoTimerRunning() throws IOException {
+    var timers = Files.readAllLines(dir.resolve("timers"));
+    assertFalse(timers.isEmpty(), "no check started a timer");
+    for (var timer : timers) {
+      for (var pid : timer.split(" ")) {
+        assertFalse(
+            ProcessHandle.of(Long.parseLong(pid)).map(ProcessHandle::isAlive).orElse(false),
+            "the timer's process " + pid + " outlived its check");
+      }
+    }
   }
 
   @Test
