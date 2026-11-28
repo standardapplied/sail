@@ -760,6 +760,13 @@ import Testing
         bench.setChatState(.known(.yourTurn), of: working.id)
         bench.setChatState(.known(.needsYou), of: working.id)
         #expect(bench.mark(of: tab) == .needsYou && bench.panes[working.id]?.unseen == false)
+        let kept = bench.arrangement(runner: "uday", holding: [])
+        var restored = Workbench.restore(kept, live: ["mac-1"] + kept.runnerSessions(for: "uday"), home: "/", for: "uday")
+        restored.selectTab(at: 0)
+        let back = try #require(restored.panes.values.first { $0.session == Self.chatID("20") })
+        #expect(back.chatState == nil)
+        restored.setChatState(.known(.yourTurn), of: back.id)
+        #expect(restored.panes[back.id]?.unseen == false, "a chat restored with no state took its first state for a turn's end")
     }
 
     /// The listing tells a held chat where it stands and its title, an ended turn's included.
