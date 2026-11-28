@@ -6,18 +6,98 @@
 package ai.singlr.sail.harness;
 
 import ai.singlr.sail.engine.ChatItem;
+import ai.singlr.sail.engine.ChatWire;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
- * A harness a person chats with ({@link Harness#chat}): one process that stays up, takes each of a
- * person's messages as a JSON line on its stdin, asks that person before what its mode does not
- * allow, and writes what it does as JSON lines on its stdout; and what of its own names a person is
- * shown in a chat's items, in words no client has to know the harness to read.
+ * A harness a person chats with ({@link Harness#chat}): how a process of it is started for a chat
+ * ({@link #argv}) and spoken with ({@link #wire}), the modes a person may choose, and what of its
+ * own names a person is shown in a chat's items, in words no client has to know the harness to
+ * read. It is handed a person's messages a turn at a time, asks that person before what its mode
+ * does not allow, and says what it does; how it is written to and read, and where a turn begins and
+ * ends, are its wire's alone, so a host knows nothing of them.
  */
 public interface HarnessChat {
+
+  /**
+   * A request the harness asked, as its wire answers it: the line that tells the harness the
+   * person's {@code reply}, held to what was asked.
+   */
+  @FunctionalInterface
+  interface Asked {
+
+    /**
+     * @throws IllegalArgumentException for a reply the request does not take, which leaves it asked
+     */
+    String answer(ChatWire.Reply reply);
+  }
+
+  /** The conversation a harness named ({@code conversation}) and the mode it said it is in. */
+  record Said(String conversation, String mode) {}
+
+  /**
+   * What one line a harness wrote says: what a person is shown of it ({@code items}); how a request
+   * among them is answered ({@code asked}, null when none asks); the conversation and mode it named
+   * ({@code said}, null when it named neither); whether it began a turn ({@code began}); whether
+   * the open turn is to be stopped ({@code stop}), since it waits on what no answer reaches; and
+   * what is written back to it at once ({@code replies}), in order.
+   */
+  record Heard(
+      List<ChatItem> items,
+      Asked asked,
+      Said said,
+      boolean began,
+      boolean stop,
+      List<String> replies) {
+
+    /**
+     * @throws IllegalArgumentException for a request heard with no way to answer it
+     */
+    public Heard {
+      items = List.copyOf(items);
+      replies = List.copyOf(replies);
+      if (asked == null && items.stream().anyMatch(ChatItem.Request.class::isInstance)) {
+        throw new IllegalArgumentException("A request is heard with how it is answered.");
+      }
+    }
+
+    /** A line that says {@code items} and asks nothing else of its host. */
+    public static Heard of(List<ChatItem> items) {
+      return new Heard(items, null, null, false, false, List.of());
+    }
+  }
+
+  /**
+   * One process's side of a chat's pipes, the only way a host speaks to the harness: the lines
+   * written before any other, what each line it writes says, and the lines that hand it a message,
+   * stop its turn, change its mode and, through {@link Asked}, answer what it asked. A host writes
+   * each line whole, in the order it is given them, and calls a wire under its process's guard, one
+   * call at a time, so a wire keeps what its exchange needs between lines (an id it sent, a message
+   * held until its harness is ready) with no lock of its own.
+   */
+  interface Wire {
+
+    /** The lines written before any other: none for a harness that needs no opening. */
+    List<String> opening();
+
+    /** What {@code line}, one the harness wrote, says. */
+    Heard read(String line);
+
+    /**
+     * The lines that hand the harness a person's {@code text} as a turn: none while it is not yet
+     * ready for one, the line that makes it ready then writing them ({@link Heard#replies}).
+     */
+    List<String> message(String text);
+
+    /** The line that stops the turn in progress, named {@code id} where the harness names one. */
+    String interrupt(String id);
+
+    /** The line that puts the process in {@code mode} between turns, asked as {@code id}. */
+    String mode(String id, String mode);
+  }
 
   /**
    * One chat's launch: the mode it starts in, by the harness's own name, an optional model and the
@@ -63,6 +143,9 @@ public interface HarnessChat {
    * hold {@code [} and {@code ]}, which a shell reads as a pattern.
    */
   List<String> argv(Launch launch);
+
+  /** The wire of a process started with {@code launch} ({@link #argv}), made for it alone. */
+  Wire wire(Launch launch);
 
   /**
    * The modes a person may choose for a chat, each with what a person is shown for it ({@code

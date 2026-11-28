@@ -169,9 +169,14 @@ final class ChatLog {
     store.handed(session, seq);
   }
 
-  /** The person's messages not yet handed to the harness, oldest first. */
-  List<ChatStore.Item> unhanded() {
-    return store.unhanded(session, MESSAGE);
+  /**
+   * The person's messages not yet handed to the harness, oldest first, past {@code handing}, the
+   * one being handed now (0 for none), which its taking marks handed.
+   */
+  List<ChatStore.Item> unhanded(long handing) {
+    return store.unhanded(session, MESSAGE).stream()
+        .filter(message -> message.seq() > handing)
+        .toList();
   }
 
   /**

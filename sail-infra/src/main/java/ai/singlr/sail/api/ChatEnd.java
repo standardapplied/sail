@@ -23,7 +23,7 @@ final class ChatEnd {
   private static final Duration EXIT_GRACE = Duration.ofSeconds(5);
 
   private final Object guard;
-  private final String session;
+  private final Runnable closeInput;
   private final String agent;
   private final AgentProcess.Handle handle;
   private final ChatTiming timing;
@@ -34,13 +34,17 @@ final class ChatEnd {
   private boolean known;
 
   /**
-   * The end of chat {@code session}'s process {@code handle}, with {@code agent}, under {@code
-   * guard}.
+   * The end of the process {@code handle}, with {@code agent}, under {@code guard}, whose stdin
+   * {@code closeInput} closes once what it was handed is written, never waiting.
    */
   ChatEnd(
-      Object guard, String session, String agent, AgentProcess.Handle handle, ChatTiming timing) {
+      Object guard,
+      Runnable closeInput,
+      String agent,
+      AgentProcess.Handle handle,
+      ChatTiming timing) {
     this.guard = Objects.requireNonNull(guard, "guard");
-    this.session = Objects.requireNonNull(session, "session");
+    this.closeInput = Objects.requireNonNull(closeInput, "closeInput");
     this.agent = Objects.requireNonNull(agent, "agent");
     this.handle = Objects.requireNonNull(handle, "handle");
     this.timing = Objects.requireNonNull(timing, "timing");
@@ -63,7 +67,7 @@ final class ChatEnd {
   void begin(String why) {
     ending = true;
     reason = why;
-    ProcessEnd.closeInput(handle, "sail-chat-end-" + session);
+    closeInput.run();
   }
 
   /**
@@ -111,7 +115,7 @@ final class ChatEnd {
     if (exit.isPresent()) {
       return exit;
     }
-    ProcessEnd.closeInput(handle, "sail-chat-unread-" + session);
+    closeInput.run();
     ProcessEnd.signalled(
         handle,
         timing.grace(),

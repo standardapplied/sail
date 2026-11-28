@@ -4452,6 +4452,29 @@ turn is open, while an earlier one waits or while the process is ending is `queu
 log past the chat's `handed` mark, and handed when the turn ends (a `delivered` item names it) or by
 the next process. A message is handed at least once: marked handed after the harness took it.
 
+**A harness's wire.** The host speaks a chat's harness only through the wire `HarnessChat.wire`
+makes for each process, from the launch its argv was made from (`HarnessChat.Wire`): the lines
+written before any other (`opening`; none for Claude Code), what each line the harness writes says
+(`read`, a `HarnessChat.Heard`: the items a person is shown, how a request among them is answered,
+`HarnessChat.Asked`, the conversation and mode it named, whether it began a turn, whether its turn
+is to be stopped, and lines written back at once), and the lines that hand it a message (none while
+it is not ready for one, as a JSON-RPC harness before its handshake answers; the line that makes
+it ready writes them), stop its turn and change its mode. Where a turn begins and ends is the
+wire's to say: Claude Code's (`ClaudeCodeWire`, over `LiveStream`, `LiveChat` and `LiveReply`)
+begins one at each `init` and ends it at its `result`, and a host opens one as it hands a message.
+No class of the host (each `Chat*` of the api package, and the routes) depends on a class of
+Claude Code's or names a harness (`ArchitectureRulesTest.aChatsHostSpeaksAHarnessOnlyThroughItsWire`),
+and `ChatRpcTest` runs a turn of a test-only JSON-RPC harness (a handshake before the first
+message, request ids, a turn its prompt's response ends) through the host as it is. Every line is
+decided under the process's monitor (an answer is logged and its request taken out before its line
+is handed) and written by the process's one writer (`ChatWriter`), on a thread of its own, in the
+order handed, never under the chat's lock or the monitor: at most 64 lines and 4 MiB wait, and a
+line past either, or after one the harness did not take, is refused at once, as a write the harness
+refuses is; a caller waits for its own line at most `ProcessEnd.Grace.afterInt`, then goes on;
+stdin is closed only after the lines handed before the close; and a line the harness has not taken
+`ChatTiming.stopBound` after it was handed ends the process, its turn cut in that line's words (an
+answer's "…did not get your answer…").
+
 **One conversation, one process.** Every process of a chat writes its pid to one place, the chat's
 own folder (`AgentUnit.chat`, `~/.sail/chats/<session>/`), and the chat is marked `launched` from
 just before its start until its exit is known. Only a send, or the delivery of a waiting message,
@@ -4503,7 +4526,8 @@ its opener alone: any other caller, an admin included, and an id of no chat, are
 (`chat_items`) before it is read; text is gathered over `LiveMembers.DELTA_WINDOW` into one item a
 block. A request is held until its person answers it or the harness withdraws it, however long that
 takes (below); a turn Sail asked to stop that has not stopped `ChatTiming.stopBound` (five minutes)
-later has its process ended. A request the harness's reader could not read whole is refused at
+later has its process ended, and so does a process that has not taken a line Sail wrote it that
+long after. A request the harness's reader could not read whole is refused at
 once by its id, or, naming none, the turn is stopped. The sweep (every 60 seconds) erases chats
 ended more than 30 days ago, asks again after processes left over, ends a process whose chat was
 erased, and ends a process idle past the project's `max_idle` with no turn open, deciding and
@@ -4516,12 +4540,14 @@ not its container was left, and `Erasure`).
 **Answering a chat's agent** (`ChatAnswers`, reached through `ChatHost`'s one seam: the chat's lock
 and the process this sail holds for it, `live.get`, never `holder`, so none of its routes starts a
 process or waits on one). Each process holds every request a person can answer (a `permission`,
-`question` or `plan` item) as its whole step, input and the harness's own suggestions included,
-keyed by its id under the process's monitor, until it is answered, withdrawn, its turn ends or the
+`question` or `plan` item) as its wire answers it (`HarnessChat.Asked`; Claude Code's holds its
+whole step, input and the harness's own suggestions included), keyed by its id under the process's
+monitor, until it is answered, withdrawn, its turn ends or the
 process ends; an `unreadable` request is never held. `POST /v1/sessions/{id}/chat/requests/{request}`
 `{"decision", "message", "answers"}` (`allow`, `allow_always`, `deny`, `answer`; no other field)
-logs `answered {request, decision, message?, answers?, by}`, takes the held step out and only then
-writes one `control_response` (`LiveReply.reply`), and answers `{"seq"}` (an answer whose log write
+logs `answered {request, decision, message?, answers?, by}`, takes the held request out and only
+then hands its answer to the process's writer (its `HarnessChat.Asked`: for Claude Code one
+`control_response`, `LiveReply.reply`), and answers `{"seq"}` (an answer whose log write
 fails leaves the step held, so its retry is the one): an allow hands back the
 step's own input, `allow_always` its own `permission_suggestions` exactly and only when its item
 offers an `always` (`HarnessChat.always`, the one decision for the card and this gate; never for

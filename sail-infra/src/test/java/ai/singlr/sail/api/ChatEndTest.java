@@ -37,7 +37,7 @@ class ChatEndTest {
     var end =
         new ChatEnd(
             guard,
-            "chat",
+            () -> {},
             "Claude Code",
             handle(signal -> signals.add(signal + (open.get() ? " in the turn" : " after it"))),
             timing());

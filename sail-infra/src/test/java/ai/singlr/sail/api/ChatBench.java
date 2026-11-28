@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.Recorded;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceOwner;
+import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -28,6 +29,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -96,6 +98,11 @@ final class ChatBench implements AutoCloseable {
   }
 
   ChatBench(Path dir) {
+    this(dir, Harnesses::of);
+  }
+
+  /** The same box, whose chats start the harness {@code harnesses} names. */
+  ChatBench(Path dir, Function<String, Harness> harnesses) {
     db = Sqlite.open(dir.resolve("sail.db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
@@ -144,7 +151,7 @@ final class ChatBench implements AutoCloseable {
             processes,
             processes.container(),
             roles,
-            Harnesses::of);
+            harnesses);
     processes.container().holds("try");
     processes.onStart(fake -> fake.onClose(fake::exitsIfRunning));
     host = restarted();

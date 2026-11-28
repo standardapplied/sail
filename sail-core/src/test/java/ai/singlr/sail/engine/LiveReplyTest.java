@@ -8,9 +8,9 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.sail.engine.LiveReply.Answer;
-import ai.singlr.sail.engine.LiveReply.Decision;
-import ai.singlr.sail.engine.LiveReply.Reply;
+import ai.singlr.sail.engine.ChatWire.Answer;
+import ai.singlr.sail.engine.ChatWire.Decision;
+import ai.singlr.sail.engine.ChatWire.Reply;
 import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;

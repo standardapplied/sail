@@ -5,12 +5,16 @@
 
 package ai.singlr.sail.engine;
 
+import static ai.singlr.sail.engine.LiveStream.CONTENT_CODE_POINTS;
+
+import ai.singlr.sail.common.Strings;
 import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * An entry of a chat's log as the log keeps it and a client reads it: a {@link ChatItem} the
@@ -30,6 +34,69 @@ public final class ChatWire {
    * set's: never one of their fields' names ({@code kind} is a call's).
    */
   public static final String TYPE = "type";
+
+  /** What a person decides on a request their agent made, by the name a client sends. */
+  public enum Decision {
+    ALLOW,
+    ALLOW_ALWAYS,
+    DENY,
+    ANSWER;
+
+    /**
+     * The decision a client names {@code name}.
+     *
+     * @throws IllegalArgumentException for any other name
+     */
+    public static Decision named(String name) {
+      for (var decision : values()) {
+        if (decision.name().toLowerCase(Locale.ROOT).equals(name)) {
+          return decision;
+        }
+      }
+      throw new IllegalArgumentException("decision is allow, allow_always, deny or answer.");
+    }
+  }
+
+  /**
+   * A person's answer to one of a request's questions, named by its exact text: labels from its own
+   * choices ({@code chosen}), or the person's {@code own} words, never both.
+   */
+  public record Answer(String question, List<String> chosen, String own) {
+    public Answer {
+      Objects.requireNonNull(question, "question");
+      chosen = List.copyOf(chosen);
+      if (chosen.isEmpty() == (own == null)) {
+        throw new IllegalArgumentException(
+            "An answer to a question is the labels chosen or the person's own words, not both.");
+      }
+      if (own != null) {
+        words(Strings.requireNonBlank(own, "own"));
+      }
+    }
+  }
+
+  /**
+   * What a person answers a request with: the {@code decision}, the words a denial carries ({@code
+   * message}, null for none) and the answers to a question's questions, the only decision that has
+   * any. Which line tells its harness is the harness's own ({@code HarnessChat.Asked}).
+   */
+  public record Reply(Decision decision, String message, List<Answer> answers) {
+    public Reply {
+      Objects.requireNonNull(decision, "decision");
+      answers = List.copyOf(answers);
+      if (message != null && decision != Decision.DENY) {
+        throw new IllegalArgumentException("Only a denial carries words: message goes with deny.");
+      }
+      if (answers.isEmpty() == (decision == Decision.ANSWER)) {
+        throw new IllegalArgumentException(
+            "answers go with answer alone, which names each question it answers.");
+      }
+      if (message != null && words(message).isBlank()) {
+        throw new IllegalArgumentException(
+            "message is the person's own words; leave it out to say none.");
+      }
+    }
+  }
 
   /** What Sail itself logs in a chat, beside what the harness said: no harness says these. */
   public sealed interface Own {}
@@ -52,11 +119,7 @@ public final class ChatWire {
    * none). Logged before the agent is told, and never with the request's input or suggestions.
    */
   public record Answered(
-      String request,
-      LiveReply.Decision decision,
-      String message,
-      List<LiveReply.Answer> answers,
-      String by)
+      String request, Decision decision, String message, List<Answer> answers, String by)
       implements Own {
     public Answered {
       answers = answers == null || answers.isEmpty() ? null : List.copyOf(answers);
@@ -70,6 +133,21 @@ public final class ChatWire {
   public record ModeSet(String mode, String request, String by) implements Own {}
 
   private ChatWire() {}
+
+  /**
+   * {@code words}, a person's own, within the bound of what an answer holds.
+   *
+   * @throws IllegalArgumentException past {@link LiveStream#CONTENT_CODE_POINTS}
+   */
+  private static String words(String words) {
+    if (words.codePointCount(0, words.length()) > CONTENT_CODE_POINTS) {
+      throw new IllegalArgumentException(
+          "Your words are past the "
+              + CONTENT_CODE_POINTS
+              + " characters an answer holds; say it shorter.");
+    }
+    return words;
+  }
 
   /** The kind an entry of {@code type}, a {@link ChatItem} or one of Sail's {@link Own}, is. */
   public static String kind(Class<? extends Record> type) {

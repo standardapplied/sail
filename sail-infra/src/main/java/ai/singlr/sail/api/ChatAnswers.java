@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.ChatWire;
-import ai.singlr.sail.engine.LiveReply;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
@@ -16,15 +15,18 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * What a chat's person tells its agent besides a message: an answer to a request it made, a stop of
  * its turn, and a change of its mode. Each reaches the chat only through its host's {@link Held}
  * seam, the chat's lock and the process its host holds for it, if any, so nothing here starts a
- * process or waits on one; each writes under the process's monitor, inside the chat's lock, as the
- * host's own writers do. An answer reaches its request once: only a request its process holds is
- * answered, and every other is refused from what the log says of it.
+ * process or waits on one; each decides under the process's monitor, inside the chat's lock, as the
+ * host's own writers do, and waits for what it wrote once the lock is let go. An answer reaches its
+ * request once: only a request its process holds is answered, and every other is refused from what
+ * the log says of it.
  */
 final class ChatAnswers {
 
@@ -44,15 +46,18 @@ final class ChatAnswers {
     /**
      * {@code work} on the caller's chat {@code session}, once it is theirs (refused as no chat of
      * theirs otherwise), under the chat's lock, with its log and the process its host holds for it,
-     * null for none.
+     * null for none; then what it answers, once the lock is let go.
      */
     Mappable under(String session, Work work);
   }
 
-  /** What a route does with a chat, under its lock. */
+  /**
+   * What a route does with a chat, under its lock: it decides, and answers what is then said
+   * outside the lock, once what it wrote is waited for.
+   */
   @FunctionalInterface
   interface Work {
-    Mappable apply(ChatStore.Chat chat, ChatLog log, ChatProcess process);
+    Supplier<Mappable> apply(ChatStore.Chat chat, ChatLog log, ChatProcess process);
   }
 
   /** What a route logged: its seq. */
@@ -81,7 +86,8 @@ final class ChatAnswers {
   /**
    * Answers the request {@code request} of the caller's chat {@code session} with {@code body}
    * ({@code decision}, the words a denial carries in {@code message}, a question's {@code
-   * answers}): logged as answered, then sent to the agent. Answers the seq it was logged as.
+   * answers}): logged as answered, then sent to the agent. Answers the seq it was logged as, or is
+   * refused as withdrawn when the agent did not take it.
    */
   Mappable answer(String session, String request, Map<String, Object> body) {
     if (!Harness.isSafeSessionId(request)) {
@@ -95,11 +101,17 @@ final class ChatAnswers {
           if (chat.ended()) {
             throw ended(chat, "answer");
           }
-          var seq = process == null ? 0 : process.answer(request, reply, by, withdrawn(chat));
-          if (seq == 0) {
-            throw unanswerable(chat, log.about(request), request);
-          }
-          return new Logged(seq);
+          var answered =
+              (process == null
+                      ? Optional.<ChatProcess.Answered>empty()
+                      : process.answer(request, reply, by, withdrawn(chat)))
+                  .orElseThrow(() -> unanswerable(chat, log.about(request), request));
+          return () -> {
+            if (!process.wrote(answered.line())) {
+              throw withdrawn(chat);
+            }
+            return new Logged(answered.seq());
+          };
         });
   }
 
@@ -110,7 +122,11 @@ final class ChatAnswers {
    */
   Mappable interrupt(String session) {
     return held.under(
-        session, (chat, log, process) -> new Stopping(process != null && process.stop()));
+        session,
+        (chat, log, process) -> {
+          var stopping = new Stopping(process != null && process.stop());
+          return () -> written(process, stopping);
+        });
   }
 
   /**
@@ -135,11 +151,21 @@ final class ChatAnswers {
           var harness = Harnesses.of(chat.harness());
           Harness.Mode.named(harness.chat().orElseThrow().modes(), mode, harness.displayName());
           if (process != null) {
-            return new Logged(process.setMode(mode, by, turnOpen(harness)));
+            var logged = new Logged(process.setMode(mode, by, turnOpen(harness)));
+            return () -> written(process, logged);
           }
           log.said(null, mode);
-          return new Logged(log.log(new ChatWire.ModeSet(mode, null, by)));
+          var logged = new Logged(log.log(new ChatWire.ModeSet(mode, null, by)));
+          return () -> logged;
         });
+  }
+
+  /** {@code answer}, once what {@code process} was handed is waited for; at once with none. */
+  private static Mappable written(ChatProcess process, Mappable answer) {
+    if (process != null) {
+      process.written();
+    }
+    return answer;
   }
 
   /**
@@ -147,7 +173,7 @@ final class ChatAnswers {
    *
    * @throws IllegalArgumentException for a field it does not name, or one not of its shape
    */
-  private static LiveReply.Reply reply(Map<String, Object> body) {
+  private static ChatWire.Reply reply(Map<String, Object> body) {
     if (!ANSWER.containsAll(body.keySet())) {
       throw new IllegalArgumentException("An answer names only decision, message and answers.");
     }
@@ -158,12 +184,12 @@ final class ChatAnswers {
     if (message != null && !(message instanceof String)) {
       throw new IllegalArgumentException("message is the person's own words, as text.");
     }
-    return new LiveReply.Reply(
-        LiveReply.Decision.named(decision), (String) message, answers(body.get("answers")));
+    return new ChatWire.Reply(
+        ChatWire.Decision.named(decision), (String) message, answers(body.get("answers")));
   }
 
   /** Each question's answer, as {@code answers} names them, in its order. */
-  private static List<LiveReply.Answer> answers(Object answers) {
+  private static List<ChatWire.Answer> answers(Object answers) {
     if (answers == null) {
       return List.of();
     }
@@ -171,13 +197,13 @@ final class ChatAnswers {
       throw new IllegalArgumentException(
           "answers name each question by its text, each with what was chosen or said.");
     }
-    var given = new ArrayList<LiveReply.Answer>();
+    var given = new ArrayList<ChatWire.Answer>();
     named.forEach((question, answer) -> given.add(answer((String) question, answer)));
     return given;
   }
 
   /** The answer {@code answer} gives {@code question}: its labels chosen, or own words. */
-  private static LiveReply.Answer answer(String question, Object answer) {
+  private static ChatWire.Answer answer(String question, Object answer) {
     if (!(answer instanceof Map<?, ?> one)
         || !ONE_ANSWER.containsAll(one.keySet())
         || !(one.get("own") == null || one.get("own") instanceof String)
@@ -189,7 +215,7 @@ final class ChatAnswers {
     if (!chosen.stream().allMatch(String.class::isInstance)) {
       throw new IllegalArgumentException("Each label chosen is text, as its choice names it.");
     }
-    return new LiveReply.Answer(
+    return new ChatWire.Answer(
         question, chosen.stream().map(String.class::cast).toList(), (String) one.get("own"));
   }
 
