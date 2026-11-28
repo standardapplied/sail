@@ -522,7 +522,8 @@ actor Desk: Transport {
         let content = pane.flow.menuContent
         #expect(pane.heading.stringValue == content.name && content.name == "Uday" && pane.disc.name == content.name)
         #expect(pane.email.stringValue == "uday@example.com" && pane.state.isHidden)
-        #expect(WorkspacesViewTests.found(Pill.self, in: pane).allSatisfy(\.isHidden), "a pill shows on a connected account")
+        let pills = WorkspacesViewTests.found(Pill.self, in: pane).filter { !$0.isHidden }
+        #expect(pills.isEmpty, "\(pills.map(\.said)) shown on a connected account")
         #expect(pane.disc.drawn == pane.look.headerAvatar && pane.disc.drawn.fill != nil, "the disc is not the page's filled one: \(pane.disc.drawn)")
         #expect(pane.text.hasPrefix("Uday\nuday@example.com\n127.0.0.1:7979\nSigned in until "), "\(pane.text)")
     }
