@@ -1,23 +1,27 @@
 import Foundation
+import SailAPI
 
-/// What a workbench keeps between launches: its arrangement, never its sessions. The tabs in
-/// order, each tab's tree with its ratios, every pane's session name and place, each tab's name and
-/// focused session, the selected tab, and the person whose runner panes these are. Zoom, titles
-/// and folders are not kept.
+/// What a workbench keeps between launches, on this Mac alone: its arrangement, never its
+/// sessions. The tabs in order, each tab's tree with its ratios, every pane's form, session name
+/// (a new chat's own) and place, a chat's harness and unsent draft, each tab's name and focused
+/// session, the selected tab, the last workspace, and the person whose runner panes these are.
+/// Zoom, titles, folders and chats' states are not kept.
 public struct Arrangement: Codable, Equatable, Sendable {
-    public static let currentVersion = 1
+    public static let currentVersion = 2
 
     public var version: Int
     public var tabs: [Tab]
     public var selected: Int?
     /// Whose runner panes it holds: they come back for that person's sign-in alone.
     public var runner: String?
+    public var lastWorkspace: Place?
 
-    public init(version: Int = currentVersion, tabs: [Tab], selected: Int?, runner: String? = nil) {
+    public init(version: Int = currentVersion, tabs: [Tab], selected: Int?, runner: String? = nil, lastWorkspace: Place? = nil) {
         self.version = version
         self.tabs = tabs
         self.selected = selected
         self.runner = runner
+        self.lastWorkspace = lastWorkspace
     }
 
     /// Its tabs on the runner: a tab's panes are all on the runner or none are, as a split takes
@@ -33,6 +37,12 @@ public struct Arrangement: Codable, Equatable, Sendable {
         return runnerTabs.flatMap(\.layout.sessions)
     }
 
+    /// The last workspace when it is `person`'s; none for anyone else, or for no one.
+    public func lastWorkspace(for person: String?) -> Place? {
+        guard let person, person == runner else { return nil }
+        return lastWorkspace
+    }
+
     public struct Tab: Codable, Equatable, Sendable {
         public var name: String?
         public var focused: String
@@ -40,20 +50,20 @@ public struct Arrangement: Codable, Equatable, Sendable {
     }
 
     public indirect enum Node: Codable, Equatable, Sendable {
-        case pane(session: String, place: Place, agent: AgentStart? = nil)
+        case pane(session: String, place: Place, agent: AgentStart? = nil, form: Pane.Form = .terminal, draft: String = "")
         case split(axis: Axis, ratio: Double, first: Node, second: Node)
 
         /// Its panes' sessions, in order.
         public var sessions: [String] {
             switch self {
-            case let .pane(session, _, _): [session]
+            case let .pane(session, _, _, _, _): [session]
             case let .split(_, _, first, second): first.sessions + second.sessions
             }
         }
 
         var onRunner: Bool {
             switch self {
-            case let .pane(_, place, _): place.onRunner
+            case let .pane(_, place, _, _, _): place.onRunner
             case let .split(_, _, first, _): first.onRunner
             }
         }
@@ -65,7 +75,8 @@ extension Workbench {
         Arrangement(
             version: Arrangement.currentVersion,
             tabs: tabs.map { .init(name: $0.name, focused: panes[$0.focused]?.session ?? "", layout: node($0.layout)) },
-            selected: tabs.firstIndex { $0.id == selected }
+            selected: tabs.firstIndex { $0.id == selected },
+            lastWorkspace: lastWorkspace
         )
     }
 
@@ -93,23 +104,53 @@ extension Workbench {
         return made
     }
 
+    /// Each live session of `person` in `listing`, workspace `place`'s, that no pane and no tab
+    /// of `held` holds, opened as a last tab, oldest first so the newest ends last: a terminal
+    /// running its harness, a chat as a chat. Ended rows, another person's and a form this app does
+    /// not know are never adopted; the selected tab stays, or with none the first is. A chat a pane
+    /// holds takes the listing's state and title. Answers the panes made.
+    @discardableResult
+    public mutating func adopt(listing: RunnerSessions, in place: Place, for person: String, beside held: [Arrangement.Tab] = []) -> [PaneID] {
+        precondition(place.onRunner, "a sessions listing is a workspace's, on the runner")
+        for chat in listing.chats {
+            guard let id = panes.values.first(where: { $0.form == .chat && $0.session == chat.name })?.id else { continue }
+            setChatState(chat.state, of: id)
+            panes[id]?.chatTitle = chat.title
+        }
+        let terminals = listing.live(for: person).map { (name: $0.name, at: $0.createdAt, agent: $0.agent?.start, chat: ChatRow?.none) }
+        let chats = listing.chats.filter { $0.live && $0.opener == person }.map { (name: $0.name, at: $0.createdAt, agent: Optional($0.agent.start), chat: Optional($0)) }
+        var taken = Set(panes.values.map(\.session) + held.flatMap(\.layout.sessions))
+        var made: [PaneID] = []
+        for row in (terminals + chats).sorted(by: { ($0.at, $0.name) < ($1.at, $1.name) }) where taken.insert(row.name).inserted {
+            let pane = makePane(session: row.name, place: place, agent: row.agent, form: row.chat == nil ? .terminal : .chat)
+            panes[pane]?.chatState = row.chat?.state
+            panes[pane]?.chatTitle = row.chat?.title
+            _ = adoptTab(.pane(pane), focused: pane)
+            made.append(pane)
+        }
+        if selected == nil { selectTab(at: 0) }
+        return made
+    }
+
     private func node(_ layout: Layout) -> Arrangement.Node {
         switch layout {
         case let .pane(id):
             let pane = panes[id]
-            return .pane(session: pane?.session ?? "", place: pane?.place ?? .thisMac(folder: ""), agent: pane?.agent)
+            return .pane(session: pane?.session ?? "", place: pane?.place ?? .thisMac(folder: ""), agent: pane?.agent, form: pane?.form ?? .terminal, draft: pane?.draft ?? "")
         case let .split(axis, ratio, first, second):
             return .split(axis: axis, ratio: ratio, first: node(first), second: node(second))
         }
     }
 
-    /// The kept `arrangement` holding only sessions `live` names (W6); a live `mac-*` session no
-    /// pane holds opens as a last tab in `home`. An unknown version drops all, a ratio not strictly
-    /// inside (0, 1) is halved, a session held twice keeps its first holder.
-    public static func restore(_ arrangement: Arrangement?, live: [String], home: String) -> Workbench {
+    /// The kept `arrangement` holding only sessions `live` names (W6), and its last workspace
+    /// when it is `person`'s; a live `mac-*` session no pane holds opens as a last tab in `home`.
+    /// Another version drops all, a ratio not strictly inside (0, 1) is halved, a session held twice
+    /// keeps its first holder.
+    public static func restore(_ arrangement: Arrangement?, live: [String], home: String, for person: String? = nil) -> Workbench {
         var bench = Workbench()
         var unheld = Set(live)
         let stored = arrangement.flatMap { $0.version == Arrangement.currentVersion ? $0 : nil }
+        bench.lastWorkspace = stored?.lastWorkspace(for: person)
         var selected: TabID?
         for (index, tab) in (stored?.tabs ?? []).enumerated() {
             guard let layout = bench.adopt(tab.layout, from: &unheld) else { continue }

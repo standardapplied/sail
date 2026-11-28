@@ -1,4 +1,5 @@
 import Foundation
+import SailAPI
 import SailTerminalWire
 
 /// A pane's identity in its workbench, made once and never given to another pane.
@@ -84,21 +85,50 @@ public enum Place: Hashable, Codable, Sendable {
     }
 }
 
-/// One terminal: its session, for the pane's life, the harness it runs when it is an agent, and
-/// what its program last said.
+/// One pane: a terminal, with the harness it runs when it is an agent and what its program last
+/// said; a chat, by its id, with its harness, where it stands and its title; or a new chat, which
+/// holds no chat yet, only its own name (`new-…`), a place and a harness it may still change, until
+/// its first message opens the chat it is bound to. A chat's and a new chat's unsent text is its
+/// draft.
 public struct Pane: Hashable, Sendable {
+    public enum Form: String, Hashable, Codable, Sendable {
+        case terminal, chat, newChat
+    }
+
+    /// What a new chat is named after until it is bound.
+    public static let newChats = "new-"
+
     public let id: PaneID
-    public let session: String
-    public let place: Place
+    public internal(set) var session: String
+    public internal(set) var place: Place
     public internal(set) var agent: AgentStart?
+    public internal(set) var form = Form.terminal
     /// The program's title (OSC 0 or 2), empty for none.
     public internal(set) var programTitle = ""
     /// The folder the shell last reported (OSC 7), as it was sent, empty for none.
     public internal(set) var reportedFolder = ""
+    public internal(set) var draft = ""
+    public internal(set) var chatState: Open<ChatState>?
+    /// The chat's title as listed, nil before its first message.
+    public internal(set) var chatTitle: String?
+    /// Its turn ended while its tab was not in front, and it has not been shown since.
+    public internal(set) var unseen = false
 
-    /// What its tab is called until the person names it: an agent by its harness and workspace
-    /// ("Claude Code · dock"), else its place's label.
+    /// Whether a pane of `form` can be in `place` running `agent`: an agent runs in a workspace on
+    /// the runner, and a chat, new or not, is an agent's.
+    static func whole(_ form: Form, place: Place, agent: AgentStart?) -> Bool {
+        form == .terminal ? agent == nil || place.onRunner : agent != nil && place.onRunner
+    }
+
+    /// Whether it is a chat or a new chat, the panes with a draft.
+    public var converses: Bool {
+        form != .terminal
+    }
+
+    /// What its tab is called until the person names it: a chat by its title, else "New chat"; an
+    /// agent by its harness and workspace ("Claude Code · dock"); else its place's label.
     public var label: String? {
+        if converses { return chatTitle ?? Workbench.newChat }
         guard let agent, case let .workspace(_, name) = place else { return place.label }
         return "\(agent.display) · \(name)"
     }
