@@ -31,7 +31,7 @@ class ChatItemTest {
 
   private static final String SUMMARY = "s".repeat(LiveStream.SUMMARY_CODE_POINTS);
 
-  private static final String CONTENT = "c".repeat(LiveStream.CONTENT_CODE_POINTS);
+  private static final String CONTENT = "c".repeat(ChatItem.CONTENT_CODE_POINTS);
 
   private static String over(String whole) {
     return whole + whole.charAt(0);

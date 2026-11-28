@@ -862,7 +862,7 @@ class LiveChatTest {
     var command =
         "a"
             .repeat(
-                LiveStream.CONTENT_CODE_POINTS
+                ChatItem.CONTENT_CODE_POINTS
                     - YamlUtil.dumpJsonValue(Map.of("command", "")).length());
     var described = "d".repeat(LiveStream.SUMMARY_CODE_POINTS + 10);
 
@@ -910,7 +910,7 @@ class LiveChatTest {
   void whatTheAgentWroteLongIsShownInPartAndSaysSo() {
     var huge = "w".repeat(200_000);
     var summary = "w".repeat(LiveStream.SUMMARY_CODE_POINTS);
-    var content = "w".repeat(LiveStream.CONTENT_CODE_POINTS);
+    var content = "w".repeat(ChatItem.CONTENT_CODE_POINTS);
 
     assertEquals(
         List.of(new ChatItem.Failed(content, null, true), new TurnEnded(null, 0, 0, 0)),

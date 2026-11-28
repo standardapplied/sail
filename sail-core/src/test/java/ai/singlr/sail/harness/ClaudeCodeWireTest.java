@@ -73,7 +73,7 @@ class ClaudeCodeWireTest {
         "{\"type\":\"control_request\",\"request_id\":\"big-1\",\"request\":{\"subtype\":"
             + "\"can_use_tool\",\"tool_name\":\"Bash\",\"display_name\":\"Bash\",\"input\":"
             + "{\"command\":\""
-            + "a".repeat(LiveStream.CONTENT_CODE_POINTS + 1)
+            + "a".repeat(ChatItem.CONTENT_CODE_POINTS + 1)
             + "\"},\"tool_use_id\":\"toolu_big\"}}";
     var malformed = "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{";
 

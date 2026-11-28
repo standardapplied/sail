@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.engine;
 
-import static ai.singlr.sail.engine.LiveStream.CONTENT_CODE_POINTS;
+import static ai.singlr.sail.engine.ChatItem.CONTENT_CODE_POINTS;
 
 import ai.singlr.sail.common.Strings;
 import java.lang.reflect.RecordComponent;
@@ -137,7 +137,7 @@ public final class ChatWire {
   /**
    * {@code words}, a person's own, within the bound of what an answer holds.
    *
-   * @throws IllegalArgumentException past {@link LiveStream#CONTENT_CODE_POINTS}
+   * @throws IllegalArgumentException past {@link ChatItem#CONTENT_CODE_POINTS}
    */
   private static String words(String words) {
     if (words.codePointCount(0, words.length()) > CONTENT_CODE_POINTS) {

@@ -71,9 +71,6 @@ public final class LiveStream {
    */
   public static final int SUMMARY_CODE_POINTS = 120;
 
-  /** How much of what the agent wrote at length, a text, a call's input or output, is shown. */
-  public static final int CONTENT_CODE_POINTS = 1 << 16;
-
   private static final String SUCCESS = "success";
 
   /** How a turn a person stopped ends: in its text, or while a tool waited or ran. */
@@ -198,11 +195,11 @@ public final class LiveStream {
     /**
      * A request Claude Code made of the host that could not be read whole (an id that is not safe
      * to hand back, no input, no tool), or that is {@code tooLarge} to show a person whole (any
-     * part of it, its input as JSON included, past {@link #CONTENT_CODE_POINTS}, or its line past
-     * {@link #MAX_LINE_CHARS}): no person is asked it, and it holds nothing to allow, so the host
-     * refuses it at once ({@link LiveChat#refuseUnreadable}), or, when {@code requestId} is null
-     * because it named none that is safe, or a request no refusal answers, stops the turn, which
-     * would otherwise wait on it.
+     * part of it, its input as JSON included, past {@link ChatItem#CONTENT_CODE_POINTS}, or its
+     * line past {@link #MAX_LINE_CHARS}): no person is asked it, and it holds nothing to allow, so
+     * the host refuses it at once ({@link LiveChat#refuseUnreadable}), or, when {@code requestId}
+     * is null because it named none that is safe, or a request no refusal answers, stops the turn,
+     * which would otherwise wait on it.
      */
     record Unreadable(String requestId, boolean tooLarge) implements Step {}
 
@@ -462,9 +459,9 @@ public final class LiveStream {
    * A {@code can_use_tool} read whole, or {@link Step.Unreadable} too large when a person could not
    * be shown it whole: when any of what a card of it shows, its tool, its words, why it asks or its
    * input as JSON (which holds every other part: a command, an edit, a plan, a question), is past
-   * {@link #CONTENT_CODE_POINTS}. Its suggestions are the harness's own, to hand back as they came:
-   * none when there are none, or when one is missing ({@code null}), since what is left of them is
-   * no longer what it offered to keep.
+   * {@link ChatItem#CONTENT_CODE_POINTS}. Its suggestions are the harness's own, to hand back as
+   * they came: none when there are none, or when one is missing ({@code null}), since what is left
+   * of them is no longer what it offered to keep.
    */
   private static Step asked(String id, Map<String, Object> request) {
     var call = id(request, "tool_use_id");
@@ -481,7 +478,8 @@ public final class LiveStream {
             text(request, "decision_reason"))
         .anyMatch(
             shown ->
-                shown != null && shown.codePointCount(0, shown.length()) > CONTENT_CODE_POINTS)) {
+                shown != null
+                    && shown.codePointCount(0, shown.length()) > ChatItem.CONTENT_CODE_POINTS)) {
       return new Step.Unreadable(id, true);
     }
     var permission =

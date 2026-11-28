@@ -264,8 +264,8 @@ class LiveReplyTest {
 
   @Test
   void aReplyIsOnlyTheShapeItsDecisionTakes() {
-    var tooLong = "a".repeat(LiveStream.CONTENT_CODE_POINTS) + "😀";
-    var wholly = "😀".repeat(LiveStream.CONTENT_CODE_POINTS);
+    var tooLong = "a".repeat(ChatItem.CONTENT_CODE_POINTS) + "😀";
+    var wholly = "😀".repeat(ChatItem.CONTENT_CODE_POINTS);
     var past = "Your words are past the 65536 characters an answer holds; say it shorter.";
 
     assertEquals(

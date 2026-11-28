@@ -6,7 +6,6 @@
 package ai.singlr.sail.harness;
 
 import ai.singlr.sail.engine.ChatItem;
-import ai.singlr.sail.engine.LiveStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -103,12 +102,11 @@ final class ClaudeCodeAlways {
   /**
    * The one way to allow the call of {@code tool} with {@code input} always that Claude Code
    * offers: all its suggestions, kept together, none when their sentences together are longer than
-   * a person is shown whole ({@link LiveStream#CONTENT_CODE_POINTS}), as 02b recorded each of them:
-   * a rule that allows a command ({@code addRules}), a folder it may work in ({@code
-   * addDirectories}) and a chat mode ({@code setMode}), each kept for the session or in the
-   * workspace's own settings file. None when any one is of another shape, since what Sail cannot
-   * say a person cannot consent to, and none for a command that {@link #redirects}, whatever rule
-   * is suggested for it.
+   * a person is shown whole ({@link ChatItem#CONTENT_CODE_POINTS}), as 02b recorded each of them: a
+   * rule that allows a command ({@code addRules}), a folder it may work in ({@code addDirectories})
+   * and a chat mode ({@code setMode}), each kept for the session or in the workspace's own settings
+   * file. None when any one is of another shape, since what Sail cannot say a person cannot consent
+   * to, and none for a command that {@link #redirects}, whatever rule is suggested for it.
    */
   static List<ChatItem.Always> of(
       String tool, Map<String, Object> input, List<Object> suggestions, List<Harness.Mode> modes) {
@@ -125,7 +123,7 @@ final class ClaudeCodeAlways {
     }
     return words.isEmpty()
             || words.stream().mapToInt(said -> said.codePointCount(0, said.length())).sum()
-                > LiveStream.CONTENT_CODE_POINTS
+                > ChatItem.CONTENT_CODE_POINTS
         ? List.of()
         : List.of(new ChatItem.Always(words));
   }
