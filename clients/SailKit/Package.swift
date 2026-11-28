@@ -20,6 +20,7 @@ let package = Package(
         .library(name: "SailWorkbench", targets: ["SailWorkbench"]),
         .library(name: "SailMeasures", targets: ["SailMeasures"]),
         .library(name: "SailDesign", targets: ["SailDesign"]),
+        .library(name: "SailChat", targets: ["SailChat"]),
         .library(name: "SailKitTestSupport", targets: ["SailKitTestSupport"]),
         .executable(name: "sail-term-probe", targets: ["sail-term-probe"]),
     ],
@@ -51,6 +52,7 @@ let package = Package(
         .target(name: "SailWorkbench", dependencies: ["SailAPI", "SailTerminalWire"], swiftSettings: strict),
         .target(name: "SailMeasures", dependencies: ["SailSurface", "SailTerminal"], swiftSettings: strict),
         .target(name: "SailDesign", dependencies: ["SailVT"], swiftSettings: strict),
+        .target(name: "SailChat", swiftSettings: strict),
         .executableTarget(
             name: "sail-term-probe",
             dependencies: ["SailAPI", "SailMeasures", "SailSurface", "SailTerminal", "SailVT", "SailWorkbench"],
@@ -103,6 +105,7 @@ let package = Package(
         ),
         .testTarget(name: "SailMeasuresTests", dependencies: ["SailKitTestSupport", "SailMeasures", "SailSurface"], swiftSettings: strict),
         .testTarget(name: "SailDesignTests", dependencies: ["SailDesign", "SailVT"], swiftSettings: strict),
+        .testTarget(name: "SailChatTests", dependencies: ["SailChat"], swiftSettings: strict),
         .testTarget(
             name: "SailSurfaceTests",
             dependencies: ["SailSurface", "SailVT", "SailKitTestSupport"],
