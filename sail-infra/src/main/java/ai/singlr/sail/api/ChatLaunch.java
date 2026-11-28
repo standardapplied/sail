@@ -104,7 +104,7 @@ final class ChatLaunch {
   String admit(String project, String workspace, String harness, String mode, boolean inside) {
     var agent = harnesses.apply(Strings.requireNonBlank(harness, "harness"));
     Harness.Mode.named(form(agent, inside).modes(), mode, agent.displayName());
-    var person = new PtyIdentity.Person(Actor.current());
+    var person = person();
     act(() -> doors.admitWorkspace(project, workspace, person));
     ask(
         () ->
@@ -122,10 +122,7 @@ final class ChatLaunch {
     if (caller.filter(chat.opener()::equals).isEmpty()) {
       return false;
     }
-    act(
-        () ->
-            doors.admitWorkspace(
-                chat.project(), chat.workspace(), new PtyIdentity.Person(Actor.current())));
+    act(() -> doors.admitWorkspace(chat.project(), chat.workspace(), person()));
     return true;
   }
 
@@ -160,7 +157,7 @@ final class ChatLaunch {
   Started start(ChatStore.Chat chat, Consumer<Boolean> launched) {
     var harness = harnesses.apply(chat.harness());
     var form = form(harness, chat.inside());
-    var person = new PtyIdentity.Person(Actor.current());
+    var person = person();
     var project = chat.project();
     var workspace = chat.workspace();
     var login =
@@ -285,6 +282,10 @@ final class ChatLaunch {
     return form;
   }
 
+  private static PtyIdentity.Person person() {
+    return new PtyIdentity.Person(Actor.current());
+  }
+
   /** A door of the pty host's that answers, asked as a route asks. */
   @FunctionalInterface
   private interface Door<T> {
@@ -297,12 +298,22 @@ final class ChatLaunch {
     void run() throws IOException;
   }
 
-  /** What {@code door} answers, or its {@link #refusal}. */
+  /**
+   * What {@code door} answers, or its refusal as the API says it: its own code when it names one,
+   * its words as they are.
+   */
   private static <T> T ask(Door<T> door) {
     try {
       return door.ask();
     } catch (IOException refused) {
-      throw refusal(refused);
+      throw switch (refused) {
+        case PtyAdmission.Absent absent -> ApiException.of(ErrorCode.NOT_FOUND, absent);
+        case PtyAdmission.Unavailable unavailable ->
+            ApiException.of(ErrorCode.CONTAINER_ERROR, unavailable);
+        case Remedied remedied when Strings.isNotBlank(remedied.code()) ->
+            ApiException.of(ErrorCode.valueOf(remedied.code().toUpperCase(Locale.ROOT)), refused);
+        default -> ApiException.of(ErrorCode.FORBIDDEN, refused);
+      };
     }
   }
 
@@ -312,17 +323,5 @@ final class ChatLaunch {
           act.run();
           return null;
         });
-  }
-
-  /** {@code refused} as the API says it: its own code when it names one, its words as they are. */
-  private static ApiException refusal(IOException refused) {
-    return switch (refused) {
-      case PtyAdmission.Absent absent -> ApiException.of(ErrorCode.NOT_FOUND, absent);
-      case PtyAdmission.Unavailable unavailable ->
-          ApiException.of(ErrorCode.CONTAINER_ERROR, unavailable);
-      case Remedied remedied when Strings.isNotBlank(remedied.code()) ->
-          ApiException.of(ErrorCode.valueOf(remedied.code().toUpperCase(Locale.ROOT)), refused);
-      default -> ApiException.of(ErrorCode.FORBIDDEN, refused);
-    };
   }
 }
