@@ -35,8 +35,9 @@ public struct Tab: Hashable, Sendable {
     public internal(set) var zoomed: PaneID?
 }
 
-/// The terminals of a window as a value: tabs in order, the selected one, and every pane. Each
-/// operation returns what it opened or closed and leaves the value whole (the spec's W1).
+/// The sessions of a window as a value: tabs in order, the selected one, and every pane, terminal
+/// or chat. Each operation returns what it opened or closed and leaves the value whole (the spec's
+/// W1).
 public struct Workbench: Hashable, Sendable {
     /// What a tab is called when nobody named it and its program said nothing.
     public static let untitled = "This Mac"

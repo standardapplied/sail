@@ -123,8 +123,8 @@ extension Workbench {
             setChatState(chat.state, of: id)
             panes[id]?.chatTitle = chat.title
         }
-        let terminals = listing.live(for: person).map { (name: $0.name, at: $0.createdAt, agent: $0.agent?.start, chat: ChatRow?.none) }
-        let chats = listing.chats.filter { $0.live && $0.opener == person }.map { (name: $0.name, at: $0.createdAt, agent: Optional($0.agent.start), chat: Optional($0)) }
+        let terminals: [Arrival] = listing.live(for: person).map { ($0.name, $0.createdAt, $0.agent?.start, nil) }
+        let chats: [Arrival] = listing.chats.filter { $0.live && $0.opener == person }.map { ($0.name, $0.createdAt, $0.agent.start, $0) }
         var taken = Set(panes.values.map(\.session) + held.flatMap(\.layout.sessions))
         var made: [PaneID] = []
         for row in (terminals + chats).sorted(by: { ($0.at, $0.name) < ($1.at, $1.name) }) where taken.insert(row.name).inserted {
@@ -137,6 +137,8 @@ extension Workbench {
         if selected == nil { selectTab(at: 0) }
         return made
     }
+
+    private typealias Arrival = (name: String, at: Date, agent: AgentStart?, chat: ChatRow?)
 
     private func node(_ layout: Layout) -> Arrangement.Node {
         switch layout {

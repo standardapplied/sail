@@ -167,9 +167,9 @@ public struct RunnerAgent: Codable, Equatable, Sendable {
 
 extension Endpoint where Response == RunnerSessions {
     /// The caller's sessions in workspace `name` of `project`: the terminals the runner would let
-    /// the caller attach to (none of another person's) and the caller's chats; not found when the caller may not read the
-    /// project, or the runner holds no such workspace; refused for a credential that stands for no
-    /// person, as a ticket is.
+    /// the caller attach to (none of another person's) and the caller's chats; not found when the
+    /// caller may not read the project, or the runner holds no such workspace; refused for a
+    /// credential that stands for no person, as a ticket is.
     public static func sessions(workspace name: String, project: String) -> Self {
         Self(.get, Route.workspace(name, project: project) + ["sessions"])
     }
