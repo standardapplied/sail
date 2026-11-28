@@ -176,6 +176,20 @@ import Testing
         ))) { try result.get() }
     }
 
+    @Test func eachRouteReadsItsAnswerAsTheServerWroteIt() throws {
+        func read<Response>(_ endpoint: Endpoint<Response>, _ name: String) throws -> Response {
+            try endpoint.decode(response(try Exchange(name)))
+        }
+        #expect(try read(.openChat(claudeChat, workspace: "berth", project: "harbor"), "chat-opened") == ChatOpened(session: fifthChat))
+        #expect(try read(.send("hi", chat: fifthChat), "chat-message-sent") == ChatSent(seq: 1, queued: false))
+        #expect(try read(.send("and this", chat: fifthChat), "chat-message-queued") == ChatSent(seq: 7, queued: true))
+        #expect(try read(.answer(chatRequest(9), chat: sixthChat, with: .allowAlways), "chat-request-allowed-always") == ChatLogged(seq: 7))
+        #expect(try read(.setMode("plan", chat: sixthChat), "chat-mode-set") == ChatLogged(seq: 20))
+        #expect(try read(.interrupt(chat: sixthChat), "chat-stopping") == ChatStopping(stopping: true))
+        #expect(try read(.interrupt(chat: sixthChat), "chat-not-stopping") == ChatStopping(stopping: false))
+        #expect(try read(.endChat(fifthChat), "chat-ended") == NoContent())
+    }
+
     @Test func eachDecisionIsSentByItsOwnName() throws {
         #expect(ChatAnswer.allow.decision.rawValue == "allow" && ChatAnswer.allowAlways.decision.rawValue == "allow_always")
         #expect(ChatAnswer.deny(nil).decision == .deny && ChatAnswer.answer([:]).decision == .answer)
