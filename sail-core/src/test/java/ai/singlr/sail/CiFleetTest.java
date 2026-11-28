@@ -28,6 +28,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -67,8 +68,9 @@ class CiFleetTest {
 
   /**
    * A check limit whose timer, the stand-in {@code sleep}, runs out only once the check's remote
-   * command writes to the FIFO {@code go}; a minute's grace after it runs out at once. Each of the
-   * two adds its own pid and its parent's, the timer's shell, to {@code timers}.
+   * command writes to the FIFO {@code go}; a minute's grace after it runs out at once, or never
+   * where the test makes the FIFO {@code grace}. Each of the two adds its own pid and its parent's,
+   * the timer's shell, to {@code timers}.
    */
   private static final String LIMIT = "1000";
 
@@ -115,12 +117,25 @@ class CiFleetTest {
         esac
         case $1 in
           %s) exec cat "$FLEET_TEST/go" ;;
-          60) exit 0 ;;
+          60) [[ -p $FLEET_TEST/grace ]] && exec cat "$FLEET_TEST/grace"; exit 0 ;;
         esac
         PATH=${PATH#*:} exec sleep "$@"
         """
             .formatted(LIMIT, LIMIT));
     remote(READS_ITS_INPUT);
+  }
+
+  /** A timer a failed test left running, waiting on a FIFO of its, is ended with it. */
+  @AfterEach
+  void noTimerOutlivesItsTest() throws IOException {
+    var timers = dir.resolve("timers");
+    if (Files.exists(timers)) {
+      for (var line : Files.readAllLines(timers)) {
+        for (var pid : line.split(" ")) {
+          ProcessHandle.of(Long.parseLong(pid)).ifPresent(ProcessHandle::destroyForcibly);
+        }
+      }
+    }
   }
 
   @Test
@@ -735,7 +750,7 @@ class CiFleetTest {
   @Test
   void aCheckThatIgnoresTermIsKilledAfterItsGraceAndTheRunGoesOn() throws Exception {
     var never = dir.resolve("never");
-    run("mkfifo", never.toString(), dir.resolve("go").toString());
+    run("mkfifo", never.toString(), dir.resolve("go").toString(), dir.resolve("grace").toString());
 
     try (var held = new RandomAccessFile(never.toFile(), "rw")) {
       var ended =
@@ -745,6 +760,36 @@ class CiFleetTest {
                           .formatted(LIMIT)
                       + " 'ignores TERM' bash -c 'trap \"\" TERM; echo $$ > \"$FLEET_TEST/pid\";"
                       + " echo > \"$FLEET_TEST/go\"; exec cat \"$FLEET_TEST/never\"' || true; }"
+                      + " && check stubborn after true",
+                  SCRIPT.toString()));
+
+      assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
+      var log = runs.resolve("stubborn").resolve(logOf("ignores TERM"));
+      assertEquals(
+          List.of("FAIL ignores TERM (did not end within 1000 s; see " + log + ")", "PASS after"),
+          report("stubborn"));
+      var pid = Long.parseLong(Files.readString(dir.resolve("pid")).strip());
+      assertFalse(
+          ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
+          "the check that ignored TERM outlived its grace");
+      assertNoTimerRunning();
+    }
+  }
+
+  @Test
+  void aCheckWhoseOwnShellIgnoresTermIsKilledWhenItsGraceRunsOutAndTheRunGoesOn() throws Exception {
+    var never = dir.resolve("never");
+    run("mkfifo", never.toString(), dir.resolve("go").toString());
+
+    try (var held = new RandomAccessFile(never.toFile(), "rw")) {
+      var ended =
+          Child.run(
+              shell(
+                  SOURCED
+                      + "stubborn() { trap '' TERM; echo $BASHPID > \"$FLEET_TEST/pid\";"
+                      + " echo > \"$FLEET_TEST/go\"; exec cat \"$FLEET_TEST/never\"; }"
+                      + " && { check_within %s stubborn 'ignores TERM' stubborn || true; }"
+                          .formatted(LIMIT)
                       + " && check stubborn after true",
                   SCRIPT.toString()));
 
@@ -869,37 +914,33 @@ class CiFleetTest {
 
   /**
    * The check {@code name} of {@code body} at {@link #LIMIT}, its body over before its wait is
-   * reached; then nothing of its timer is left running. The test holds the timer's FIFO open
-   * meanwhile, so a timer left running waits on it, and its close ends that timer, also when the
-   * check never returns.
+   * reached; then nothing of its timer is left running.
    */
   private Child.Ended beforeItsWait(String name, String body) throws Exception {
-    var go = dir.resolve("go");
-    run("mkfifo", go.toString());
-    try (var held = new RandomAccessFile(go.toFile(), "rw")) {
-      var ended =
-          Child.run(
-              shell(
-                  SOURCED
-                      + WAITS_ONCE_THE_BODY_HAS_ENDED
-                      + "check_within %s early '%s' %s".formatted(LIMIT, name, body),
-                  SCRIPT.toString()));
-      assertNoTimerRunning();
-      return ended;
-    }
+    run("mkfifo", dir.resolve("go").toString());
+    var ended =
+        Child.run(
+            shell(
+                SOURCED
+                    + WAITS_ONCE_THE_BODY_HAS_ENDED
+                    + "check_within %s early '%s' %s".formatted(LIMIT, name, body),
+                SCRIPT.toString()));
+    assertNoTimerRunning();
+    return ended;
   }
 
   /** Every timer a check started, its shell and its {@code sleep}, has ended. */
   private void assertNoTimerRunning() throws IOException {
     var timers = Files.readAllLines(dir.resolve("timers"));
     assertFalse(timers.isEmpty(), "no check started a timer");
-    for (var timer : timers) {
-      for (var pid : timer.split(" ")) {
-        assertFalse(
-            ProcessHandle.of(Long.parseLong(pid)).map(ProcessHandle::isAlive).orElse(false),
-            "the timer's process " + pid + " outlived its check");
-      }
-    }
+    var running =
+        timers.stream()
+            .flatMap(timer -> Stream.of(timer.split(" ")))
+            .filter(
+                pid ->
+                    ProcessHandle.of(Long.parseLong(pid)).map(ProcessHandle::isAlive).orElse(false))
+            .toList();
+    assertEquals(List.of(), running, "the timer's processes that outlived their check");
   }
 
   @Test
