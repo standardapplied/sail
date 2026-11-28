@@ -102,11 +102,15 @@ final class FakeContainer implements ShellExec {
     instances.add(copy.get(3));
   }
 
-  /** A person's terminal opened on a spec's conversation: its pid file names a live process. */
+  /**
+   * A person's terminal opened on a spec's conversation: its pid file names a live process, whose
+   * start is recorded beside it.
+   */
   void terminalOpened() {
     var terminal = new Agent(pids.incrementAndGet(), Map.of());
     agents.put("terminal", terminal);
     files.put(AgentUnit.TERMINAL.pidPath(), String.valueOf(terminal.pid));
+    files.put(AgentUnit.TERMINAL.startPath(), terminal.stat());
   }
 
   /** Whether the terminal opened on a spec's conversation still runs. */
@@ -560,24 +564,11 @@ final class FakeContainer implements ShellExec {
     if (ScriptedShellExecutor.reachableContainer(String.join(" ", inner)).isPresent()) {
       return presence(inner.get(inner.size() - 2), inner.getLast());
     }
-    if (inner.get(2).startsWith("kill \"$1\" || exit 1")) {
-      return halt(inner.get(4));
-    }
     var script = inner.stream().filter(arg -> arg.contains("printf '%s' \"$1\" >")).findFirst();
     if (script.isPresent()) {
       files.put(inner.get(inner.size() - 1), inner.get(inner.size() - 2));
     }
     return ok("");
-  }
-
-  /**
-   * The pid-file halt of a process that is no unit: it is signalled, and the script says whether it
-   * is {@code gone} or still {@code alive}.
-   */
-  private Result halt(String pid) {
-    var agent = Optional.ofNullable(holder(pid));
-    agent.ifPresent(this::end);
-    return ok(agent.filter(found -> found.alive).isPresent() ? "alive" : "gone");
   }
 
   /**

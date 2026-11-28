@@ -29,7 +29,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -541,16 +540,19 @@ class AgentSessionTest {
   }
 
   private static final AgentUnit FOREGROUND = AgentUnit.recorded(RUN_ID, "");
-  private static final String READ_PID = "cat " + FOREGROUND.pidPath();
-  private static final String HALT_PID = "bash 9999";
 
   private static final AgentUnit CHAT = AgentUnit.chat(RUN_ID);
-  private static final String HALT_STARTED = "sh " + CHAT.pidPath() + " " + CHAT.startPath();
+
+  /** The halt of {@code unit}'s process as it reaches the container: its paths, grace and asks. */
+  private static String haltOf(AgentUnit unit) {
+    return "sh " + unit.pidPath() + " " + unit.startPath() + " 3 5";
+  }
 
   /**
    * A started process's halt is one script in the container, its paths as arguments, and only the
    * word it prints is believed: a run that failed or said nothing is unanswered, whatever it
-   * printed.
+   * printed. A unitless run's halt, a foreground session's, a live member's and a workspace's
+   * terminal's, is that same script: no pid is signalled before its identity is checked.
    */
   @Test
   void aStartedProcessIsHaltedByOneScriptWhoseWordAloneIsBelieved() throws Exception {
@@ -560,24 +562,28 @@ class AgentSessionTest {
             new ShellExec.Result(0, "alive", ""),
             new ShellExec.Result(0, "", ""),
             new ShellExec.Result(1, "gone", "Error: websocket: close 1006"));
-    var halts = new ArrayList<AgentSession.Halt>();
-    var shells = new ArrayList<ScriptedShellExecutor>();
-    for (var answer : answers) {
-      var shell = new ScriptedShellExecutor().on(HALT_STARTED, answer);
-      shells.add(shell);
-      halts.add(new AgentSession(shell).killStarted("acme-try", CHAT));
-    }
+    for (var unit : List.of(CHAT, FOREGROUND, AgentUnit.live(RUN_ID), AgentUnit.TERMINAL)) {
+      var halts = new ArrayList<AgentSession.Halt>();
+      for (var answer : answers) {
+        var shell = new ScriptedShellExecutor().on(haltOf(unit), answer);
+        var session = new AgentSession(shell);
+        halts.add(
+            unit == CHAT
+                ? session.killStarted("acme-try", unit)
+                : session.killAgent("acme-try", unit));
 
-    assertEquals(
-        List.of(
-            AgentSession.Halt.Ended.class,
-            AgentSession.Halt.Survived.class,
-            AgentSession.Halt.Unanswered.class,
-            AgentSession.Halt.Unanswered.class),
-        halts.stream().map(Object::getClass).toList());
-    for (var shell : shells) {
-      assertEquals(1, shell.invocations().size(), "one script, and nothing removed beside it");
-      assertEquals(1, count(shell, HALT_STARTED + " 3 5"));
+        assertEquals(1, shell.invocations().size(), "one script, and nothing removed beside it");
+        assertEquals(1, count(shell, haltOf(unit)), unit.pidPath());
+      }
+
+      assertEquals(
+          List.of(
+              AgentSession.Halt.Ended.class,
+              AgentSession.Halt.Survived.class,
+              AgentSession.Halt.Unanswered.class,
+              AgentSession.Halt.Unanswered.class),
+          halts.stream().map(Object::getClass).toList(),
+          unit.pidPath());
     }
   }
 
@@ -649,45 +655,25 @@ class AgentSessionTest {
     return ran.stdout();
   }
 
-  @Test
-  void aUnitlessSessionIsHaltedByItsPidInOneScriptAndNeverThroughAUnit() throws Exception {
-    var shell =
-        new ScriptedShellExecutor().onOk(READ_PID, "9999\n").onOk(HALT_PID, "gone").onOk("rm -f");
-    var session = new AgentSession(shell);
-
-    var halt = session.killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(AgentSession.Halt.Ended.class, halt);
-    assertEquals(3, shell.invocations().size(), "the pid read, the halt, the pid file's removal");
-    assertEquals(1, count(shell, "rm -f " + FOREGROUND.pidPath()));
-    assertEquals(0, count(shell, "systemctl"), "a unitless session has no unit to kill or reset");
-  }
-
   /**
-   * The container, as far as a unitless halt goes: the pid file names {@code agent}, a real process
-   * of this test, and the halt's script runs on this machine against it.
+   * The halt's ladder on this machine's real processes: the process its wrapper recorded that
+   * outlives its SIGTERM is sent SIGKILL, still being the one recorded, and the script answers gone
+   * with its pid file removed.
    */
-  private static final class HereWith extends Here {
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aRecordedProcessThatIgnoresTheSigtermIsEndedByTheSigkill(@TempDir Path dir)
+      throws Exception {
+    var stubborn = process("bash", "-c", "trap '' TERM; echo ready; while :; do sleep 1; done");
+    assertEquals("ready", stubborn.inputReader().readLine(), "the signal is ignored from here on");
 
-    private final Process agent;
+    var said = halted(dir, "stubborn", stubborn, startOf(stubborn));
 
-    HereWith(Process agent) {
-      this.agent = agent;
-    }
-
-    @Override
-    public Result exec(List<String> command)
-        throws IOException, InterruptedException, TimeoutException {
-      if (command.contains("bash")) {
-        return super.exec(command);
-      }
-      commands.add(List.copyOf(command));
-      return new Result(0, command.contains("cat") ? agent.pid() + "\n" : "", "");
-    }
-
-    private long removals() {
-      return commands.stream().filter(c -> c.contains("rm")).count();
-    }
+    assertEquals("gone", said);
+    assertTrue(stubborn.waitFor(10, TimeUnit.SECONDS));
+    assertEquals(137, stubborn.exitValue(), "by SIGKILL");
+    assertFalse(Files.exists(dir.resolve("stubborn.pid")));
   }
 
   private final List<Process> started = new ArrayList<>();
@@ -708,154 +694,6 @@ class AgentSessionTest {
             .start();
     started.add(process);
     return process;
-  }
-
-  @Test
-  void aRealProcessIsEndedByTheSigtermAndTheScriptAnswersGone() throws Exception {
-    var agent = process("sleep", "300");
-    var here = new HereWith(agent);
-
-    var halt = new AgentSession(here).killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(AgentSession.Halt.Ended.class, halt);
-    assertTrue(agent.waitFor(10, TimeUnit.SECONDS));
-    assertEquals(143, agent.exitValue(), "by SIGTERM");
-    assertEquals(1, here.removals());
-    var haltCommand = here.commands.get(1);
-    var script = haltCommand.indexOf("-c") + 1;
-    assertEquals(
-        String.valueOf(agent.pid()),
-        haltCommand.get(script + 2),
-        "the pid is the script's first argument");
-    assertFalse(
-        haltCommand.get(script).contains(String.valueOf(agent.pid())),
-        "the pid travels as an argument, never as script text");
-  }
-
-  @Test
-  void aRealProcessThatIgnoresTheSigtermIsEndedByTheSigkill() throws Exception {
-    var agent = process("bash", "-c", "trap '' TERM; echo ready; while :; do sleep 1; done");
-    assertEquals("ready", agent.inputReader().readLine(), "the signal is ignored from here on");
-    var here = new HereWith(agent);
-
-    var halt = new AgentSession(here).killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(AgentSession.Halt.Ended.class, halt);
-    assertTrue(agent.waitFor(10, TimeUnit.SECONDS));
-    assertEquals(137, agent.exitValue(), "by SIGKILL");
-    assertEquals(1, here.removals());
-  }
-
-  @Test
-  void aProcessAlreadyGoneWhenTheSignalIsSentWasNotEndedByIt() throws Exception {
-    var agent = process("true");
-    assertTrue(agent.waitFor(10, TimeUnit.SECONDS));
-    var here = new HereWith(agent);
-
-    var halt = new AgentSession(here).killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(
-        AgentSession.Halt.Unanswered.class,
-        halt,
-        "no signal was delivered, so nothing is said to have been ended by one");
-    assertEquals(0, here.removals());
-  }
-
-  @Test
-  void aUnitlessSessionTheContainerSaysIsStillAliveSurvivedAndItsPidFileIsKept() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk(READ_PID, "9999\n").onOk(HALT_PID, "alive");
-    var session = new AgentSession(shell);
-
-    var halt = session.killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(AgentSession.Halt.Survived.class, halt);
-    assertEquals(0, count(shell, "rm -f"), "a pid alive after SIGKILL keeps its pid file");
-  }
-
-  @Test
-  void aUnitlessSessionInAContainerThatCannotBeReachedIsUnanswered() throws Exception {
-    var shell = new ScriptedShellExecutor();
-    var session = new AgentSession(shell);
-
-    var halt = session.killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(AgentSession.Halt.Unanswered.class, halt);
-    assertEquals(
-        List.of(),
-        shell.invocations().stream().filter(c -> !c.contains(READ_PID)).toList(),
-        "nothing was signalled and nothing removed");
-  }
-
-  @Test
-  void aContainerLostAfterThePidWasReadIsUnansweredAndThePidFileIsKept() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk(READ_PID, "9999\n");
-    var session = new AgentSession(shell);
-
-    var halt = session.killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(
-        AgentSession.Halt.Unanswered.class,
-        halt,
-        "a halt that could not be run is not a process that is gone");
-    assertEquals(1, count(shell, HALT_PID));
-    assertEquals(
-        0,
-        count(shell, "rm -f"),
-        "the pid file is what still says the agent may be alive: it is kept");
-  }
-
-  @Test
-  void aHaltThatCameBackWithNoAnswerIsUnansweredHoweverItExited() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk(READ_PID, "9999\n").onOk(HALT_PID, "");
-    var session = new AgentSession(shell);
-
-    var halt = session.killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(AgentSession.Halt.Unanswered.class, halt);
-    assertEquals(0, count(shell, "rm -f"));
-  }
-
-  @Test
-  void anAnswerFromAHaltThatFailedIsNotBelieved() throws Exception {
-    var shell =
-        new ScriptedShellExecutor()
-            .onOk(READ_PID, "9999\n")
-            .on(HALT_PID, new ShellExec.Result(1, "gone", "connection reset"));
-    var session = new AgentSession(shell);
-
-    var halt = session.killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(AgentSession.Halt.Unanswered.class, halt);
-    assertEquals(0, count(shell, "rm -f"));
-  }
-
-  @Test
-  void aPidFileThatNamesNoPidIsUnansweredAndNothingIsSignalled() throws Exception {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "gone", ""))
-            .onOk(READ_PID, "; rm -rf /\n");
-    var session = new AgentSession(shell);
-
-    var halt = session.killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(AgentSession.Halt.Unanswered.class, halt);
-    assertEquals(1, shell.invocations().size(), "what the pid file held never reached a shell");
-  }
-
-  @Test
-  void aPidFileThatCouldNotBeReadIsUnansweredNeverAnAgentTakenForGone() throws Exception {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "gone", ""))
-            .onFail(READ_PID, "Error: websocket: close 1006 (abnormal closure)");
-    var session = new AgentSession(shell);
-
-    var halt = session.killAgent("acme-health", FOREGROUND);
-
-    assertInstanceOf(
-        AgentSession.Halt.Unanswered.class,
-        halt,
-        "a read that failed says the same of a missing file as of a lost container");
-    assertEquals(1, shell.invocations().size(), "no signal was sent and nothing removed");
   }
 
   /** The wrapper every launch shape starts its harness with: the run's launch.env, read once. */
@@ -1074,17 +912,50 @@ class AgentSessionTest {
         joined.contains("SAIL_RUN_ID=\"$6\""), "the run id is exported into the launched process");
   }
 
+  /**
+   * The foreground wrapper records, before its pid, the start of the process its pid names, the one
+   * it then {@code exec}s into: run here for real, the halt ends that process by its record.
+   */
   @Test
-  void buildForegroundTaskCommandWritesTheRunScopedPidFile() {
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void theForegroundWrapperRecordsTheStartOfTheProcessItsPidNames(@TempDir Path dir)
+      throws Exception {
     var cmd = foreground(true, CLAUDE_CODE, null, null, "spec-1", "claude-code");
+    var inner = new ArrayList<>(cmd.subList(cmd.indexOf("--") + 1, cmd.size()));
+    var pidFile = dir.resolve("agent.pid");
+    var record = AgentUnit.startPath(pidFile.toString());
+    inner.set(inner.indexOf("/home/dev/workspace"), dir.toString());
+    inner.set(inner.indexOf(RUN_UNIT.logPath()), "/dev/stdout");
+    inner.set(inner.indexOf(RUN_UNIT.pidPath()), pidFile.toString());
+    inner.set(inner.indexOf(RUN_UNIT.startPath()), record);
+    inner.set(inner.indexOf("bash") + 2, "echo ready; read -r line");
+    var builder = new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD);
+    builder.environment().put("HOME", dir.toString());
+    var agent = builder.start();
+    started.add(agent);
 
+    assertEquals("ready", agent.inputReader().readLine());
+    var pid = Files.readString(pidFile).strip();
+    assertEquals(String.valueOf(agent.pid()), pid, "the pid file names the process itself");
     assertEquals(
-        RUN_UNIT.pidPath(),
-        cmd.get(cmd.size() - 2),
-        "the wrapper's pid lands in the run's pid file so a foreground session stays probeable"
-            + " and stoppable");
-    var script = cmd.get(cmd.indexOf("-c") + 1);
-    assertTrue(script.contains("printf '%s\\n' \"$$\" > \"$7\""));
+        AgentSession.parseStartTicks(Files.readString(Path.of("/proc", pid, "stat"))),
+        AgentSession.parseStartTicks(Files.readString(Path.of(record))));
+    var halt =
+        Child.run(
+            new ProcessBuilder(
+                "sh",
+                "-c",
+                AgentSession.KILL_STARTED_SCRIPT,
+                "sh",
+                pidFile.toString(),
+                record,
+                "1",
+                "5"));
+
+    assertEquals("gone", halt.stdout(), halt.stderr());
+    assertTrue(agent.waitFor(10, TimeUnit.SECONDS));
+    assertEquals(143, agent.exitValue(), "by SIGTERM");
   }
 
   @Test
@@ -1124,7 +995,7 @@ class AgentSessionTest {
     assertTrue(String.join(" ", background).contains("SAIL_RUN_ROLE=$9"));
     assertEquals("room", background.getLast(), "the role rides as the ninth positional argument");
     assertTrue(String.join(" ", foreground).contains("SAIL_RUN_ROLE=\"$8\""));
-    assertEquals("adhoc", foreground.getLast());
+    assertEquals("adhoc", foreground.get(foreground.size() - 2), "and eighth in the foreground");
   }
 
   @Test
@@ -1133,7 +1004,7 @@ class AgentSessionTest {
     var foreground = foreground(true, CLAUDE_CODE, null, null, "spec-1", "claude-code");
 
     assertEquals("", background.getLast());
-    assertEquals("", foreground.getLast());
+    assertEquals("", foreground.get(foreground.size() - 2));
   }
 
   @Test
@@ -1563,9 +1434,9 @@ class AgentSessionTest {
             "bash",
             "-l",
             "-c",
-            "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
-                + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\" SAIL_RUN_ROLE=\"$8\""
-                + " exec bash -l -c \"$2\" > \"$5\" 2>&1",
+            "mkdir -p \"$(dirname \"$5\")\" && cat /proc/$$/stat > \"$9\" && printf '%s\\n'"
+                + " \"$$\" > \"$7\" && cd \"$1\" && SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\""
+                + " SAIL_RUN_ID=\"$6\" SAIL_RUN_ROLE=\"$8\" exec bash -l -c \"$2\" > \"$5\" 2>&1",
             "bash",
             "/home/dev/workspace",
             READS_LAUNCH_ENV
@@ -1577,7 +1448,8 @@ class AgentSessionTest {
             RUN_UNIT.logPath(),
             RUN_ID,
             RUN_UNIT.pidPath(),
-            ""));
+            "",
+            RUN_UNIT.startPath()));
     assertEquals(expected, cmd, "the foreground launch whole, no secret on it");
   }
 

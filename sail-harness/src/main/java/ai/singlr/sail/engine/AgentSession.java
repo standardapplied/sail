@@ -496,22 +496,41 @@ public final class AgentSession {
       "if [ \"$(cat -- \"$1\" 2>/dev/null)\" = \"$2\" ]; then rm -f -- \"$1\"; fi";
 
   /**
-   * Halts, from inside the container, the process the pid file its first argument names, only while
-   * it is the process whose start the record its second names holds (field 22 of {@code
-   * /proc/<pid>/stat}, read as {@link #parseStartTicks} reads it), and says what became of it: by
-   * SIGTERM, the grace its third argument gives in seconds, and SIGKILL only to that same process
-   * still there, then as many asks a second apart as its fourth allows. It prints {@code gone}, the
-   * pid file removed, once no process holds that pid with that start (another process at the pid, a
-   * record missing, a pid file naming none are never signalled), and {@code alive} when the process
-   * outlived its signals; a run of it that printed neither says nothing of the process.
+   * The one identity rule every signal to a process a wrapper started goes by, the head of each
+   * script that sends one: the pid file its first argument names and the start record its second
+   * names, which the wrapper wrote beside it ({@link AgentUnit#startPath}). {@code ours} holds only
+   * while the process at that pid has the recorded start (field 22 of {@code /proc/<pid>/stat},
+   * read as {@link #parseStartTicks} reads it): another process the box gave the pid, a record
+   * missing or unreadable, and a process gone are never it. A pid file that names no pid ends the
+   * script, with {@code gone} printed and nothing signalled.
    */
-  static final String KILL_STARTED_SCRIPT =
+  private static final String STARTED =
       """
       ticks() { set -- $(sed 's/.*) //' "$1" 2>/dev/null); printf %s "${20}"; }
       pid=$(tr -d '[:space:]' < "$1" 2>/dev/null)
       case "$pid" in ''|0|*[!0-9]*) printf gone; exit 0 ;; esac
       mine=$(ticks "$2")
       ours() { [ -n "$mine" ] && [ "$(ticks "/proc/$pid/stat")" = "$mine" ]; }
+      """;
+
+  /**
+   * Sends the signal its third argument names, once, to the process its wrapper recorded ({@link
+   * #STARTED}), and to nothing else; it removes nothing, so a run of it that failed changed
+   * nothing.
+   */
+  static final String SIGNAL_STARTED_SCRIPT = STARTED + "ours && kill -s \"$3\" \"$pid\"\n";
+
+  /**
+   * Halts, from inside the container, the process its wrapper recorded ({@link #STARTED}), and says
+   * what became of it: by SIGTERM, the grace its third argument gives in seconds, and SIGKILL only
+   * to that same process still there, then as many asks a second apart as its fourth allows. It
+   * prints {@code gone}, the pid file removed, once no process holds that pid with that start, and
+   * {@code alive} when the process outlived its signals; a run of it that printed neither says
+   * nothing of the process.
+   */
+  static final String KILL_STARTED_SCRIPT =
+      STARTED
+          + """
       if ours; then
         kill "$pid" || exit 1
         sleep "$3"
