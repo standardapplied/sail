@@ -451,8 +451,10 @@ public final class RunReservation {
    * workspace and a claim of it from both going on, with no lock between them: a claim takes its
    * row, then ends the terminal its pid file names; the terminal names its process, then calls
    * this, which asks {@code claims} for the runs claiming the place and, when there is one, ends
-   * the terminal itself. Whichever comes second sees what the first did. Answers the run it yielded
-   * to.
+   * the terminal itself. Whichever comes second sees what the first did. A terminal, {@code mine},
+   * that its pid file no longer names once this has run is ended by {@code end}, its own attach: a
+   * claim's halt of a stale pid file may have removed the name it had just written, and no claim
+   * can end it by a name it does not have. Answers the run it yielded to.
    */
   public static Optional<String> yieldToAClaim(
       ShellExec shell,
@@ -462,8 +464,34 @@ public final class RunReservation {
       Runnable end) {
     var claim = claims.get().stream().findFirst();
     claim.ifPresent(run -> endTerminal(shell, place));
+    if (unnamed(shell, place, mine)) {
+      end.run();
+    }
     return claim;
   }
+
+  /**
+   * Whether {@code place}'s terminal pid file, read in its container, is gone or names a pid other
+   * than {@code mine}; a read the container did not answer says neither.
+   */
+  private static boolean unnamed(ShellExec shell, RunPlace place, int mine) {
+    try {
+      var read =
+          shell.exec(
+              ContainerExec.asDevUser(
+                  place.instance(),
+                  List.of("sh", "-c", NAMED_SCRIPT, "sh", AgentUnit.TERMINAL.pidPath())));
+      return read.ok() && !read.stdout().strip().equals(String.valueOf(mine));
+    } catch (Exception unanswered) {
+      if (unanswered instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      return false;
+    }
+  }
+
+  /** Prints what the file its first argument names holds, or nothing when there is no file. */
+  private static final String NAMED_SCRIPT = "cat -- \"$1\" 2>/dev/null || [ ! -e \"$1\" ]";
 
   /** Ends the terminal resumed in {@code place}'s workspace, when one is there. */
   private static void endTerminal(ShellExec shell, RunPlace place) {

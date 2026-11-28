@@ -471,15 +471,16 @@ public final class AgentSession {
    * script that sends one: the pid file its first argument names and the start record its second
    * names, which the wrapper wrote beside it ({@link AgentUnit#startPath}). {@code ours} holds only
    * while the process at that pid has the recorded start (field 22 of {@code /proc/<pid>/stat},
-   * read as {@link #parseStartTicks} reads it): another process the box gave the pid, a record
-   * missing or unreadable, and a process gone are never it. A pid file that names no pid ends the
-   * script, with {@code gone} printed and nothing signalled.
+   * read as {@link #parseStartTicks} reads it, from the last {@code ") "} on, a name holding a
+   * newline included): another process the box gave the pid, a record missing or unreadable, and a
+   * process gone are never it. A pid file that names no pid, or one written with a leading zero,
+   * ends the script, with {@code gone} printed and nothing signalled.
    */
   private static final String STARTED =
       """
-      ticks() { set -- $(sed 's/.*) //' "$1" 2>/dev/null); printf %s "${20}"; }
+      ticks() { set -f; set -- $(tr '\n' ' ' < "$1" 2>/dev/null | sed 's/.*) //'); printf %s "${20}"; }
       pid=$(tr -d '[:space:]' < "$1" 2>/dev/null)
-      case "$pid" in ''|0|*[!0-9]*) printf gone; exit 0 ;; esac
+      case "$pid" in ''|0*|*[!0-9]*) printf gone; exit 0 ;; esac
       mine=$(ticks "$2")
       ours() { [ -n "$mine" ] && [ "$(ticks "/proc/$pid/stat")" = "$mine" ]; }
       """;
@@ -495,9 +496,11 @@ public final class AgentSession {
    * Halts, from inside the container, the process its wrapper recorded ({@link #STARTED}), and says
    * what became of it: by SIGTERM, the grace its third argument gives in seconds, and SIGKILL only
    * to that same process still there, then as many asks a second apart as its fourth allows. It
-   * prints {@code gone}, the pid file removed, once no process holds that pid with that start, and
-   * {@code alive} when the process outlived its signals; a run of it that printed neither says
-   * nothing of the process.
+   * prints {@code gone} once no process holds that pid with that start, and {@code alive} when the
+   * process outlived its signals; a run of it that printed neither says nothing of the process. The
+   * pid file goes with a {@code gone} only while it still names the pid the script judged: a
+   * process that named itself there meanwhile, a terminal opening as a claim ends a stale one,
+   * keeps its name.
    */
   static final String KILL_STARTED_SCRIPT =
       STARTED
@@ -511,7 +514,7 @@ public final class AgentSession {
           while [ "$asks" -lt "$4" ] && ours; do sleep 1; asks=$((asks + 1)); done
         fi
       fi
-      if ours; then printf alive; else rm -f -- "$1"; printf gone; fi
+      if ours; then printf alive; else [ "$(tr -d '[:space:]' < "$1" 2>/dev/null)" != "$pid" ] || rm -f -- "$1"; printf gone; fi
       """;
 
   /**

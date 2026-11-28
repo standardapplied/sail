@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -480,6 +481,9 @@ final class FakeContainer implements ShellExec {
     }
     if (inner.get(2).startsWith("ticks() {")) {
       return haltStarted(inner.get(4), inner.get(5));
+    }
+    if (inner.get(2).startsWith("cat -- \"$1\" 2>/dev/null || [ ! -e")) {
+      return ok(Objects.requireNonNullElse(files.get(inner.get(4)), ""));
     }
     if (inner.get(2).startsWith("for d in")) {
       var skillsDir = inner.getLast();

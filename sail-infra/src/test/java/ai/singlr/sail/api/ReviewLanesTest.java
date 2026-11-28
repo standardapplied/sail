@@ -255,8 +255,8 @@ class ReviewLanesTest {
 
   /**
    * A claim's halt of a stale terminal pid file removed it just after a new terminal named itself
-   * there, so no claim can end that terminal by it: the terminal's own attach, finding its name gone
-   * once it has yielded to the claim, ends it.
+   * there, so no claim can end that terminal by it: the terminal's own attach, finding its name
+   * gone once it has yielded to the claim, ends it.
    */
   @Test
   void aTerminalWhoseNameAClaimsHaltTookIsEndedByItsOwnAttach() {

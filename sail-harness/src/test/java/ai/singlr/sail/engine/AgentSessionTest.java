@@ -680,8 +680,8 @@ class AgentSessionTest {
   /**
    * A halt that judged a stale pid file's process gone removes the file only while it still holds
    * that pid: a terminal that named itself in the file meanwhile (its start, then its pid, as its
-   * wrapper writes them) keeps its name, so the claim it then yields to can end it. The new write is
-   * held here until the halt's last look at the old pid, just before its removal.
+   * wrapper writes them) keeps its name, so the claim it then yields to can end it. The new write
+   * is held here until the halt's last look at the old pid, just before its removal.
    */
   @Test
   @EnabledOnOs(OS.LINUX)
@@ -738,9 +738,9 @@ class AgentSessionTest {
 
   /**
    * A process may name itself with a newline, which splits its stat line in two: its start is still
-   * read from the last {@code ") "} on, field 22 and no other. One at the pid whose start is not the
-   * recorded one is never signalled, though every other field of the two matches; the one recorded
-   * is.
+   * read from the last {@code ") "} on, field 22 and no other. One at the pid whose start is not
+   * the recorded one is never signalled, though every other field of the two matches; the one
+   * recorded is.
    */
   @Test
   @EnabledOnOs(OS.LINUX)
