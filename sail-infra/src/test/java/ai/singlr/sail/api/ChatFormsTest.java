@@ -40,8 +40,8 @@ class ChatFormsTest {
   /** L10: Claude Code offers a chat in its chat modes, signing in inside; Codex offers none. */
   @Test
   void eachOfferSaysTheFormsItsHarnessTakesAndHowItChats() {
-    var claude = new AgentOffer(CLAUDE, null, true, null, null).toMap();
-    var codex = new AgentOffer(Harnesses.of("codex"), null, true, null, null).toMap();
+    var claude = new AgentOffer(CLAUDE, null, true, null, null, true).toMap();
+    var codex = new AgentOffer(Harnesses.of("codex"), null, true, null, null, true).toMap();
 
     assertEquals(List.of("terminal", "chat"), claude.get("forms"));
     assertEquals(
@@ -76,30 +76,155 @@ class ChatFormsTest {
   /** A harness the workspace does not let start inside offers no inside chat either. */
   @Test
   void anOfferThatDoesNotStartInsideOffersNoInsideChat() {
-    var offered = new AgentOffer(CLAUDE, null, false, null, null).toMap();
+    var offered = new AgentOffer(CLAUDE, null, false, null, null, true).toMap();
 
     assertEquals(false, ((Map<?, ?>) offered.get("chat")).get("inside"));
+  }
+
+  /**
+   * Each offer holds only the forms this runner opens now: with a terminal door, a terminal and,
+   * for a harness that chats, a chat; with none, Claude Code a chat alone and Codex, which has no
+   * chat, nothing.
+   */
+  @Test
+  void anOfferHoldsOnlyTheFormsThisRunnerOpens() {
+    var codex = Harnesses.of("codex");
+
+    assertEquals(
+        List.of(List.of("terminal", "chat"), List.of("chat"), List.of("terminal"), List.of()),
+        List.of(
+            offer(CLAUDE, true).get("forms"),
+            offer(CLAUDE, false).get("forms"),
+            offer(codex, true).get("forms"),
+            offer(codex, false).get("forms")));
+    assertEquals(
+        offer(CLAUDE, true).get("chat"),
+        offer(CLAUDE, false).get("chat"),
+        "a chat is offered alike with or without a terminal door");
+  }
+
+  /**
+   * An offer left with no form is not offered, and an answer left with none says once why nothing
+   * starts here, in the ticket route's words; an answer with a form left refuses nothing.
+   */
+  @Test
+  void anOfferWithNoFormIsNotOfferedAndAnAnswerLeftWithNoneSaysWhyOnce() {
+    var codex = Harnesses.of("codex");
+    var some =
+        AgentOffersResponse.opening(
+                "acme",
+                "try",
+                "sam",
+                true,
+                false,
+                List.of(offered(CLAUDE, false), offered(codex, false)))
+            .toMap();
+    var none =
+        AgentOffersResponse.opening(
+                "acme", "try", "sam", true, false, List.of(offered(codex, false)))
+            .toMap();
+    var both =
+        AgentOffersResponse.opening(
+                "acme",
+                "try",
+                "sam",
+                true,
+                true,
+                List.of(offered(CLAUDE, true), offered(codex, true)))
+            .toMap();
+
+    assertEquals(List.of("claude-code"), harnesses(some));
+    assertFalse(some.containsKey("refusal"));
+    assertEquals(List.of("claude-code", "codex"), harnesses(both));
+    assertFalse(both.containsKey("refusal"));
+    assertEquals(List.of(), none.get("offered"));
+    var refusal = (Map<?, ?>) none.get("refusal");
+    assertEquals(
+        List.of(
+            "terminal_not_offered",
+            "This runner offers no terminal over the network; ask an admin."),
+        List.of(refusal.get("code"), refusal.get("message")));
+    assertEquals(
+        List.of("project", "workspace", "owner", "running", "terminal", "refusal", "offered"),
+        List.copyOf(none.keySet()),
+        "said once, on the answer");
+  }
+
+  /**
+   * The answer says whether this runner opens a terminal at all, for what is not an offer (a Shell,
+   * a shell beside a chat), as the runner has its door or not, whatever is left to offer.
+   */
+  @Test
+  void theAnswerSaysWhetherThisRunnerOpensATerminal() {
+    var codex = Harnesses.of("codex");
+
+    assertEquals(
+        List.of(true, false, false),
+        List.of(
+            AgentOffersResponse.opening(
+                    "acme", "try", "sam", true, true, List.of(offered(codex, true)))
+                .toMap()
+                .get("terminal"),
+            AgentOffersResponse.opening(
+                    "acme", "try", "sam", true, false, List.of(offered(CLAUDE, false)))
+                .toMap()
+                .get("terminal"),
+            AgentOffersResponse.opening(
+                    "acme", "try", "sam", true, false, List.of(offered(codex, false)))
+                .toMap()
+                .get("terminal")));
+  }
+
+  /**
+   * A chat's open refuses a harness with no chat by the rule its offer keeps its forms by: sent to
+   * a terminal where this runner opens one, and to nothing on a runner with no terminal door.
+   */
+  @Test
+  void aHarnessWithNoChatIsSentToATerminalOnlyWhereThisRunnerOpensOne() {
+    var codex = Harnesses.of("codex");
+
+    assertEquals(
+        List.of(
+            "Codex CLI has no chat form; start it in a terminal.", "Codex CLI has no chat form."),
+        List.of(
+            assertThrows(IllegalArgumentException.class, () -> ChatLaunch.form(codex, false, true))
+                .getMessage(),
+            assertThrows(IllegalArgumentException.class, () -> ChatLaunch.form(codex, false, false))
+                .getMessage()));
+  }
+
+  private static AgentOffer offered(Harness harness, boolean terminal) {
+    return new AgentOffer(harness, null, true, null, null, terminal);
+  }
+
+  private static Map<String, Object> offer(Harness harness, boolean terminal) {
+    return offered(harness, terminal).toMap();
+  }
+
+  private static List<Object> harnesses(Map<String, Object> answer) {
+    return ((List<?>) answer.get("offered"))
+        .stream().<Object>map(offer -> ((Map<?, ?>) offer).get("harness")).toList();
   }
 
   /** L11, I7: the switch off says so on the route and refuses an inside open; a key open works. */
   @Test
   void withTheSwitchOffAChatTakesTheStoredKeyAndNotTheSignInInside() {
     var outside = signingInOutside();
-    var offered = new AgentOffer(outside, null, true, null, null).toMap();
-    var claude = new AgentOffer(CLAUDE, null, true, null, null).toMap();
+    var offered = new AgentOffer(outside, null, true, null, null, true).toMap();
+    var claude = new AgentOffer(CLAUDE, null, true, null, null, true).toMap();
 
     assertEquals(false, ((Map<?, ?>) offered.get("chat")).get("inside"));
     assertEquals(true, offered.get("inside"), "a terminal still starts signed in inside");
     assertEquals(claude.get("kinds"), offered.get("kinds"), "an API key is always offered");
     var refused =
-        assertThrows(IllegalArgumentException.class, () -> ChatLaunch.form(outside, true));
+        assertThrows(IllegalArgumentException.class, () -> ChatLaunch.form(outside, true, true));
     assertEquals(
         "Claude Code's chat takes your stored API key here, not the sign-in made in the workspace.",
         refused.getMessage());
-    assertSame(outside.chat().orElseThrow(), ChatLaunch.form(outside, false));
+    assertSame(outside.chat().orElseThrow(), ChatLaunch.form(outside, false, true));
     assertEquals(
         CLAUDE.chat().orElseThrow().modes(),
-        ChatLaunch.form(CLAUDE, true).modes(),
+        ChatLaunch.form(CLAUDE, true, true).modes(),
         "Claude Code's own chat signs in inside");
   }
 
@@ -112,7 +237,8 @@ class ChatFormsTest {
   void aChatOpenedInsideIsNotStartedInsideOnceTheSwitchIsOff(@TempDir Path dir) {
     try (var bench = new ChatBench(dir)) {
       var session =
-          ChatBench.as("tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true))
+          ChatBench.as(
+                  "tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true, true))
               .session();
       var chat = bench.store.find(session).orElseThrow();
       var switchedOff =

@@ -149,6 +149,7 @@
       "project": "harbor",
       "running": true,
       "schema_version": 1,
+      "terminal": true,
       "workspace": "berth"
     },
     "status": 200
