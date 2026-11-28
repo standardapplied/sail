@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -743,7 +744,7 @@ class CiFleetTest {
       assertFalse(
           ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
           "the remote command outlived its check");
-      assertNoTimerRunning();
+      assertEveryTimerEnds();
     }
   }
 
@@ -772,7 +773,7 @@ class CiFleetTest {
       assertFalse(
           ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
           "the check that ignored TERM outlived its grace");
-      assertNoTimerRunning();
+      assertEveryTimerEnds();
     }
   }
 
@@ -802,7 +803,7 @@ class CiFleetTest {
       assertFalse(
           ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
           "the check that ignored TERM outlived its grace");
-      assertNoTimerRunning();
+      assertEveryTimerEnds();
     }
   }
 
@@ -914,7 +915,7 @@ class CiFleetTest {
 
   /**
    * The check {@code name} of {@code body} at {@link #LIMIT}, its body over before its wait is
-   * reached; then nothing of its timer is left running.
+   * reached; then every process of its timer ends.
    */
   private Child.Ended beforeItsWait(String name, String body) throws Exception {
     run("mkfifo", dir.resolve("go").toString());
@@ -925,22 +926,27 @@ class CiFleetTest {
                     + WAITS_ONCE_THE_BODY_HAS_ENDED
                     + "check_within %s early '%s' %s".formatted(LIMIT, name, body),
                 SCRIPT.toString()));
-    assertNoTimerRunning();
+    assertEveryTimerEnds();
     return ended;
   }
 
-  /** Every timer a check started, its shell and its {@code sleep}, has ended. */
-  private void assertNoTimerRunning() throws IOException {
+  /**
+   * Every timer a check started, its shell and its {@code sleep}, ends. Its shell has ended when
+   * the check returns; its {@code sleep}, signalled with it, may finish dying just after.
+   */
+  private void assertEveryTimerEnds() throws Exception {
     var timers = Files.readAllLines(dir.resolve("timers"));
     assertFalse(timers.isEmpty(), "no check started a timer");
-    var running =
-        timers.stream()
-            .flatMap(timer -> Stream.of(timer.split(" ")))
-            .filter(
-                pid ->
-                    ProcessHandle.of(Long.parseLong(pid)).map(ProcessHandle::isAlive).orElse(false))
-            .toList();
-    assertEquals(List.of(), running, "the timer's processes that outlived their check");
+    for (var pid : timers.stream().flatMap(timer -> Stream.of(timer.split(" "))).toList()) {
+      var process = ProcessHandle.of(Long.parseLong(pid));
+      if (process.isPresent()) {
+        try {
+          process.get().onExit().get(Child.PATIENCE.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException running) {
+          throw new AssertionError("the timer's process " + pid + " outlived its check", running);
+        }
+      }
+    }
   }
 
   @Test
