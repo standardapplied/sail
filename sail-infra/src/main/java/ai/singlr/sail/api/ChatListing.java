@@ -13,6 +13,7 @@ import ai.singlr.sail.harness.SessionForm;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChatStore;
 import ai.singlr.sail.store.FdeStore;
+import java.text.BreakIterator;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -52,7 +53,17 @@ final class ChatListing {
   static final int TITLE_READ = 1024;
 
   private static final Pattern LINE = Pattern.compile("\\R");
-  private static final Pattern BLANKS = Pattern.compile("[\\p{Cc}\\p{Z}]+");
+
+  /**
+   * What a title holds as one space: whitespace, control characters, and the bidi embeddings,
+   * overrides and isolates, which would turn what the app writes after a title, and which a cut at
+   * the bound could leave open. The joiners, selectors, tags and marks of words and emoji stay.
+   */
+  private static final Pattern BLANKS =
+      Pattern.compile("[\\p{Cc}\\p{Z}\\u202A-\\u202E\\u2066-\\u2069]+");
+
+  /** What a line with words holds: a letter, number, punctuation or symbol. */
+  private static final Pattern WORDS = Pattern.compile("[\\p{L}\\p{N}\\p{P}\\p{S}]");
 
   private static final String MESSAGE = ChatWire.kind(ChatWire.Message.class);
   private static final String FAILED = ChatWire.kind(ChatItem.Failed.class);
@@ -138,9 +149,9 @@ final class ChatListing {
 
   /**
    * The title of a chat whose first message opens with {@code said}: its first line with words in
-   * it, each run of whitespace and control characters one space, cut to {@link #TITLE_MOST} code
-   * points on the last whole word that fits, or at the bound when one word is longer; null when no
-   * line has words or there is no message.
+   * it ({@link #WORDS}), each run of {@link #BLANKS} one space, cut to {@link #TITLE_MOST} code
+   * points on the last whole word that fits, or on the last whole grapheme when one word is longer;
+   * null when no line has words or there is no message.
    */
   private static String title(String said) {
     if (said == null) {
@@ -149,7 +160,7 @@ final class ChatListing {
     var line =
         LINE.splitAsStream(said)
             .map(each -> BLANKS.matcher(each).replaceAll(" ").strip())
-            .filter(each -> !each.isEmpty())
+            .filter(each -> WORDS.matcher(each).find())
             .findFirst()
             .orElse(null);
     if (line == null || line.codePointCount(0, line.length()) <= TITLE_MOST) {
@@ -157,7 +168,18 @@ final class ChatListing {
     }
     var bound = line.offsetByCodePoints(0, TITLE_MOST);
     var space = line.lastIndexOf(' ', bound);
-    return line.substring(0, space < 0 ? bound : space);
+    return line.substring(0, space < 0 ? grapheme(line, bound) : space);
+  }
+
+  /**
+   * Where a cut of {@code line} at or before {@code bound} leaves its last grapheme whole: a ZWJ
+   * family, a flag or a letter with its marks; {@code bound} itself when one grapheme is longer.
+   */
+  private static int grapheme(String line, int bound) {
+    var graphemes = BreakIterator.getCharacterInstance();
+    graphemes.setText(line);
+    var whole = graphemes.isBoundary(bound) ? bound : graphemes.preceding(bound);
+    return whole > 0 ? whole : bound;
   }
 
   /**

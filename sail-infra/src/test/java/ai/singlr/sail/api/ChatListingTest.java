@@ -376,11 +376,101 @@ class ChatListingTest {
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void onlyWhitespaceOrControlCharactersIsNoTitle() {
-    for (var said : List.of(" \t\n\r\n\u00A0\u2003 ", "\u0007\u001B\u0000", "\u0085\u009B ")) {
+    for (var said :
+        List.of(
+            " \t\n\r\n\u00A0\u2003 ",
+            "\u0007\u001B\u0000",
+            "\u0085\u009B ",
+            "\u200B\u2060\uFEFF\u200D",
+            "\u202E\u2066\u2069")) {
       assertFalse(
           only(listed(said)).containsKey("title"),
           () -> said.codePoints().mapToObj(Integer::toHexString).toList().toString());
     }
+  }
+
+  /** T10: a line of only invisible characters is no line with words: the next one is the title. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aLineOfOnlyInvisibleCharactersIsPassedOver() {
+    assertEquals("Fix the bug", titleOf("\u200B\nFix the bug"));
+    assertEquals("Fix the bug", titleOf("\uFEFF\u200D\u2060\nFix the bug"));
+  }
+
+  /**
+   * T11: no bidi embedding, override or isolate reaches a title, so none can turn what the app
+   * writes after it, balanced or left open, and no cut at the bound leaves one open; the marks and
+   * joiners that make words and emoji are kept.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void noBidiEmbeddingOverrideOrIsolateReachesATitle() {
+    assertEquals("upload limit", titleOf("\u202Eupload limit"));
+    assertEquals("upload limit", titleOf("\u202Eupload limit\u202C"));
+    assertEquals(
+        "a b c d e f g h i j",
+        titleOf("a\u202Ab\u202Bc\u202Cd\u202De\u2066f\u2067g\u2068h\u2069i j"));
+    assertEquals(
+        "word ".repeat(16).strip(),
+        titleOf("\u2067" + "word ".repeat(20) + "\u2069"),
+        "an isolate the cut would leave open");
+    var kept =
+        "\uD83D\uDC69\u200D\uD83D\uDC67 \u2764\uFE0F e\u200Cf \u200Fok \u200Eok"
+            + " \uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62\uDB40\uDC73\uDB40\uDC63\uDB40\uDC74\uDB40\uDC7F";
+    assertEquals(kept, titleOf(kept), "joiners, selectors, marks and tags are kept");
+  }
+
+  /**
+   * T12: one word past the bound is cut on the last whole grapheme within it, never inside a family
+   * joined by ZWJ or a flag; a single grapheme past the bound is cut at the bound, never to
+   * nothing.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void oneLongWordIsCutOnAWholeGrapheme() {
+    var family = "\uD83D\uDC69\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66";
+    assertEquals(7, family.codePointCount(0, family.length()));
+    assertEquals("x" + family.repeat(11), titleOf("x" + family.repeat(12)), "a family whole");
+    var flag = "\uD83C\uDDFA\uD83C\uDDF8";
+    assertEquals("x" + flag.repeat(39), titleOf("x" + flag.repeat(40)), "a flag whole");
+    var zalgo = "e" + "\u0301".repeat(100);
+    assertEquals(
+        zalgo.substring(0, ChatListing.TITLE_MOST), titleOf(zalgo), "one grapheme past the bound");
+  }
+
+  /** T13: only a message is a title: a mode set before the first message is passed over. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aModeSetBeforeTheFirstMessageIsNoTitle() {
+    var session = bench.samsChat();
+    as("sam", () -> bench.host.answers().mode(session, Map.of("mode", "plan")));
+    assertEquals(List.of("mode_set"), bench.kinds(session));
+
+    bench.send(session, "Plan the berths");
+
+    assertEquals("Plan the berths", only(listed("sam", "try")).get("title"));
+  }
+
+  /** T14: another chat's message, the person's own or another's, never titles a chat. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void anotherChatsMessageNeverTitlesMine() {
+    var untitled = bench.samsChat();
+    var at = Instant.parse("2026-11-27T08:00:00Z");
+    var tomId = bench.fdes.byHandle("tom").orElseThrow().id();
+    for (var other :
+        List.of(
+            chat("toms", "acme", tomId, "try", at), chat("mine", "acme", bench.samId, "try", at))) {
+      bench.store.open(other);
+      new ChatLog(bench.store, other.id(), timing, () -> {})
+          .log(new ChatWire.Message("Said in " + other.id(), false));
+    }
+
+    var rows = listed("sam", "try");
+
+    assertEquals(List.of(untitled, "mine"), names(rows));
+    assertFalse(rows.getFirst().containsKey("title"), rows.getFirst().toString());
+    assertEquals("Said in mine", rows.get(1).get("title"));
   }
 
   /**
