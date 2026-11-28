@@ -170,8 +170,9 @@ public final class TabStrip: NSView {
         let countWidth = TabRow.countSide - Look.Space.s
         count.frame = CGRect(x: placed(Double(bounds.width) - TabRow.countSide, width: countWidth), y: (height - TabRow.addSide) / 2, width: countWidth, height: TabRow.addSide)
         count.isHidden = !showsTabs || !row.scrolls
-        fades.before.frame = CGRect(x: placed(leading, width: TabRow.fade), y: 0, width: TabRow.fade, height: height)
-        fades.after.frame = CGRect(x: placed(leading + row.room - TabRow.fade, width: TabRow.fade), y: 0, width: TabRow.fade, height: height)
+        let margins = row.margins
+        fades.before.frame = CGRect(x: placed(leading, width: margins.before), y: 0, width: margins.before, height: height)
+        fades.after.frame = CGRect(x: placed(leading + row.room - margins.after, width: margins.after), y: 0, width: margins.after, height: height)
         fades.before.isHidden = !showsTabs || !row.fadesBefore
         fades.after.isHidden = !showsTabs || !row.fadesAfter
         fades.before.solidOnTheLeft = !rightToLeft
@@ -250,8 +251,9 @@ public final class TabStrip: NSView {
     }
 }
 
-/// The fade over an edge of the strip with tabs past it: the chrome, solid at the edge and gone at
-/// its inner side. It takes no click: one on it reaches the tab under it.
+/// The fade over an edge of the strip with tabs past it, over all the room the tab past it shows
+/// in: the chrome, solid at the edge and gone at its inner side. It takes no click: one on it
+/// reaches the tab under it.
 @MainActor
 final class StripFade: NSView {
     private let gradient = CAGradientLayer()
@@ -298,7 +300,7 @@ final class StripFade: NSView {
 }
 
 /// A tab's mark as its menu items draw it: a 10 pt slot for its state's mark, empty for now, then
-/// its form's icon, one template image AppKit inks as the menu's text.
+/// its form's icon, one template image AppKit inks as the menu's text, drawn when it is made.
 @MainActor
 enum TabMark {
     static let slot = 10.0
@@ -308,10 +310,17 @@ enum TabMark {
         let configuration = NSImage.SymbolConfiguration(pointSize: Look.Step.callout.points, weight: .regular)
         let icon = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(configuration) ?? NSImage()
         let size = NSSize(width: slot + Look.Space.s + Double(icon.size.width), height: max(Double(icon.size.height), slot))
-        let image = NSImage(size: size, flipped: false) { _ in
-            icon.draw(in: NSRect(x: slot + Look.Space.s, y: (Double(size.height) - Double(icon.size.height)) / 2, width: Double(icon.size.width), height: Double(icon.size.height)))
-            return true
-        }
+        let image = NSImage(size: size)
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int((Double(size.width) * 2).rounded(.up)), pixelsHigh: Int((Double(size.height) * 2).rounded(.up)),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return image }
+        bitmap.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        icon.draw(in: NSRect(x: slot + Look.Space.s, y: (Double(size.height) - Double(icon.size.height)) / 2, width: Double(icon.size.width), height: Double(icon.size.height)))
+        NSGraphicsContext.restoreGraphicsState()
+        image.addRepresentation(bitmap)
         image.isTemplate = true
         return image
     }

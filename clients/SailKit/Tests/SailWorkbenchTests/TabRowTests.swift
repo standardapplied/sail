@@ -48,6 +48,7 @@ import Testing
         #expect(Self.row(30, window: 480).revealing(29).first == 29)
         #expect(Self.row(0, window: 480).shown == 0 && Self.row(0, window: 480).add == 0)
         #expect(three.add == three.room + TabRow.gap && twelve.add == twelve.room + TabRow.gap)
+        #expect(three.margins.before == 0 && three.margins.after == 0 && Self.row(0, window: 480).margins.after == 0)
     }
 
     /// A step a tab: from the first tab to the second and third, the tabs keep their width and the
@@ -76,12 +77,12 @@ import Testing
             let shownEnd = try #require(row.start(of: last)) + row.width
             if row.fadesBefore {
                 let before = try #require(row.start(of: row.first - 1), "from \(row.first) the tab before shows nothing")
-                #expect(before < 0 && before + row.width <= row.inset - TabRow.gap + 1e-9 && row.inset >= TabRow.fade)
+                #expect(before < 0 && before + row.width <= row.inset - TabRow.gap + 1e-9 && row.inset >= TabRow.fade && row.margins.before == row.inset)
                 #expect(row.start(of: row.first - 2) == nil)
             }
             if row.fadesAfter {
                 let after = try #require(row.start(of: last + 1), "from \(row.first) the tab after shows nothing")
-                #expect(after == shownEnd + TabRow.gap && row.room - shownEnd >= TabRow.fade)
+                #expect(after == shownEnd + TabRow.gap && row.room - shownEnd >= TabRow.fade && row.margins.after == row.room - shownEnd)
                 #expect(row.start(of: last + 2) == nil)
             }
         }

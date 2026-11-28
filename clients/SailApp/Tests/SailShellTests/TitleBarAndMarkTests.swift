@@ -128,10 +128,12 @@ import Testing
         return strip
     }
 
+    /// The tabs a person sees whole: in the lane and under no fade.
     static func visible(_ strip: TabStrip) -> [Int] {
-        strip.tabs.indices.filter { index in
-            let tab = strip.tabs[index]
-            return !tab.isHidden && strip.lane.bounds.contains(tab.frame)
+        let fades = [strip.fades.before, strip.fades.after].filter { !$0.isHidden }.map(\.frame)
+        return strip.tabs.indices.filter { index in
+            let tab = strip.tabs[index], frame = tab.convert(tab.bounds, to: strip)
+            return !tab.isHidden && strip.lane.bounds.contains(tab.frame) && !fades.contains { $0.intersects(frame) }
         }
     }
 
@@ -144,7 +146,7 @@ import Testing
         #expect(three.tabs.allSatisfy { !$0.isHidden && abs(Double($0.frame.width) - TabRow.widest) < 0.5 })
         let strip = try Self.shown(12, selected: 6)
         let whole = Self.visible(strip)
-        #expect(whole == Array(0 ..< 7) && strip.tabs.allSatisfy { abs(Double($0.frame.width) - TabRow.narrowest) < 0.5 }, "twelve tabs show \(whole) whole")
+        #expect(whole == Array(0 ..< 7) && strip.tabs.filter { !$0.isHidden }.allSatisfy { abs(Double($0.frame.width) - TabRow.narrowest) < 0.5 }, "twelve tabs show \(whole) whole")
         #expect(!strip.count.isHidden && strip.count.attributedTitle.string == "12" && abs(Double(strip.count.frame.maxX) - (1094 - Look.Space.s)) < 0.5,
                 "the count \(strip.count.attributedTitle.string) stands at \(strip.count.frame)")
         #expect(strip.fades.before.isHidden && !strip.fades.after.isHidden && strip.fades.after.solidOnTheLeft == false)
@@ -222,7 +224,8 @@ import Testing
         bench.apply()
         let menu = bench.tabsMenu()
         let titles = bench.model.tabs.map { bench.model.title(of: $0.id) }
-        #expect(menu.items.count == 12 && menu.items.map(\.toolTip) == titles)
+        try #require(menu.items.count == 12)
+        #expect(menu.items.map(\.toolTip) == titles)
         #expect(menu.items.map(\.keyEquivalent) == ["1", "2", "3", "4", "5", "6", "7", "8", "", "", "", "9"])
         #expect(menu.items.allSatisfy { $0.keyEquivalentModifierMask == .command && $0.target === bench })
         #expect(menu.items.map { $0.state == .on } == bench.model.tabs.map { $0.id == bench.model.selected })
@@ -260,7 +263,8 @@ import Testing
         let fifth = try #require(bench.model.tabs[4].layout.leaves.first)
         _ = bench.model.close(fifth)
         bench.apply()
-        #expect(tabs().count == 11 && tabs()[1].title == "deploy" && tabs().map(\.keyEquivalent) == ["1", "2", "3", "4", "5", "6", "7", "8", "", "", "9"],
+        try #require(tabs().count == 11, "after a rename and a close the Window menu lists \(Self.said(tabs()))")
+        #expect(tabs()[1].title == "deploy" && tabs().map(\.keyEquivalent) == ["1", "2", "3", "4", "5", "6", "7", "8", "", "", "9"],
                 "after a rename and a close the Window menu lists \(Self.said(tabs()))")
         bench.change { $0.moveTab(ids[0], to: 3) }
         bench.change { $0.select(ids[2]) }

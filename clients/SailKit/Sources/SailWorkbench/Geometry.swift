@@ -211,6 +211,12 @@ public struct TabRow: Equatable, Sendable {
         first + shown < tabs
     }
 
+    /// The room past the tabs shown whole at the leading edge and at the trailing one: where the
+    /// tab past a fading edge shows, under its fade.
+    public var margins: (before: Double, after: Double) {
+        (inset, shown == 0 ? 0 : max(0, room - inset - Double(shown) * width - Self.gap * Double(shown - 1)))
+    }
+
     /// Where `+` starts, from the strip's leading edge.
     public var add: Double {
         tabs == 0 ? 0 : room + Self.gap
