@@ -132,7 +132,8 @@ import Testing
 
     @Test func aTypeThisAppDoesNotKnowIsKeptWithItsSeqAndThePageReads() throws {
         let page = try Self.page(try Exchange("chat-items").altered(at: ["items", 2, "type"], to: "drydock"))
-        #expect(page.items.count == 5 && page.items[2].seq == 3 && page.items[2].at.milliseconds == Goldens.pinnedMilliseconds)
+        try #require(page.items.count == 5)
+        #expect(page.items[2].seq == 3 && page.items[2].at.milliseconds == Goldens.pinnedMilliseconds)
         #expect(page.items[2].body == .unknown("drydock"))
         let detail = try Self.page(try Exchange("chat-items").altered(at: ["items", 2, "detail", "type"], to: "telescope"))
         guard case let .tool(tool) = detail.items[2].body else { Issue.record("not a tool"); return }
