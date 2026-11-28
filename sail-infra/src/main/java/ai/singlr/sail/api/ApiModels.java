@@ -1136,8 +1136,8 @@ record AgentsResponse(List<AgentView> agents) implements Mappable {
 /**
  * A harness's two ways in, as every route that names a harness says them: its own sign-in, which a
  * person makes inside a session of it ({@code sign_in}: its name, how it goes, and what a person
- * must do first that the line cannot hold, {@code more}, said only where there is something), and the kinds of
- * key it takes ({@code kinds}: each one's name, label and how to make one).
+ * must do first that the line cannot hold, {@code more}, said only where there is something), and
+ * the kinds of key it takes ({@code kinds}: each one's name, label and how to make one).
  */
 record HarnessWaysIn(Harness harness) {
   Map<String, Object> signIn() {

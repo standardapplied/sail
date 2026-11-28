@@ -96,11 +96,11 @@ final class ClaudeCodeChat implements HarnessChat {
    * one Claude Code says ({@code init}, {@code status}). In plan mode the recorded turns ran on a
    * model other than the one {@code --model} named, until the plan was approved. Never asks ({@code
    * bypassPermissions}) is not offered: it was never recorded at a chat's start or as a switch.
-   * Each mode's words, one line, say only what a recording shows it doing (asserted, claim by claim,
-   * in {@code LiveChatTest.everyModeWordIsARecordedDecision}): Asks first asked before a Write and a
-   * command, and ran {@code sleep} and {@code echo} unasked; Edits freely ran a Write and {@code
-   * rm}, {@code mv}, {@code cp}, {@code sed -i} and {@code nice rm} inside the workspace unasked,
-   * and asked before {@code rm} outside it. Its words claim nothing of elsewhere: its
+   * Each mode's words, one line, say only what a recording shows it doing (asserted, claim by
+   * claim, in {@code LiveChatTest.everyModeWordIsARecordedDecision}): Asks first asked before a
+   * Write and a command, and ran {@code sleep} and {@code echo} unasked; Edits freely ran a Write
+   * and {@code rm}, {@code mv}, {@code cp}, {@code sed -i} and {@code nice rm} inside the workspace
+   * unasked, and asked before {@code rm} outside it. Its words claim nothing of elsewhere: its
    * documentation's {@code additionalDirectories} are not named, and no word says it is limited to
    * the workspace.
    */
@@ -128,10 +128,7 @@ final class ClaudeCodeChat implements HarnessChat {
             "Changes files in this workspace without asking.",
             false),
         ClaudeCode.permissionMode(
-            "plan",
-            "Plans first",
-            "Changes nothing until you approve its plan.",
-            false));
+            "plan", "Plans first", "Changes nothing until you approve its plan.", false));
   }
 
   /** What each of Claude Code's tools does, by its name; a tool an MCP server serves is MCP's. */

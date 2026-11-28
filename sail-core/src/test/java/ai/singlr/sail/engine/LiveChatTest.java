@@ -52,9 +52,8 @@ class LiveChatTest {
       "Let it work in the folder `/home/dev/workspace`, for this session only.";
 
   private static final String EDITS_FREELY =
-      "Switch this chat to Edits freely: Edits files, and runs file commands such as rm, mv, cp"
-          + " and sed, inside this workspace and any folder you let it work in, without asking; it"
-          + " still asks before such a command anywhere else. It stays for the rest of this chat.";
+      "Switch this chat to Edits freely: Changes files in this workspace without asking. It stays"
+          + " for the rest of this chat.";
 
   private static Detail written(String path, String text) {
     return new Detail.Edit(

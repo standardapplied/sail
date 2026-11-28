@@ -311,38 +311,19 @@ final class ClaudeCode implements Harness {
   public List<Mode> modes() {
     return List.of(
         new Mode(
-            "default",
-            "Claude Code's own",
-            "Starts as Claude Code starts on its own.",
-            "",
-            false),
-        permissionMode(
-            "manual", "Manual", "Asks before it edits or runs a command.", false),
+            "default", "Claude Code's own", "Starts as Claude Code starts on its own.", "", false),
+        permissionMode("manual", "Manual", "Asks before it edits or runs a command.", false),
         permissionMode(
             "acceptEdits",
             "Accept edits",
             "Edits files and runs file commands without asking.",
             false),
+        permissionMode("plan", "Plan", "Changes nothing until you approve its plan.", false),
+        permissionMode("auto", "Auto", "Runs without asking, but blocks risky actions.", false),
         permissionMode(
-            "plan",
-            "Plan",
-            "Changes nothing until you approve its plan.",
-            false),
+            "dontAsk", "Don't ask", "Runs only pre-approved actions; refuses the rest.", false),
         permissionMode(
-            "auto",
-            "Auto",
-            "Runs without asking, but blocks risky actions.",
-            false),
-        permissionMode(
-            "dontAsk",
-            "Don't ask",
-            "Runs only pre-approved actions; refuses the rest.",
-            false),
-        permissionMode(
-            "bypassPermissions",
-            "Bypass permissions",
-            "Runs everything without asking.",
-            true));
+            "bypassPermissions", "Bypass permissions", "Runs everything without asking.", true));
   }
 
   static Mode permissionMode(String name, String label, String about, boolean risky) {

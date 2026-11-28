@@ -12,19 +12,19 @@
             "mode_default": "default",
             "modes": [
               {
-                "about": "Asks before it edits a file or runs a command, except commands it counts as safe, such as sleep or echo, which run without asking.",
+                "about": "Asks before edits and commands, except safe ones.",
                 "label": "Asks first",
                 "mode": "default",
                 "risky": false
               },
               {
-                "about": "Edits files, and runs file commands such as rm, mv, cp and sed, inside this workspace and any folder you let it work in, without asking; it still asks before such a command anywhere else.",
+                "about": "Changes files in this workspace without asking.",
                 "label": "Edits freely",
                 "mode": "acceptEdits",
                 "risky": false
               },
               {
-                "about": "Researches and proposes a plan, and changes nothing until you approve it.",
+                "about": "Changes nothing until you approve its plan.",
                 "label": "Plans first",
                 "mode": "plan",
                 "risky": false
@@ -56,43 +56,43 @@
           "mode_default": "default",
           "modes": [
             {
-              "about": "Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual.",
+              "about": "Starts as Claude Code starts on its own.",
               "label": "Claude Code's own",
               "mode": "default",
               "risky": false
             },
             {
-              "about": "Asks before edits, shell commands and network actions.",
+              "about": "Asks before it edits or runs a command.",
               "label": "Manual",
               "mode": "manual",
               "risky": false
             },
             {
-              "about": "Makes file edits and common filesystem commands without asking.",
+              "about": "Edits files and runs file commands without asking.",
               "label": "Accept edits",
               "mode": "acceptEdits",
               "risky": false
             },
             {
-              "about": "Researches and proposes changes, and edits nothing until you approve the plan.",
+              "about": "Changes nothing until you approve its plan.",
               "label": "Plan",
               "mode": "plan",
               "risky": false
             },
             {
-              "about": "Runs everything, with a classifier reviewing each action first; Manual where auto is not available.",
+              "about": "Runs without asking, but blocks risky actions.",
               "label": "Auto",
               "mode": "auto",
               "risky": false
             },
             {
-              "about": "Refuses anything that would ask, and runs only what is approved beforehand.",
+              "about": "Runs only pre-approved actions; refuses the rest.",
               "label": "Don't ask",
               "mode": "dontAsk",
               "risky": false
             },
             {
-              "about": "Skips every permission prompt and safety check.",
+              "about": "Runs everything without asking.",
               "label": "Bypass permissions",
               "mode": "bypassPermissions",
               "risky": true
@@ -101,7 +101,7 @@
           "sign_in": {
             "how": [
               {
-                "text": "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."
+                "text": "Sign in with Claude when it starts."
               }
             ],
             "name": "Your Claude account"
@@ -132,17 +132,21 @@
           "mode_default": "full-access",
           "modes": [
             {
-              "about": "Runs every command without asking and outside Codex's sandbox.",
+              "about": "Runs every command without asking.",
               "label": "Full access",
               "mode": "full-access",
               "risky": true
             }
           ],
-          "note": "Sail starts Codex CLI in a workspace with full access, running every command without asking and without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's container.",
           "sign_in": {
             "how": [
               {
-                "text": "Codex CLI asks you to sign in with your ChatGPT account when it starts, once in each workspace. Choose “Sign in with Device Code” there, after turning it on in your ChatGPT security settings."
+                "text": "Choose “Sign in with Device Code” when it starts."
+              }
+            ],
+            "more": [
+              {
+                "text": "First turn on device code sign-in in your ChatGPT security settings."
               }
             ],
             "name": "Your ChatGPT account"

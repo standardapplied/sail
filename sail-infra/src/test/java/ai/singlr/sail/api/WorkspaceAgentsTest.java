@@ -255,7 +255,7 @@ class WorkspaceAgentsTest {
             "label",
             "Plan",
             "about",
-            "Researches and proposes changes, and edits nothing until you approve the plan.",
+            "Changes nothing until you approve its plan.",
             "risky",
             false),
         ((List<?>) claude.get("modes")).get(3));
