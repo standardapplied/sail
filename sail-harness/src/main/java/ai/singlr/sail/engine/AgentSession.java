@@ -478,7 +478,7 @@ public final class AgentSession {
    */
   private static final String STARTED =
       """
-      ticks() { set -f; set -- $(tr '\n' ' ' < "$1" 2>/dev/null | sed 's/.*) //'); printf %s "${20}"; }
+      ticks() { set -f; set -- $(tr '\\n' ' ' < "$1" 2>/dev/null | sed 's/.*) //'); printf %s "${20}"; }
       pid=$(tr -d '[:space:]' < "$1" 2>/dev/null)
       case "$pid" in ''|0*|*[!0-9]*) printf gone; exit 0 ;; esac
       mine=$(ticks "$2")
