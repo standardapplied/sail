@@ -1032,14 +1032,15 @@ chat_walks() {
 # A chat's person answering what Claude Code asks, on the API as a client calls it, each effect
 # checked in the workspace itself: a command denied with a token comes back as the call's result,
 # exactly, and never ran; asked again and allowed, it ran; one allowed always keeps the rule Claude
-# Code suggested and switches the chat to Edits freely, as its card says, and the same command then
-# asks nothing; a second answer, an invented id and another member are refused, an idle chat has no
-# turn to stop, Never asks is refused, and Ask first, then Edits freely, are set between turns, each
-# said back by Claude Code. The command allowed always is a touch, as recorded (S1's probe 01): a
-# command that writes through a redirect is asked again by Claude Code 2.1.332 even with its own
-# exact rule kept (probe 6), so its card must offer no always, which the first command's card
-# shows on the harness a workspace installs now. A wait that runs out prints what the
-# chat said since its step. The chat is ended, the login removed, the key file and both tokens gone,
+# Code suggested and switches the chat to Edits freely, as its card says, and, the chat back in Ask
+# first so only the rule can let it through, the same command then asks nothing; a second answer,
+# an invented id and another member are refused, an idle chat has no turn to stop, Never asks is
+# refused, and Edits freely, then Ask first, are set between turns, each said back by Claude Code.
+# The command allowed always is a touch, as recorded (S1's probe 01): a command that writes through
+# a redirect is asked again by Claude Code 2.1.332 with a kept rule that allowed it, exact or a
+# prefix (probes 6 and 7), so Sail offers its card no always from the command itself, whatever rule
+# Claude Code suggests, which the first command's card shows on the harness a workspace installs
+# now. A wait that runs out prints what the chat said since its step. The chat is ended, the login removed, the key file and both tokens gone,
 # whatever failed.
 readonly CHAT_ANSWERS='set -u
 handle=$1 project=$2 workspace=$3 other=$4
@@ -1131,7 +1132,7 @@ say "printf fleet-%s 7341 > asked.txt"
 await asked 7341
 read -r denied call_id offer <<< "$found"
 [ "$denied" != "-" ] || fail "no permission item for the command holding 7341 arrived"
-[ "$offer" = once ] || fail "the card offered always for a command that writes through a redirect, which Claude Code asked for again with its rule kept (probe 6)"
+[ "$offer" = once ] || fail "the card offered always for a command that writes through a redirect, which Sail withholds whatever rule Claude Code suggests: Claude Code asked for one again with its rule kept (probes 6 and 7)"
 status=$(answer "$denied" "{\"decision\":\"deny\",\"message\":\"DENIED-tamarind-4417\"}")
 [ "$status" = 200 ] || fail "the denial was refused: HTTP $status"
 await done "$call_id"
@@ -1162,13 +1163,18 @@ await ended -
 [ "$(python3 -I /tmp/chat-step.py mode "$mark" acceptEdits)" = yes ] || fail "allow always did not switch the chat to Edits freely, as its card said"
 in_workspace cat .claude/settings.local.json | python3 -I -c "import json, sys; sys.exit(0 if \"Bash(touch always-7341.txt)\" in json.load(sys.stdin)[\"permissions\"][\"allow\"] else 1)" ||
   fail "settings.local.json does not hold the rule Claude Code suggested"
+mark=$after
+status=$(call "$token" PUT "/v1/sessions/$session/chat/mode" "{\"mode\":\"default\"}")
+[ "$status" = 200 ] || fail "default was refused between turns: HTTP $status"
+await mode default
+[ "$found" = yes ] || fail "Claude Code did not say it is back in default"
 in_workspace rm -f always-7341.txt
 say "touch always-7341.txt"
 await settled -
 [ "$(python3 -I /tmp/chat-step.py unasked "$mark" -)" = unasked ] || fail "the command allowed always asked again"
 [ "$found" = yes ] || fail "the repeated turn did not end"
 in_workspace test -e always-7341.txt || fail "the command allowed always did not run again"
-echo "always: the suggested rule is kept, the chat is in Edits freely, and the same command ran again without asking"
+echo "always: the suggested rule is kept, the chat is in Edits freely, and back in default the same command ran again without asking"
 status=$(answer "$denied" "{\"decision\":\"allow\"}")
 [ "$status" = 409 ] && grep -qF "\"request_answered\"" /tmp/chat.json || fail "a second answer was not refused: HTTP $status"
 status=$(answer 7f35b673-a8fa-4967-a1d0-a52e2b28cf73 "{\"decision\":\"allow\"}")
@@ -1179,14 +1185,14 @@ status=$(call "$token" POST "/v1/sessions/$session/chat:interrupt")
 [ "$status" = 200 ] && grep -qF "\"stopping\": false" /tmp/chat.json || fail "an idle chat did not say it had nothing to stop: HTTP $status"
 status=$(call "$token" PUT "/v1/sessions/$session/chat/mode" "{\"mode\":\"bypassPermissions\"}")
 [ "$status" = 422 ] || fail "Never asks was not refused: HTTP $status"
-for chosen in default acceptEdits; do
+for chosen in acceptEdits default; do
   mark=$after
   status=$(call "$token" PUT "/v1/sessions/$session/chat/mode" "{\"mode\":\"$chosen\"}")
   [ "$status" = 200 ] || fail "$chosen was refused between turns: HTTP $status"
   await mode "$chosen"
   [ "$found" = yes ] || fail "Claude Code did not say it is in $chosen"
 done
-echo "refused: a second answer, an invented id, $other, Never asks; an idle stop is none; default, then acceptEdits, set and said"
+echo "refused: a second answer, an invented id, $other, Never asks; an idle stop is none; acceptEdits, then default, set and said"
 echo "ANSWERS GIVEN"'
 
 chat_answers() {
@@ -2779,7 +2785,7 @@ storage() {
     chat_walks "$run" main eng acme eng-own client
   check "$run" "main holds the fleet's Claude Code key where only root reads it, for eng's answers" \
     place_secret "$run" main fleet-anthropic-key anthropic
-  check "$run" "eng answers what Claude Code asks in a chat in eng-own: a command writing through a redirect is offered no always, and denied with a token comes back as the call's result exactly and never ran, asked again and allowed it ran, allowed always its suggested rule is kept, the chat is in Edits freely, and it then asks nothing; a second answer, an invented id and client are refused, an idle chat has nothing to stop, Never asks is refused, and Ask first then Edits freely set between turns are each said back; the key, the login and the tokens removed after" \
+  check "$run" "eng answers what Claude Code asks in a chat in eng-own: a command writing through a redirect is offered no always whatever rule Claude Code suggests for it, and denied with a token comes back as the call's result exactly and never ran, asked again and allowed it ran, allowed always its suggested rule is kept, the chat is in Edits freely, and back in Ask first it then asks nothing; a second answer, an invented id and client are refused, an idle chat has nothing to stop, Never asks is refused, and Edits freely then Ask first set between turns are each said back; the key, the login and the tokens removed after" \
     chat_answers "$run" main eng acme eng-own client
   check "$run" "main holds the fleet's Claude Code key again where only root reads it, for eng's listed chat" \
     place_secret "$run" main fleet-anthropic-key anthropic
