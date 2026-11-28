@@ -514,18 +514,17 @@ actor Desk: Transport {
         items(list).map(\.name)
     }
 
-    /// The header says what the user menu says: its name (the disc's initial), handle and role, then
-    /// the email.
-    @Test func theHeaderSaysTheMenusNameHandleAndRole() async throws {
+    /// The header is the person's name (the disc's initial) and, under it, the email only: no
+    /// handle, no role. The control plane's row says no "Connected" while it is.
+    @Test func theHeaderIsTheNameAndTheEmail() async throws {
         let (pane, window) = try await Self.signedIn(try Desk(Self.goldens))
         defer { window.orderOut(nil) }
         let content = pane.flow.menuContent
         #expect(pane.heading.stringValue == content.name && content.name == "Uday" && pane.disc.name == content.name)
-        #expect(pane.handle.stringValue == content.handle && content.handle == "@uday")
-        #expect(pane.role.said == content.role && content.role == "Admin" && pane.role.plain && !pane.role.isHidden)
-        #expect(pane.email.stringValue == "uday@example.com")
+        #expect(pane.email.stringValue == "uday@example.com" && pane.state.isHidden)
+        #expect(WorkspacesViewTests.found(Pill.self, in: pane).allSatisfy(\.isHidden), "a pill shows on a connected account")
         #expect(pane.disc.drawn == pane.look.headerAvatar && pane.disc.drawn.fill != nil, "the disc is not the page's filled one: \(pane.disc.drawn)")
-        #expect(pane.text.hasPrefix("Uday\n@uday · Admin · uday@example.com\n127.0.0.1:7979 · Connected\nSigned in until "), "\(pane.text)")
+        #expect(pane.text.hasPrefix("Uday\nuday@example.com\n127.0.0.1:7979\nSigned in until "), "\(pane.text)")
     }
 
     /// Four groups in order, each under its eyebrow, and no primary button anywhere, a row chosen or
@@ -864,11 +863,12 @@ actor Desk: Transport {
         #expect(pane.banner === banner, "a check out of reach again made the banner, and its Try Again, again")
         #expect(pane.planeLines == ["Sail cannot reach 127.0.0.1:7979.", "Check that this Mac is on its network."] && pane.state.said == "Can’t reach" && pane.state.state == .error)
         #expect(pane.passkeyFrame.alphaValue == 1 && pane.keyFrame.alphaValue == 1 && Self.names(pane.passkeyList).count == 2)
+        #expect(!pane.state.isHidden && pane.text.contains("127.0.0.1:7979 · Can’t reach"), "\(pane.text)")
         try await desk.answer("whoami")
         pane.tryAgain(nil)
         await pane.acting?.value
         await pane.loading?.value
-        #expect(pane.banner == nil && pane.state.said == "Connected")
+        #expect(pane.banner == nil && pane.state.isHidden && pane.text.contains("\n127.0.0.1:7979\n"), "\(pane.text)")
     }
 
     /// `root` and every view in it laid out right to left, as the drive lays them out.
@@ -959,45 +959,6 @@ actor Desk: Transport {
         await pane.loading?.value
         let asked = await desk.asked
         #expect(asked.filter { $0 == "GET /v1/passkeys" }.count == listed + 1 && !pane.planeLines.isEmpty, "asked \(asked), said \(pane.planeLines)")
-    }
-
-    /// The user menu's Keys shows the Account view scrolled to its keys, also once the keys come.
-    @Test func keysInTheMenuLandsAtTheKeys() async throws {
-        let desk = try Desk(Self.goldens)
-        let shell = try ShellApp(
-            fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in Signs() }, connect: { _ in desk }, vault: OneSession(fde: "uday", lasts: Self.month),
-            defaults: ReattachTests.defaults()
-        )
-        shell.window.setFrame(NSRect(origin: .zero, size: ShellApp.leastFrame), display: false)
-        shell.window.orderFront(nil)
-        defer { shell.window.orderOut(nil) }
-        UserMenuTests.own(shell)
-        shell.flow.show(Self.someone)
-        try UserMenuTests.open(shell, shell.flow.menuContent)
-        let keys = try #require(shell.userMenu.view.items.first { $0.item == .keys })
-        #expect(keys.accessibilityPerformPress())
-        await shell.account.loading?.value
-        shell.account.layoutSubtreeIfNeeded()
-        let pane = shell.account
-        let most = max(Double(pane.scroll.documentView?.frame.height ?? 0) - Double(pane.scroll.contentSize.height), 0)
-        let target = min(max(Double(pane.eyebrows[2].frame.minY) - PageColumn.padding.top, 0), most)
-        #expect(shell.rail.selected == .account && !shell.userMenu.isOpen && target > 0, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"), the keys at \(target)")
-        #expect(abs(pane.scrolledTo - target) < 1, "scrolled to \(pane.scrolledTo), the keys at \(target)")
-    }
-
-    /// Keys chosen while nothing could be asked (no one signed in yet) leaves no jump behind: the
-    /// next load, asked for itself, leaves the view where it is.
-    @Test func keysChosenWhenNothingIsAskedLeavesTheNextLoadWhereItIs() async throws {
-        let pane = try Self.pane(remembering: "uday", try Desk(Self.goldens), lasts: Self.month)
-        let window = Self.shown(pane, height: 400)
-        defer { window.orderOut(nil) }
-        pane.scrollToKeys()
-        pane.scroll.contentView.scroll(to: .zero)
-        await pane.flow.refresh()
-        await pane.loading?.value
-        pane.layoutSubtreeIfNeeded()
-        let most = Double(pane.scroll.documentView?.frame.height ?? 0) - Double(pane.scroll.contentSize.height)
-        #expect(most > 0 && pane.scrolledTo == 0, "the load after went to the keys: scrolled to \(pane.scrolledTo) of \(most)")
     }
 
     /// A key stored from the Account view is the one New Session starts with, as one stored from

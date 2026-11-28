@@ -128,8 +128,6 @@ struct Step: Decodable {
     var accountRow: [String]?
     /// The Account view shows these words, whatever is under way (a check held in mid-air).
     var accountSays: String?
-    /// The Account view is shown, scrolled to its keys as far as it scrolls.
-    var accountAtKeys: Bool?
     /// From now on a sign-in ends this many days from now: the recorded sign-in's answer with its
     /// `expires_at` moved.
     var sessionEndsIn: Double?

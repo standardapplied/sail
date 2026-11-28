@@ -12,7 +12,7 @@ import Testing
         let menu = UserMenuContent.signedIn(handle: "uday", address: "sail.example.com", whoami: Self.uday, unreachable: false, refreshing: false)
         #expect(menu.name == "Uday Chandra" && menu.disc == .initial("U") && menu.detail == "@uday · Admin")
         #expect(menu.address == "sail.example.com" && menu.plane == .connected)
-        #expect(menu.items == [.account, .keys, .signOut])
+        #expect(menu.items == [.account, .signOut])
     }
 
     @Test func withNoNameFromTheServerTheHandleIsTheName() {

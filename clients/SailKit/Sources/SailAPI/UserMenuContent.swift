@@ -25,7 +25,7 @@ public struct UserMenuContent: Equatable, Sendable {
 
     /// What the menu offers, in its order; Appearance is offered whoever is signed in.
     public enum Item: String, Equatable, Sendable, CaseIterable {
-        case account = "Account", keys = "Keys", signOut = "Sign Out", signIn = "Sign In"
+        case account = "Account", signOut = "Sign Out", signIn = "Sign In"
 
         /// The key that chooses it with ⌘ from anywhere.
         public var key: String? {
@@ -70,7 +70,7 @@ public struct UserMenuContent: Equatable, Sendable {
         let plane = Plane(unreachable: unreachable, refreshing: refreshing)
         return Self(
             name: name, disc: name.first.map { .initial(String($0).uppercased()) }, handle: "@\(handle)", role: role,
-            detail: "@\(handle)" + (role.map { " · \($0)" } ?? ""), address: address, plane: plane, items: [.account, .keys, .signOut]
+            detail: "@\(handle)" + (role.map { " · \($0)" } ?? ""), address: address, plane: plane, items: [.account, .signOut]
         )
     }
 }

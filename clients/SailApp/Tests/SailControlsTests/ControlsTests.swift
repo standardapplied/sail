@@ -562,17 +562,12 @@ import Testing
         }
     }
 
-    /// A pill says words of its own in its state's paint, changed as they change; a plain pill says
-    /// its words with no dot, in the secondary ink, as the page's `.pill.plain` does.
+    /// A pill says words of its own in its state's paint, changed as they change.
     @Test(arguments: [Look.light, .dark])
-    func aPillSaysItsOwnWordsAndAPlainOneInTheSecondaryInk(_ look: Look) throws {
+    func aPillSaysItsOwnWordsInItsStatesPaint(_ look: Look) throws {
         let state = Pill(.running, look: look, mono: try Self.mono())
         state.words = "Connected"
         #expect(state.said == "Connected" && state.accessibilityLabel() == "Connected" && state.paint.text == PillPaint(.running, look: look).text && !state.dot.isHidden)
-        let role = Pill(plain: "", size: .small, look: look, mono: try Self.mono())
-        let narrow = Double(role.intrinsicContentSize.width)
-        role.words = "Admin"
-        #expect(role.plain && role.said == "Admin" && role.paint.text == look.textSecondary && role.dot.isHidden && Double(role.intrinsicContentSize.width) > narrow)
     }
 
     /// An empty state with no body keeps no room for one: its action stands under its title as it
