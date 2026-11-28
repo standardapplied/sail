@@ -1,0 +1,358 @@
+{
+  "ended": false,
+  "items": [
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "queued": false,
+      "seq": 1,
+      "text": "hi",
+      "type": "message"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "message": 1,
+      "seq": 2,
+      "type": "delivered"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "seq": 3,
+      "type": "told",
+      "words": "Sail restarted, so the turn stopped."
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "by": "dana",
+      "decision": "allow_always",
+      "request": "req-1",
+      "seq": 4,
+      "type": "answered"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "by": "dana",
+      "mode": "plan",
+      "seq": 5,
+      "type": "mode_set"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "commands": [
+        "compact"
+      ],
+      "mode": "default",
+      "seq": 6,
+      "skills": [
+        "review"
+      ],
+      "type": "session"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "mode": "acceptEdits",
+      "seq": 7,
+      "type": "mode_changed"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "new_paragraph": true,
+      "seq": 8,
+      "text": "Reading the file.",
+      "type": "text"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "new_paragraph": false,
+      "seq": 9,
+      "text": " and the next.",
+      "type": "text",
+      "under": "toolu_sub"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "detail": {
+        "background": true,
+        "clipped": false,
+        "line": "./gradlew test",
+        "type": "command"
+      },
+      "id": "toolu_cmd",
+      "kind": "command",
+      "seq": 10,
+      "type": "tool",
+      "words": "Run the tests"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "detail": {
+        "changes": [
+          {
+            "after": "new",
+            "before": "old",
+            "clipped": false,
+            "everywhere": true,
+            "kind": "change",
+            "path": "a.txt"
+          },
+          {
+            "after": "made",
+            "clipped": false,
+            "everywhere": false,
+            "kind": "add",
+            "path": "b.txt"
+          },
+          {
+            "before": "gone",
+            "clipped": false,
+            "everywhere": false,
+            "kind": "delete",
+            "path": "c.txt"
+          },
+          {
+            "after": "y",
+            "before": "x",
+            "clipped": false,
+            "everywhere": false,
+            "from": "d.txt",
+            "kind": "move",
+            "path": "e.txt"
+          }
+        ],
+        "type": "edit"
+      },
+      "id": "toolu_edit",
+      "kind": "edit",
+      "seq": 11,
+      "type": "tool",
+      "under": "toolu_sub",
+      "words": "Edit four files"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "detail": {
+        "clipped": false,
+        "path": "README.md",
+        "type": "read"
+      },
+      "id": "toolu_read",
+      "kind": "read",
+      "seq": 12,
+      "type": "tool",
+      "words": "Read the README"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "detail": {
+        "clipped": false,
+        "type": "search",
+        "what": "TODO",
+        "where": "src"
+      },
+      "id": "toolu_find",
+      "kind": "search",
+      "seq": 13,
+      "type": "tool",
+      "words": "Find the TODOs"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "detail": {
+        "address": "https://example.com/docs",
+        "clipped": false,
+        "type": "fetch"
+      },
+      "id": "toolu_web",
+      "kind": "web",
+      "seq": 14,
+      "type": "tool",
+      "words": "Fetch the docs"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "detail": {
+        "clipped": false,
+        "input": "{\"id\":7}",
+        "name": "tracker_lookup",
+        "type": "other"
+      },
+      "id": "toolu_mcp",
+      "kind": "mcp",
+      "seq": 15,
+      "type": "tool",
+      "words": "Ask the tracker"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "failed": false,
+      "id": "toolu_cmd",
+      "output": "BUILD SUCCESSFUL",
+      "seq": 16,
+      "type": "tool_done"
+    },
+    {
+      "agent": "agent-1",
+      "always": [
+        {
+          "words": [
+            "Allow ./gradlew test from now on."
+          ]
+        }
+      ],
+      "at": "2026-11-11T09:00:00.656Z",
+      "call": "toolu_cmd",
+      "clipped": false,
+      "detail": {
+        "background": true,
+        "clipped": false,
+        "line": "./gradlew test",
+        "type": "command"
+      },
+      "id": "req-2",
+      "kind": "command",
+      "reason": "It runs a command.",
+      "seq": 17,
+      "type": "permission",
+      "words": "Run the tests"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "call": "toolu_ask",
+      "id": "req-3",
+      "questions": [
+        {
+          "choices": [
+            {
+              "about": "The small one",
+              "clipped": false,
+              "label": "Small"
+            },
+            {
+              "clipped": false,
+              "label": "Large"
+            }
+          ],
+          "clipped": false,
+          "multi_select": false,
+          "question": "Which size?"
+        }
+      ],
+      "seq": 18,
+      "type": "question"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "call": "toolu_plan",
+      "clipped": false,
+      "id": "req-4",
+      "plan": "Change nothing yet.",
+      "seq": 19,
+      "type": "plan"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "id": "req-4",
+      "seq": 20,
+      "type": "withdrawn"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "attempt": 1,
+      "attempts": 10,
+      "clipped": false,
+      "delay_ms": 500,
+      "error": "Overloaded",
+      "seq": 21,
+      "type": "retrying"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "seq": 22,
+      "tokens_after": 30000,
+      "tokens_before": 120000,
+      "trigger": "auto",
+      "type": "compacted"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "seq": 23,
+      "type": "interrupted"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "seq": 24,
+      "type": "refused",
+      "words": "That mode is not one this chat has."
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "seq": 25,
+      "stopped": false,
+      "too_large": true,
+      "type": "unreadable"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "seq": 26,
+      "type": "self_started"
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "login": {
+        "type": "refused"
+      },
+      "seq": 27,
+      "type": "failed",
+      "words": "Your login was refused."
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "login": {
+        "resets": "15:00 UTC",
+        "type": "limited"
+      },
+      "seq": 28,
+      "type": "failed",
+      "words": "Your account is out of quota."
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "login": {
+        "type": "undelivered"
+      },
+      "seq": 29,
+      "type": "failed",
+      "words": "Sail could not hand over your login."
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "clipped": false,
+      "seq": 30,
+      "type": "failed",
+      "words": "The model stopped."
+    },
+    {
+      "at": "2026-11-11T09:00:00.656Z",
+      "duration_ms": 900,
+      "seq": 31,
+      "tokens_in": 100,
+      "tokens_out": 20,
+      "type": "turn_ended"
+    }
+  ]
+}

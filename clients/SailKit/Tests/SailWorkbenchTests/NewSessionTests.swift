@@ -445,4 +445,90 @@ import Testing
         #expect(back.tabs.map { back.title(of: $0.id) } == ["Claude Code · dock", "harbor · dock"])
         #expect(back.panes.values.first { $0.session == "app-a" }?.agent == start)
     }
+
+    /// A Chat person is offered only what chats, in its chat modes, with no Shell; the key always
+    /// where one is stored and the sign-in inside only where the harness chats so.
+    @Test func aChatPersonIsOfferedOnlyWhatChatsInItsChatModesAndNoShell() throws {
+        let agents = try Self.agents("workspace-agents-dock")
+        let claude = try #require(agents.offered.first)
+        var panel = NewSession(agents, memory: ModeMemory(shellLast: true), preference: .chat)
+        #expect(panel.choices == [.harness(claude.harness)] && panel.chosen == .harness(claude.harness))
+        #expect(panel.modes(of: claude.harness).map(\.label) == ["Asks first", "Edits freely", "Plans first"])
+        #expect(panel.forms(of: claude.harness) == [.chat] && panel.mode(of: claude.harness) == "default")
+        panel.choose(mode: "bypassPermissions")
+        #expect(panel.mode(of: claude.harness) == "default", "a mode the harness does not chat in was chosen")
+        panel.choose(mode: "plan")
+        #expect(panel.readiness == .start(AgentStart(harness: claude.harness, display: claude.display, mode: "plan", inside: true, form: .chat)))
+        panel.choose(way: .key)
+        let made = panel.start()
+        let started = try #require(made)
+        #expect(started == AgentStart(harness: claude.harness, display: claude.display, mode: "plan", inside: false, form: .chat))
+        #expect(started.chat == ChatAgent(harness: claude.harness, mode: "plan", inside: false) && panel.memory.forms.isEmpty)
+    }
+
+    @Test func aChatThatDoesNotSignInInsideStartsOnTheKey() throws {
+        let outside = try Exchange("workspace-agents-dock").altered(at: ["offered", 0, "chat", "inside"], to: false)
+        let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, body: outside.body))
+        var panel = NewSession(agents, memory: ModeMemory(ways: ["claude-code": .signIn]), preference: .chat)
+        #expect(panel.way(of: "claude-code") == .key)
+        panel.choose(way: .signIn)
+        #expect(panel.way(of: "claude-code") == .key, "a chat signed in inside where the harness says it does not")
+        let made = panel.start()
+        #expect(made?.inside == false)
+    }
+
+    @Test func aChatPersonWhereNothingChatsIsOfferedNothing() throws {
+        let unchatty = try Exchange("workspace-agents-dock").altered(at: ["offered", 0, "forms"], to: ["terminal"])
+        let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, body: unchatty.body))
+        var panel = NewSession(agents, memory: ModeMemory(), preference: .chat)
+        #expect(panel.choices.isEmpty && panel.readiness == .nothing && NewSessionWords.primary(panel.readiness) == nil)
+        let made = panel.start()
+        #expect(made == nil && panel.memory == ModeMemory())
+    }
+
+    /// Any harness that chats is offered to a Chat person, whatever its name.
+    @Test func aHarnessNoClientHasHeardOfChatsByWhatTheServerSays() throws {
+        var tide = Exchange.madeUpOffer("Tide")
+        let own: [String: Any] = ["mode": "calm", "label": "Calm", "about": "Asks before anything.", "risky": false]
+        tide["forms"] = ["chat"]
+        tide["chat"] = ["modes": [own], "mode_default": "calm", "inside": false]
+        let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, body: try Exchange("workspace-agents-dock").offering([tide]).body))
+        var panel = NewSession(agents, memory: ModeMemory(), preference: .chat)
+        #expect(panel.choices == [.harness("claude-code"), .harness("tide")])
+        panel.choose(.harness("tide"))
+        #expect(panel.readiness == .start(AgentStart(harness: "tide", display: "Tide", mode: "calm", inside: false, form: .chat)))
+        #expect(NewSession(agents, memory: ModeMemory(), preference: .terminal).choices == [.harness("claude-code"), .harness("codex"), .shell])
+    }
+
+    /// Both lists every harness with the forms it opens in as a choice, the form last chosen for it
+    /// first, and the Shell; each form starts in its own modes.
+    @Test func aPersonOfBothChoosesAFormPerHarnessAndItIsRemembered() throws {
+        let agents = try Self.agents("workspace-agents-dock")
+        let (claude, codex) = (try #require(agents.offered.first), try #require(agents.offered.last))
+        var panel = NewSession(agents, memory: ModeMemory(), preference: .both)
+        #expect(panel.choices == [.harness(claude.harness), .harness(codex.harness), .shell])
+        #expect(panel.forms(of: claude.harness) == [.terminal, .chat] && panel.forms(of: codex.harness) == [.terminal])
+        #expect(panel.form(of: claude.harness) == .terminal && panel.modes(of: claude.harness) == claude.modes)
+        panel.choose(form: .chat)
+        #expect(panel.modes(of: claude.harness).map(\.mode) == ["default", "acceptEdits", "plan"])
+        let made = panel.start()
+        let chat = try #require(made)
+        #expect(chat.form == .chat && panel.memory.forms == [claude.harness: .chat])
+        var again = NewSession(agents, memory: panel.memory, preference: .both)
+        #expect(again.form(of: claude.harness) == .chat && again.startsAgain)
+        again.choose(.harness(codex.harness))
+        again.choose(form: .chat)
+        #expect(again.form(of: codex.harness) == .terminal, "a form the harness does not open in was chosen")
+        let terminal = NewSession(agents, memory: panel.memory, preference: .terminal)
+        #expect(terminal.form(of: claude.harness) == .terminal && !terminal.startsAgain, "a chat started again as a terminal")
+    }
+
+    @Test func aTerminalPersonsStartsAreTerminalsAndChooseNoForm() throws {
+        let agents = try Self.agents("workspace-agents-dock")
+        var panel = NewSession(agents, memory: ModeMemory(forms: ["claude-code": .chat]))
+        #expect(panel.preference == .terminal && panel.forms(of: "claude-code") == [.terminal])
+        let made = panel.start()
+        let started = try #require(made)
+        #expect(started.form == .terminal && panel.memory.forms == ["claude-code": .chat])
+    }
 }
