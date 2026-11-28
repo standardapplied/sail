@@ -27,9 +27,11 @@ public struct HTTPRequest: Equatable, Sendable {
     /// `-`, `_` and `~` percent-encoded, and `.` too in a segment: a segment never reads as another
     /// segment, `.` or `..`, and a `+` never reaches the server's form decoding as a space. A query
     /// keeps its dots, as a position the server handed out spells them. A nil query value is left
-    /// out.
-    package init(_ method: HTTPMethod, _ segments: [String], query: [(String, String?)] = [], body: Data? = nil) {
+    /// out. An `action` follows the last segment after a colon, as a route that acts on what the
+    /// path names spells it (`/v1/sessions/{id}:end`).
+    package init(_ method: HTTPMethod, _ segments: [String], action: String? = nil, query: [(String, String?)] = [], body: Data? = nil) {
         let path = segments.map { "/" + Self.escaped($0, keeping: Self.unescaped) }.joined()
+            + (action.map { ":" + Self.escaped($0, keeping: Self.unescaped) } ?? "")
         let parameters = query.compactMap { name, value in
             value.map { "\(Self.escaped(name, keeping: Self.queried))=\(Self.escaped($0, keeping: Self.queried))" }
         }

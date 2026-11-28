@@ -25,6 +25,22 @@ public struct URLSessionTransport: Transport {
         connection = Connection(configuration: configuration)
     }
 
+    /// The session long-polls go on, apart from every other call's: a hold is answered within the
+    /// server's 25 s or when an item arrives, so a request waits twice that before it fails, and a
+    /// chat a person keeps open holds a connection while it waits, so each of many has its own and
+    /// none waits for another's.
+    public static var longPolls: URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 60
+        configuration.httpMaximumConnectionsPerHost = 32
+        return configuration
+    }
+
+    /// A transport for long-polls alone, to the server at `base`.
+    public static func longPoll(base: URL) -> URLSessionTransport {
+        URLSessionTransport(base: base, configuration: longPolls)
+    }
+
     public func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         let request = try urlRequest(request)
         let (body, response) = try await reaching { try await connection.session.data(for: request) }

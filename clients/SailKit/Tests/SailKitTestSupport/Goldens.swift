@@ -174,14 +174,14 @@ public struct Exchange: Sendable {
     }
 
     /// A harness no client has heard of, declared as the server declares one in its own words: its
-    /// own sign-in, a key stored for it, its own mode and, `risky`, a second that warns; refused
-    /// and said `unavailable` where that is given.
+    /// own sign-in, a key stored for it, its own mode and, `risky`, a second that warns, opening
+    /// only as a terminal; refused and said `unavailable` where that is given.
     public static func madeUpOffer(_ display: String, risky: Bool = false, unavailable: String? = nil) -> [String: Any] {
         let own: [String: Any] = ["mode": "own", "label": "\(display)'s own", "about": "Starts as \(display) starts by itself.", "risky": false]
         let reckless: [String: Any] = ["mode": "reckless", "label": "Reckless", "about": "Runs anything without asking.", "risky": true]
         var offer: [String: Any] = [
             "harness": display.lowercased().replacingOccurrences(of: " ", with: "-"), "display": display, "mode_default": "own", "inside": true,
-            "modes": risky ? [own, reckless] : [own],
+            "modes": risky ? [own, reckless] : [own], "forms": ["terminal"],
             "kinds": [["kind": "token", "label": "\(display) token", "how": [["text": "Create a token in \(display)'s settings"]]]],
             "login": ["name": "default", "kind": "token"],
             "sign_in": ["name": "Your \(display) account", "signed_in": false, "how": [["text": "\(display) asks you to sign in when it starts, once in each workspace."]]],

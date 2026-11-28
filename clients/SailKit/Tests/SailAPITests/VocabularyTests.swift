@@ -14,6 +14,16 @@ import Testing
         #expect(RunPresence.allCases.map(\.rawValue) == (try Goldens.vocabulary("run_presences")))
     }
 
+    /// A chat's words: an item, a detail, a tool kind, a change kind or a decision the server adds
+    /// turns this red until the app reads it.
+    @Test func eachChatEnumHoldsTheWordsOfTheServersChatInItsOrder() throws {
+        #expect(ChatItemType.allCases.map(\.rawValue) == (try Goldens.vocabulary("chat_item_types")))
+        #expect(ChatDetailType.allCases.map(\.rawValue) == (try Goldens.vocabulary("chat_detail_types")))
+        #expect(ChatToolKind.allCases.map(\.rawValue) == (try Goldens.vocabulary("chat_tool_kinds")))
+        #expect(ChatChangeKind.allCases.map(\.rawValue) == (try Goldens.vocabulary("chat_change_kinds")))
+        #expect(ChatDecision.allCases.map(\.rawValue) == (try Goldens.vocabulary("chat_decisions")))
+    }
+
     @Test func aKnownWordReadsAsItsCaseAndAnyOtherAsItself() {
         #expect(Open<SpecStatus>(rawValue: "in_progress") == .known(.inProgress))
         #expect(Open<SpecStatus>(rawValue: "drydock") == .unknown("drydock"))

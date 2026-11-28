@@ -27,9 +27,12 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ChatItem;
+import ai.singlr.sail.engine.ChatWire;
 import ai.singlr.sail.engine.ContainerConfig;
 import ai.singlr.sail.engine.HeldLocks;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.LiveReply;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.Recorded;
 import ai.singlr.sail.engine.SailPaths;
@@ -530,6 +533,13 @@ class ClientGoldensTest {
             .map(code -> Map.of("code", code.code(), "status", code.httpCode()))
             .toList());
     vocabulary.put("change_types", ChangeFeed.TYPES);
+    vocabulary.put(
+        "chat_item_types",
+        Stream.concat(kinds(ChatWire.Own.class), kinds(ChatItem.class)).toList());
+    vocabulary.put("chat_detail_types", kinds(ChatItem.Detail.class).toList());
+    vocabulary.put("chat_tool_kinds", lowered(ChatItem.ToolKind.values()));
+    vocabulary.put("chat_change_kinds", lowered(ChatItem.ChangeKind.values()));
+    vocabulary.put("chat_decisions", lowered(LiveReply.Decision.values()));
     vocabulary.put("event_types", List.copyOf(wellKnownTypes()));
     vocabulary.put(
         "member_modes", Arrays.stream(EngagementMode.values()).map(EngagementMode::wire).toList());
@@ -576,6 +586,124 @@ class ClientGoldensTest {
         "wake_modes", List.of(RoomWakePolicy.ON, RoomWakePolicy.MENTION_MODE, RoomWakePolicy.OFF));
     GoldenFiles.check(
         GOLDENS.resolve("vocabulary"), new TreeMap<>(Map.of("vocabulary.json", json(vocabulary))));
+  }
+
+  @Test
+  void everyChatItemIsWrittenAsAReaderReadsIt() {
+    var items = new ArrayList<Map<String, Object>>();
+    for (var entry : everyChatItem()) {
+      var item = new LinkedHashMap<String, Object>();
+      item.put("seq", items.size() + 1);
+      item.put("at", DateTimeUtils.format(AT));
+      item.put(ChatWire.TYPE, ChatWire.kind(entry.getClass()));
+      item.putAll(ChatWire.fields(entry));
+      items.add(item);
+    }
+    GoldenFiles.check(
+        GOLDENS.resolve("chat"),
+        new TreeMap<>(Map.of("items.json", json(Map.of("ended", false, "items", items)))));
+  }
+
+  /**
+   * One entry of every type a chat logs, every kind of a call's detail, change and login outcome
+   * among them, and each field a reader may be given absent somewhere and present elsewhere.
+   */
+  private static List<Record> everyChatItem() {
+    var tests = new ChatItem.Detail.Command("./gradlew test", true, false);
+    return List.of(
+        new ChatWire.Message("hi", false),
+        new ChatWire.Delivered(1),
+        new ChatWire.Told("Sail restarted, so the turn stopped."),
+        new ChatWire.Answered("req-1", LiveReply.Decision.ALLOW_ALWAYS, null, null, "dana"),
+        new ChatWire.ModeSet("plan", null, "dana"),
+        new ChatItem.Session(null, "default", List.of("compact"), List.of("review"), false),
+        new ChatItem.ModeChanged("acceptEdits", false),
+        new ChatItem.Text(null, "Reading the file.", true, false),
+        new ChatItem.Text("toolu_sub", " and the next.", false, false),
+        new ChatItem.Tool(
+            null, "toolu_cmd", ChatItem.ToolKind.COMMAND, "Run the tests", tests, false),
+        new ChatItem.Tool(
+            "toolu_sub",
+            "toolu_edit",
+            ChatItem.ToolKind.EDIT,
+            "Edit four files",
+            new ChatItem.Detail.Edit(
+                List.of(
+                    new ChatItem.Change(
+                        ChatItem.ChangeKind.CHANGE, "a.txt", null, "old", "new", true, false),
+                    new ChatItem.Change(
+                        ChatItem.ChangeKind.ADD, "b.txt", null, null, "made", false, false),
+                    new ChatItem.Change(
+                        ChatItem.ChangeKind.DELETE, "c.txt", null, "gone", null, false, false),
+                    new ChatItem.Change(
+                        ChatItem.ChangeKind.MOVE, "e.txt", "d.txt", "x", "y", false, false))),
+            false),
+        new ChatItem.Tool(
+            null,
+            "toolu_read",
+            ChatItem.ToolKind.READ,
+            "Read the README",
+            new ChatItem.Detail.Read("README.md", false),
+            false),
+        new ChatItem.Tool(
+            null,
+            "toolu_find",
+            ChatItem.ToolKind.SEARCH,
+            "Find the TODOs",
+            new ChatItem.Detail.Search("TODO", "src", false),
+            false),
+        new ChatItem.Tool(
+            null,
+            "toolu_web",
+            ChatItem.ToolKind.WEB,
+            "Fetch the docs",
+            new ChatItem.Detail.Fetch("https://example.com/docs", false),
+            false),
+        new ChatItem.Tool(
+            null,
+            "toolu_mcp",
+            ChatItem.ToolKind.MCP,
+            "Ask the tracker",
+            new ChatItem.Detail.Other("tracker_lookup", "{\"id\":7}", false),
+            false),
+        new ChatItem.ToolDone(null, "toolu_cmd", "BUILD SUCCESSFUL", false, false),
+        new ChatItem.Permission(
+            "req-2",
+            "toolu_cmd",
+            "agent-1",
+            ChatItem.ToolKind.COMMAND,
+            "Run the tests",
+            "It runs a command.",
+            tests,
+            List.of(new ChatItem.Always(List.of("Allow ./gradlew test from now on."))),
+            false),
+        new ChatItem.Question(
+            "req-3",
+            "toolu_ask",
+            List.of(
+                new ChatItem.Asked(
+                    "Which size?",
+                    null,
+                    List.of(
+                        new ChatItem.Choice("Small", "The small one", false),
+                        new ChatItem.Choice("Large", null, false)),
+                    false,
+                    false))),
+        new ChatItem.Plan("req-4", "toolu_plan", "Change nothing yet.", false),
+        new ChatItem.Withdrawn("req-4"),
+        new ChatItem.Retrying(1, 10, 500, "Overloaded", false),
+        new ChatItem.Compacted("auto", 120_000, 30_000, false),
+        new ChatItem.Interrupted(),
+        new ChatItem.Refused(null, "That mode is not one this chat has.", false),
+        new ChatItem.Unreadable(true, false),
+        new ChatItem.SelfStarted(),
+        new ChatItem.Failed("Your login was refused.", new LoginOutcome.Refused(), false),
+        new ChatItem.Failed(
+            "Your account is out of quota.", new LoginOutcome.Limited("15:00 UTC"), false),
+        new ChatItem.Failed(
+            "Sail could not hand over your login.", new LoginOutcome.Undelivered(), false),
+        new ChatItem.Failed("The model stopped.", null, false),
+        new ChatItem.TurnEnded(null, 100, 20, 900));
   }
 
   /** {@code value} as a golden holds it: its keys sorted, one to a line. */
@@ -690,6 +818,23 @@ class ClientGoldensTest {
   /** An event with no data: the envelope every event has, as the box itself publishes one. */
   private static Event envelope(String spec, String type) {
     return Event.of(PROJECT, spec, type, Event.SAIL_AGENT, "box");
+  }
+
+  /**
+   * The kinds of the records {@code sealed} permits, in the order it declares them, a sealed
+   * interface it permits standing for its own.
+   */
+  private static Stream<String> kinds(Class<?> sealed) {
+    return Arrays.stream(sealed.getPermittedSubclasses())
+        .flatMap(
+            type ->
+                type.isSealed()
+                    ? kinds(type)
+                    : Stream.of(ChatWire.kind(type.asSubclass(Record.class))));
+  }
+
+  private static List<String> lowered(Enum<?>... values) {
+    return Arrays.stream(values).map(value -> value.name().toLowerCase(Locale.ROOT)).toList();
   }
 
   private static Set<String> wellKnownTypes() {

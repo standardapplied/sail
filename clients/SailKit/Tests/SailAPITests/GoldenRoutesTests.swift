@@ -4,7 +4,9 @@ import SailKitTestSupport
 import Testing
 
 /// The call this client makes for each recorded exchange, by the golden's name.
-let calls: [String: @Sendable (SailClient) async throws -> Void] = [
+let calls = routeCalls.merging(chatCalls) { route, _ in route }
+
+let routeCalls: [String: @Sendable (SailClient) async throws -> Void] = [
     "whoami": { _ = try await $0.send(.whoami) },
     "projects": { _ = try await $0.send(.projects) },
     "projects-none": { _ = try await $0.send(.projects) },
@@ -98,6 +100,90 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-resync-required": { _ = try await $0.send(.changes(since: "999999999")) },
 ]
 
+/// The chat sessions and requests the server's chat goldens name.
+let (fifthChat, sixthChat) = ("00000000-0000-7000-8000-000000000005", "00000000-0000-7000-8000-000000000006")
+
+func chatRequest(_ number: Int) -> String {
+    "00000000-0000-7000-8000-0000000000\(number < 10 ? "0" : "")\(number)"
+}
+
+let claudeChat = ChatAgent(harness: "claude-code", mode: "default", inside: false)
+
+/// A request no call of this client sends, as the server's golden recorded it, `json` its body.
+func asRecorded<Response>(_ method: HTTPMethod, _ segments: [String], query: [(String, String?)] = [], json: String? = nil) -> Endpoint<Response> {
+    Endpoint(method, segments, query: query, body: json.map { Data($0.utf8) })
+}
+
+/// The chat routes' exchanges, and the preferences', by the golden's name.
+let chatCalls: [String: @Sendable (SailClient) async throws -> Void] = [
+    "chat-opened": { _ = try await $0.send(.openChat(claudeChat, workspace: "berth", project: "harbor")) },
+    "chat-message-sent": { _ = try await $0.send(.send("hi", chat: fifthChat)) },
+    "chat-message-again": { _ = try await $0.send(.send("again", chat: fifthChat)) },
+    "chat-message-queued": { _ = try await $0.send(.send("and this", chat: fifthChat)) },
+    "chat-items": { _ = try await $0.send(.chat(fifthChat, after: 0)) },
+    "chat-items-after": { _ = try await $0.send(.chat(fifthChat, after: 5)) },
+    "chat-items-ended": { _ = try await $0.send(.chat(fifthChat, after: 10)) },
+    "chat-items-answered": { _ = try await $0.send(.chat(sixthChat, after: 0)) },
+    "chat-ended": { _ = try await $0.send(.endChat(fifthChat)) },
+    "chat-mode-kept": { _ = try await $0.send(.setMode("acceptEdits", chat: sixthChat)) },
+    "chat-mode-set": { _ = try await $0.send(.setMode("plan", chat: sixthChat)) },
+    "chat-request-denied": { _ = try await $0.send(.answer(chatRequest(7), chat: sixthChat, with: .deny("use the existing spinner instead"))) },
+    "chat-request-allowed-always": { _ = try await $0.send(.answer(chatRequest(9), chat: sixthChat, with: .allowAlways)) },
+    "chat-request-allowed": { _ = try await $0.send(.answer(chatRequest(10), chat: sixthChat, with: .allow)) },
+    "chat-question-answered": { _ = try await $0.send(.answer(chatRequest(12), chat: sixthChat, with: .answer(colorsAndSize(["Red", "Blue"])))) },
+    "chat-plan-approved": { _ = try await $0.send(.answer(chatRequest(13), chat: sixthChat, with: .allow)) },
+    "chat-stopping": { _ = try await $0.send(.interrupt(chat: sixthChat)) },
+    "chat-not-stopping": { _ = try await $0.send(.interrupt(chat: sixthChat)) },
+    "preferences": { _ = try await $0.send(.preferences) },
+    "preferences-set": { _ = try await $0.send(.setPreferences(Preferences(sessionForm: .known(.both)))) },
+    "refusal-invalid-request-preferences-value": { _ = try await $0.send(.setPreferences(Preferences(sessionForm: .unknown("tab")))) },
+    "refusal-invalid-request-preferences-field": {
+        _ = try await $0.send(asRecorded(.put, ["v1", "me", "preferences"], json: #"{"session_form":"chat","theme":"dark"}"#) as Endpoint<Preferences>)
+    },
+    "refusal-chat-after-invalid": { _ = try await $0.send(asRecorded(.get, Route.chat(fifthChat), query: [("after", "last")]) as Endpoint<ChatPage>) },
+    "refusal-chat-invalid-id": { _ = try await $0.send(asRecorded(.get, Route.chat("nobody")) as Endpoint<ChatPage>) },
+    "refusal-chat-not-found": { _ = try await $0.send(asRecorded(.get, Route.chat(fifthChat)) as Endpoint<ChatPage>) },
+    "refusal-chat-always-not-offered": { _ = try await $0.send(.answer(chatRequest(10), chat: sixthChat, with: .allowAlways)) },
+    "refusal-chat-always-not-offered-redirect": { _ = try await $0.send(.answer(chatRequest(11), chat: sixthChat, with: .allowAlways)) },
+    "refusal-chat-answer-ended": { _ = try await $0.send(.answer(chatRequest(7), chat: sixthChat, with: .allow)) },
+    "refusal-chat-answer-invalid": {
+        _ = try await $0.send(asRecorded(.post, Route.chat(sixthChat) + ["requests", chatRequest(7)], json: #"{"decision":"allow_always","rules":["Bash(*)"]}"#) as Endpoint<ChatLogged>)
+    },
+    "refusal-chat-answer-not-a-choice": { _ = try await $0.send(.answer(chatRequest(12), chat: sixthChat, with: .answer(colorsAndSize(["Teal"])))) },
+    "refusal-chat-answer-not-taken": {
+        _ = try await $0.send(asRecorded(.post, Route.chat(sixthChat) + ["requests", chatRequest(7)], json: #"{"answers":{"Which color?":{"own":"teal"}},"decision":"answer"}"#) as Endpoint<ChatLogged>)
+    },
+    "refusal-chat-request-answered": { _ = try await $0.send(.answer(chatRequest(7), chat: sixthChat, with: .allow)) },
+    "refusal-chat-request-not-found": { _ = try await $0.send(.answer(chatRequest(8), chat: sixthChat, with: .allow)) },
+    "refusal-chat-request-not-yours": { _ = try await $0.send(.answer(chatRequest(7), chat: sixthChat, with: .allow)) },
+    "refusal-chat-request-withdrawn": { _ = try await $0.send(.answer(chatRequest(14), chat: sixthChat, with: .allow)) },
+    "refusal-chat-end-not-found": { _ = try await $0.send(.endChat(fifthChat)) },
+    "refusal-chat-ended": { _ = try await $0.send(.send("more", chat: fifthChat)) },
+    "refusal-chat-launch-failed": { _ = try await $0.send(.send("hi", chat: fifthChat)) },
+    "refusal-chat-message-not-found": { _ = try await $0.send(.send("mine now", chat: fifthChat)) },
+    "refusal-chat-interrupt-not-yours": { _ = try await $0.send(.interrupt(chat: sixthChat)) },
+    "refusal-chat-mode-not-a-chat-mode": { _ = try await $0.send(.setMode("bypassPermissions", chat: sixthChat)) },
+    "refusal-chat-mode-not-yours": { _ = try await $0.send(.setMode("plan", chat: sixthChat)) },
+    "refusal-chat-mode-turn-open": { _ = try await $0.send(.setMode("plan", chat: sixthChat)) },
+    "refusal-chat-login-not-stored": { _ = try await $0.send(.openChat(claudeChat, workspace: "quay", project: "harbor")) },
+    "refusal-chat-not-your-workspace": { _ = try await $0.send(.openChat(claudeChat, workspace: "dock", project: "harbor")) },
+    "refusal-chat-inside-invalid": {
+        _ = try await $0.send(asRecorded(.post, Route.workspace("berth", project: "harbor") + ["chats"], json: #"{"harness":"claude-code","inside":"yes","mode":"default"}"#) as Endpoint<ChatOpened>)
+    },
+    "refusal-chat-mode-not-offered": {
+        _ = try await $0.send(asRecorded(.post, Route.workspace("berth", project: "harbor") + ["chats"], json: #"{"harness":"claude-code","mode":"bypassPermissions"}"#) as Endpoint<ChatOpened>)
+    },
+    "refusal-chat-no-chat-form": {
+        _ = try await $0.send(asRecorded(.post, Route.workspace("berth", project: "harbor") + ["chats"], json: #"{"harness":"codex","mode":"full-access"}"#) as Endpoint<ChatOpened>)
+    },
+]
+
+/// The answer to the two questions of the server's golden chat: `colors` chosen, the size in the
+/// person's own words.
+func colorsAndSize(_ colors: [String]) -> [String: ChatAnswer.Given] {
+    ["Which colors?": ChatAnswer.Given(chosen: colors), "Which size?": ChatAnswer.Given(own: "teal, but only on weekends")]
+}
+
 /// The project the server's golden `project-created` creates, whole.
 let marina = ProjectDefinition(
     name: "marina",
@@ -148,7 +234,7 @@ func answer<Response>(
         case let .failure(.refused(refusal)):
             #expect(exchange.status >= 400)
             let named = "refusal-" + refusal.code.rawValue.replacingOccurrences(of: "_", with: "-")
-            #expect(name == named || name.hasPrefix(named + "-"), "\(name) is named for another code than \(named)")
+            #expect(name == named || name.hasPrefix(named + "-") || name.hasPrefix("refusal-chat-"), "\(name) is named for another code than \(named)")
         case let .failure(error):
             Issue.record("\(name): \(error)")
         }
@@ -606,28 +692,12 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-template-2d-runner-not-ready", "refusal-project-name-taken",
     "refusal-project-name-invalid", "refusal-project-repos-same-path",
     "refusal-project-section-repos-same-path",
-    "refusal-chat-not-your-workspace", "refusal-chat-no-chat-form", "refusal-chat-mode-not-offered",
-    "refusal-chat-inside-invalid", "refusal-chat-not-found", "refusal-chat-invalid-id",
-    "refusal-chat-after-invalid", "refusal-chat-ended", "refusal-chat-login-not-stored",
-    "refusal-chat-launch-failed", "refusal-chat-message-not-found", "refusal-chat-end-not-found",
-    "refusal-chat-mode-turn-open", "refusal-chat-mode-not-a-chat-mode", "refusal-chat-request-not-yours",
-    "refusal-chat-interrupt-not-yours", "refusal-chat-mode-not-yours", "refusal-chat-request-not-found",
-    "refusal-chat-answer-invalid", "refusal-chat-answer-not-taken", "refusal-chat-request-answered",
-    "refusal-chat-always-not-offered", "refusal-chat-always-not-offered-redirect",
-    "refusal-chat-answer-not-a-choice",
-    "refusal-chat-request-withdrawn", "refusal-chat-answer-ended",
-    "refusal-invalid-request-preferences-value", "refusal-invalid-request-preferences-field",
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.
 let answersOfRoutesNotYetCalled: Set<String> = [
     "spec-measures", "specs-measures",
-    "chat-opened", "chat-message-sent", "chat-items", "chat-message-again", "chat-message-queued",
-    "chat-items-after", "chat-ended", "chat-items-ended",
-    "chat-mode-kept", "chat-request-denied", "chat-request-allowed-always", "chat-request-allowed",
-    "chat-question-answered", "chat-plan-approved", "chat-stopping", "chat-not-stopping", "chat-mode-set",
-    "chat-items-answered",
-    "workspace-sessions-chats", "workspace-sessions-no-terminal-door", "preferences", "preferences-set",
+    "workspace-sessions-chats", "workspace-sessions-no-terminal-door",
 ]
 
 /// The member the golden writer seats in the room.

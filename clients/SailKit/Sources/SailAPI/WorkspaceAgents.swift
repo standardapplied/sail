@@ -18,7 +18,8 @@ public struct WorkspaceAgents: Codable, Equatable, Sendable {
 /// until a person chooses (`modeDefault`), and why it has no others (`note`); its two ways in, the
 /// default key the person stored (`login`, of the `kinds` it takes) and its own sign-in inside the
 /// session (`signIn`, when a person may start it so: `inside`); and why it does not start at all
-/// (`refusal`), with the few words a row says of that (`unavailable`).
+/// (`refusal`), with the few words a row says of that (`unavailable`). The forms it opens in, and,
+/// when one is a chat, how it chats (`chat`).
 public struct AgentOffer: Codable, Equatable, Sendable {
     public let harness: String
     public let display: String
@@ -31,11 +32,26 @@ public struct AgentOffer: Codable, Equatable, Sendable {
     public let signIn: AgentSignIn?
     public let refusal: Refusal?
     public let unavailable: String?
+    public let forms: [Open<SessionForm>]
+    public let chat: AgentChat?
 
     private enum CodingKeys: String, CodingKey {
-        case harness, display, modes, note, login, kinds, inside, refusal, unavailable
+        case harness, display, modes, note, login, kinds, inside, refusal, unavailable, forms, chat
         case modeDefault = "mode_default"
         case signIn = "sign_in"
+    }
+}
+
+/// How a harness chats: its chat modes, the one a chat starts in until a person chooses
+/// (`modeDefault`), and whether a chat may sign in inside instead of with a stored key.
+public struct AgentChat: Codable, Equatable, Sendable {
+    public let modes: [AgentMode]
+    public let modeDefault: String
+    public let inside: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case modes, inside
+        case modeDefault = "mode_default"
     }
 }
 
