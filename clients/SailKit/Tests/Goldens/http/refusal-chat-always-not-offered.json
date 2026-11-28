@@ -11,7 +11,7 @@
       "error": {
         "code": "invalid_request",
         "field_errors": [],
-        "message": "Claude Code offered no way to allow this always; allow it once instead."
+        "message": "Sail does not offer always for this call: it cannot say whole, in plain words, what Claude Code would keep; allow it once instead."
       },
       "schema_version": 1
     },

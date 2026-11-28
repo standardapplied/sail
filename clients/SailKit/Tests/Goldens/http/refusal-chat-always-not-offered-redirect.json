@@ -11,7 +11,7 @@
       "error": {
         "code": "invalid_request",
         "field_errors": [],
-        "message": "Claude Code offered no way to allow this always; allow it once instead."
+        "message": "Sail does not offer always for a command that redirects with > or <: Claude Code asks again for one that writes to a file with >, even with its rule kept; allow it once instead."
       },
       "schema_version": 1
     },

@@ -109,14 +109,7 @@
           "type": "session"
         },
         {
-          "always": [
-            {
-              "words": [
-                "Allow any command that starts with `printf twice`, also when another command such as xargs, timeout, nice or nohup starts it, xargs adding whatever it is fed, and as part of a longer line whose other commands need no asking, from now on, for every Claude Code chat and terminal in this workspace (kept in the workspace's .claude/settings.local.json).",
-                "Let it work in the folder `/home/dev/workspace`, for this session only."
-              ]
-            }
-          ],
+          "always": [],
           "at": "2026-11-11T09:00:00.656Z",
           "call": "toolu_0141vQp3ZLZeTkyPqpEQpvda",
           "clipped": false,
