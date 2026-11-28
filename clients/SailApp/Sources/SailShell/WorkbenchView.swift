@@ -901,11 +901,19 @@ public final class WorkbenchView: NSView {
     /// highlighting its menu's title (⌘D held 80 to 180 ms on the runner). The matching menu item's
     /// action is sent, validated as the menu would; a disabled one does nothing.
     override public func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard !isHidden, let item = Self.shortcut(for: event, in: NSApp.mainMenu, target: self), let action = item.action else {
-            return super.performKeyEquivalent(with: event)
+        guard !isHidden else { return super.performKeyEquivalent(with: event) }
+        if let item = Self.shortcut(for: event, in: NSApp.mainMenu, target: self), let action = item.action {
+            if validateMenuItem(item) { NSApp.sendAction(action, to: self, from: item) }
+            return true
         }
-        if validateMenuItem(item) { NSApp.sendAction(action, to: self, from: item) }
+        guard Self.selectsTheLastTab(event), window?.attachedSheet == nil, let last = model.tabs.last else { return super.performKeyEquivalent(with: event) }
+        change { $0.select(last.id) }
         return true
+    }
+
+    /// ⌘9 with eight tabs or fewer, where no item holds it: the last tab, as the browsers do.
+    static func selectsTheLastTab(_ event: NSEvent) -> Bool {
+        event.modifierFlags.intersection([.command, .option, .control, .shift]) == .command && event.charactersIgnoringModifiers == TabMenu.lastKey
     }
 
     static func shortcut(for event: NSEvent, in menu: NSMenu?, target: AnyObject) -> NSMenuItem? {

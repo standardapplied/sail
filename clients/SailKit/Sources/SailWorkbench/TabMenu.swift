@@ -11,6 +11,10 @@ public struct TabMenu: Equatable, Sendable {
 
     public let entries: [Entry]
 
+    /// The digit that selects the last tab: its item's key from nine tabs on; with eight or fewer
+    /// the last tab's item has its own number, and this key still selects it.
+    public static let lastKey = "9"
+
     public init(_ bench: Workbench) {
         let tabs = bench.tabs
         entries = tabs.indices.map { index in
@@ -22,6 +26,6 @@ public struct TabMenu: Equatable, Sendable {
     /// The digit for the tab at `index` of `count`, as the browsers number theirs.
     static func key(at index: Int, of count: Int) -> String? {
         if index < 8 { return String(index + 1) }
-        return index == count - 1 ? "9" : nil
+        return index == count - 1 ? lastKey : nil
     }
 }

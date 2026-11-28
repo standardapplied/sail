@@ -244,6 +244,26 @@ import Testing
                 "choosing the tenth selected \(String(describing: bench.model.selected)), the strip from \(bench.strip.row.first)")
     }
 
+    /// ⌘9 selects the last tab with eight tabs or fewer, where the last tab's item has its own
+    /// number and no item holds ⌘9; ⌘8 with two tabs selects nothing.
+    @Test func commandNineSelectsTheLastTabWithEightOrFewer() throws {
+        let (shell, bench) = try Self.bench(tabs: 3)
+        NSApp.mainMenu = shell.menu()
+        shell.select(.sessions)
+        func key(_ characters: String) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0, context: nil, characters: characters,
+                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0
+            ))
+        }
+        bench.change { $0.selectTab(at: 0) }
+        #expect(bench.performKeyEquivalent(with: try key("9")) && bench.model.selected == bench.model.tabs.last?.id, "⌘9 with three tabs selected \(String(describing: bench.model.selected))")
+        bench.change { $0.selectTab(at: 0) }
+        #expect(bench.performKeyEquivalent(with: try key("3")) && bench.model.selected == bench.model.tabs.last?.id)
+        bench.change { $0.selectTab(at: 0) }
+        #expect(!bench.performKeyEquivalent(with: try key("8")) && bench.model.selected == bench.model.tabs.first?.id, "⌘8 with three tabs selected a tab")
+    }
+
     /// Invariant 4 and scenario 6: the Window menu lists every tab after its own items with the
     /// count's titles and keys; it follows a rename, a close, a move and a selection at once; ⌘1
     /// is its first tab's key; with no tab it lists none.
