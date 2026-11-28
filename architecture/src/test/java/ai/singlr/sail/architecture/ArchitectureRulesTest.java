@@ -75,14 +75,13 @@ class ArchitectureRulesTest {
       inModuleOf(GuardrailChecker.class);
   private static final DescribedPredicate<JavaClass> IN_SAIL_INFRA = inModuleOf(Main.class);
 
-  /** The chat's host: every class of the api package named for a chat, and the routes. */
-  private static final DescribedPredicate<JavaClass> A_CHATS_HOST =
+  /** The room's live members, the one part of sail-infra that speaks Claude Code's own stream. */
+  private static final DescribedPredicate<JavaClass> THE_ROOMS_LIVE_MEMBERS =
       describe(
-          "are the chat's host or its routes",
+          "are the room's live members",
           type ->
-              type.getPackageName().equals(SAIL + ".api")
-                  && (type.getName().startsWith(SAIL + ".api.Chat")
-                      || type.getName().startsWith(SAIL + ".api.ApiRouter")));
+              type.getName().equals(SAIL + ".api.LiveMembers")
+                  || type.getName().startsWith(SAIL + ".api.LiveMembers$"));
 
   /** Claude Code's own classes: its harness and the stream its chat and live members speak. */
   private static final DescribedPredicate<JavaClass> CLAUDE_CODES =
@@ -184,13 +183,13 @@ class ArchitectureRulesTest {
   @Test
   void aChatsHostSpeaksAHarnessOnlyThroughItsWire() throws IOException {
     noClasses()
-        .that(A_CHATS_HOST)
+        .that(IN_SAIL_INFRA.and(not(THE_ROOMS_LIVE_MEMBERS)).and(not(CLAUDE_CODES)))
         .should()
         .dependOnClassesThat(CLAUDE_CODES)
         .because(
-            "a chat's host speaks a harness only through the per-process wire its HarnessChat"
-                + " makes, so a second harness is its own adapter and wire, never a branch of the"
-                + " host")
+            "a chat's host, and every other class of sail-infra but the room's live members,"
+                + " speaks a harness only through the per-process wire its HarnessChat makes, so a"
+                + " second harness is its own adapter and wire, never a branch of the host")
         .check(MAIN);
     var api = Reactor.path("sail.root").resolve("sail-infra/src/main/java/ai/singlr/sail/api");
     var named = new ArrayList<String>();
@@ -232,7 +231,7 @@ class ArchitectureRulesTest {
 
   private static boolean ofTheChatsHost(Path source) {
     var name = source.getFileName().toString();
-    return name.endsWith(".java") && (name.startsWith("Chat") || name.equals("ApiRouter.java"));
+    return name.endsWith(".java") && name.startsWith("Chat");
   }
 
   private static DescribedPredicate<JavaClass> inModuleOf(Class<?> anchor) {
