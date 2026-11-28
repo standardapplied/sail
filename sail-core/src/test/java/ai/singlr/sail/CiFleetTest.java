@@ -859,6 +859,34 @@ class CiFleetTest {
     }
   }
 
+  /**
+   * The stop that lands in the one place no command can be hooked, after the timer's fork and
+   * before {@code timer=$!}: a DEBUG trap sends it as {@code timer=$!} is about to run, once the
+   * timer has started, and bash runs the stop's trap before that assignment.
+   */
+  @Test
+  void aCheckStoppedAsItsTimerStartsEndsTheTimerToo() throws Exception {
+    var never = dir.resolve("never");
+    run("mkfifo", never.toString(), dir.resolve("go").toString());
+
+    try (var held = new RandomAccessFile(never.toFile(), "rw")) {
+      var ended =
+          Child.run(
+              shell(
+                  SOURCED
+                      + "set -T && trap '[[ $BASH_COMMAND == \"timer=\\$!\" ]]"
+                      + " && { until [[ -s $FLEET_TEST/timers ]]; do :; done; kill -TERM $$; }'"
+                      + " DEBUG && check_within %s stopped 'stopped as its timer starts' cat"
+                          .formatted(LIMIT)
+                      + " \"$FLEET_TEST/never\"",
+                  SCRIPT.toString()));
+
+      assertEquals(143, ended.exit(), ended.stdout() + ended.stderr());
+      assertFalse(Files.exists(runs.resolve("stopped").resolve("report.txt")), "it reported");
+      assertEveryTimerEnds();
+    }
+  }
+
   @Test
   void aRunStartedWithTermIgnoredRefusesToRunAnyCheckAndSaysWhy() throws Exception {
     var command = new ArrayList<>(List.of("env", "--ignore-signal=TERM", SCRIPT.toString()));
