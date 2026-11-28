@@ -46,6 +46,7 @@ class ChatStdinTest {
   private static final String ASKS = line("02b-relay-stdio", 16);
   private static final String REQUEST = "a871f652-0656-42bf-8cc8-860ad0a34b79";
   private static final String ALWAYS = line("02b-relay-stdio", 99);
+  private static final String ENDS = line("02b-relay-stdio", 138);
   private static final String ALWAYS_REQUEST = "d3b09c29-b79d-4151-b490-d70fdf7adb18";
   private static final String TOO_LARGE =
       "{\"type\":\"control_request\",\"request_id\":\"big-1\",\"request\":{\"subtype\":"
@@ -198,7 +199,7 @@ class ChatStdinTest {
           fake.onWrite(
               line -> {
                 if (first.getAndSet(false)) {
-                  fake.says(INIT, line("02b-relay-stdio", 138));
+                  fake.says(INIT, ENDS);
                   fake.settle();
                   answered.countDown();
                 }
@@ -273,10 +274,39 @@ class ChatStdinTest {
         List.of("message", "session", "permission", "answered", "told", "interrupted"),
         bench.kinds(session));
     assertEquals(
-        "Sail could not record what it wrote to Claude Code's process, so Sail ended it; your"
-            + " next message starts it again.",
+        "Claude Code was restarted; your message was sent again.",
         bench.items(session).get(4).get("words"));
     assertEquals(List.of(LiveStream.userMessage("hi")), bench.processes.latest().written);
+  }
+
+  /**
+   * A waiting message whose hand-over cannot be recorded whole is marked handed nowhere: Sail hands
+   * it to the next process, as its words say.
+   */
+  @Test
+  void aWaitingMessageWhoseHandOverCannotBeRecordedWholeIsHandedAgain() throws Exception {
+    var session = chat();
+    var fake = asked(session, INIT);
+    as("sam", () -> host.send(session, "next"));
+    bench.db.execute(
+        "CREATE TRIGGER no_delivered BEFORE INSERT ON chat_items WHEN NEW.kind = 'delivered'"
+            + " BEGIN SELECT RAISE(ABORT, 'database is locked'); END");
+    var handedAgain = new CountDownLatch(1);
+    bench.processes.onStart(
+        next -> {
+          next.onClose(next::exitsIfRunning);
+          bench.db.execute("DROP TRIGGER no_delivered");
+          next.onWrite(line -> handedAgain.countDown());
+        });
+
+    fake.says(ENDS);
+    over(fake);
+    assertTrue(handedAgain.await(20, TimeUnit.SECONDS), "the message never went to the next");
+
+    assertEquals(
+        List.of(LiveStream.userMessage("hi"), LiveStream.userMessage("next")), fake.written);
+    assertEquals(List.of(LiveStream.userMessage("next")), bench.processes.latest().written);
+    assertEquals(2, bench.processes.starts.size());
   }
 
   /** However many of its lines are refused, a process is ended once. */

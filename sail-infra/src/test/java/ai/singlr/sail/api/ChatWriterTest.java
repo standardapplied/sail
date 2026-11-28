@@ -184,6 +184,17 @@ class ChatWriterTest {
     assertEquals("why behind", writer.stalled(NOW.plus(Duration.ofMinutes(4)).plus(bound), bound));
   }
 
+  /** An error its write throws ends the writer, and its stdin is closed all the same. */
+  @Test
+  void aWriteThatThrowsAnErrorStillClosesItsStdin() throws Exception {
+    stdin.failsWith(new LinkageError("a class the pipe needs could not be loaded"));
+    writer.start("sail-test-writer");
+
+    offer("first");
+
+    stdin.awaitClosed();
+  }
+
   @Test
   void aWriterInterruptedClosesItsStdinAndTakesNoNewLine() throws Exception {
     writer.start("sail-test-writer");
@@ -208,10 +219,15 @@ class ChatWriterTest {
     private final CountDownLatch shut = new CountDownLatch(1);
     private volatile int holding;
     private volatile boolean refuses;
+    private volatile Error failure;
     private volatile boolean closed;
 
     void holds(int writes) {
       holding = writes;
+    }
+
+    void failsWith(Error error) {
+      failure = error;
     }
 
     void refusesTheFirst() {
@@ -228,6 +244,9 @@ class ChatWriterTest {
 
     @Override
     public void write(String line) throws IOException {
+      if (failure != null) {
+        throw failure;
+      }
       if (refuses) {
         refuses = false;
         throw new IOException("Broken pipe");
