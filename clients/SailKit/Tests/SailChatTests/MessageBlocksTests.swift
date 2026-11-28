@@ -467,11 +467,11 @@ enum Examples {
         #expect(Self.depth(blocks) == shape.depth)
     }
 
-    /// Four times the longest text: work growing with the square of the text takes 16 times as long
-    /// as at the longest (a quadratic item took 9 s there, against 0.04 s), so it cannot end within
-    /// the suite's limit, while linear work ends in a few seconds.
-    @Test(arguments: shapes) func fourTimesTheLongestSplitsWithinTheLimit(_ shape: Shape) {
-        #expect(Self.depth(MessageBlocks.split(shape.text(4 * Self.codePoints))) == shape.depth)
+    /// Eight times the longest text: work growing with the square of the text takes 64 times as long
+    /// as at the longest (a quadratic item's took 9 s there and 57 s at four times), so it cannot end
+    /// within the limit each case has, while linear work ends in seconds.
+    @Test(arguments: shapes) func eightTimesTheLongestSplitsWithinTheLimit(_ shape: Shape) {
+        #expect(Self.depth(MessageBlocks.split(shape.text(8 * Self.codePoints))) == shape.depth)
     }
 
     @Test func tenThousandQuoteMarkersAreDrawnAtTheEighthLevel() {
