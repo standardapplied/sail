@@ -176,7 +176,8 @@ class ChatStdinTest {
 
   /**
    * A turn the harness ends before its message is marked handed (its answer read while the line
-   * that handed it is still being written) hands the message no second time: the next goes next.
+   * that handed it is still being written) hands that message no second time, and is not said open
+   * again once its message is marked handed.
    */
   @Test
   void aTurnThatEndsBeforeItsMessageIsMarkedHandedIsNotHandedItAgain() throws Exception {
@@ -198,13 +199,21 @@ class ChatStdinTest {
 
     as("sam", () -> host.send(session, "hi"));
     assertTrue(answered.await(20, TimeUnit.SECONDS), "the turn was never answered");
-    var next =
-        assertTimeoutPreemptively(RETURNS, () -> as("sam", () -> host.send(session, "next")));
+    var fake = bench.processes.latest();
+    assertTimeoutPreemptively(
+        RETURNS,
+        () ->
+            as(
+                "sam",
+                () -> {
+                  host.end(session);
+                  return null;
+                }));
+    over(fake);
 
-    assertFalse(next.queued(), "the turn it answered is over");
-    assertEquals(
-        List.of(LiveStream.userMessage("hi"), LiveStream.userMessage("next")),
-        bench.processes.latest().written);
+    assertEquals(List.of(LiveStream.userMessage("hi")), fake.written);
+    assertFalse(bench.store.find(session).orElseThrow().turnOpen(), "its turn is over");
+    assertEquals(List.of("message", "session", "turn_ended"), bench.kinds(session));
   }
 
   /** Line {@code number} of {@code recording}, which Claude Code took, as Sail writes it. */

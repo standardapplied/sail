@@ -341,8 +341,9 @@ final class ChatProcess {
 
   /**
    * Hands the oldest message waiting to the process, its turn open from then on. Once the harness
-   * took it, it is marked handed; one it did not take opens no turn, and waits for the next
-   * process. Returns the place of its last line in the writer, 0 for none.
+   * took it, it is marked handed, and the turn is said open unless the harness already ended it;
+   * one it did not take is said open nowhere, and waits for the next process. Returns the place of
+   * its last line in the writer, 0 for none.
    */
   private long handNext() {
     var next = log.unhanded(handing).stream().findFirst();
@@ -365,7 +366,6 @@ final class ChatProcess {
             log.turn(true);
           }
         };
-    Runnable refused = () -> turnOpen = false;
     var lines = wire.message((String) message.get("text"));
     if (lines.isEmpty()) {
       taken.run();
@@ -373,7 +373,7 @@ final class ChatProcess {
     }
     var last = 0L;
     for (var index = 0; index < lines.size(); index++) {
-      last = hand(lines.get(index), broken, index == lines.size() - 1 ? taken : NOTHING, refused);
+      last = hand(lines.get(index), broken, index == lines.size() - 1 ? taken : NOTHING, NOTHING);
     }
     return last;
   }
