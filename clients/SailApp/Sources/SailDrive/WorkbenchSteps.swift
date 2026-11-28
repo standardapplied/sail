@@ -87,6 +87,18 @@ extension Driver {
         if let name = step.shot {
             return await inBothLooks(name) { file in await self.capture(.window(self.shell.window.windowNumber), to: file) }
         }
+        if let listed = step.tabsMenu {
+            return await tabsMenu(listed, choosing: step.chooseTab, within: step.seconds ?? 5)
+        }
+        if let name = step.tabsMenuShot {
+            return await inBothLooks(name) { file in await self.captureWithTheCountsMenuOpen(to: file) }
+        }
+        if let listed = step.windowMenuTabs {
+            let window = NSApp.mainMenu?.items.first { $0.title == "Window" }?.submenu
+            let tabs = window?.items.filter { $0.action == #selector(WorkbenchView.selectTab(_:)) } ?? []
+            let said = Self.said(tabs), wanted = Self.said(workbench.tabItems())
+            return (tabs.count == listed && said == wanted, "the Window menu lists " + said.joined(separator: " | ") + (said == wanted ? "" : "; the count's: " + wanted.joined(separator: " | ")))
+        }
         if let name = step.shotMenu {
             return await inBothLooks(name) { file in await self.captureWithTheMenuOpen(to: file) }
         }
@@ -1073,6 +1085,62 @@ extension Driver {
     /// A shot of `kind` into `file` (``Shot``); screencapture's own error, if any, is printed.
     func capture(_ kind: Shot.Kind, to file: URL) async {
         await Shot.begin(kind, to: file)?.taken()
+    }
+
+    /// Menu items as one line each: ✓ for the checked one, the title, its key.
+    static func said(_ items: [NSMenuItem]) -> [String] {
+        items.map { ($0.state == .on ? "✓ " : "") + $0.title + ($0.keyEquivalent.isEmpty ? "" : " ⌘" + $0.keyEquivalent) }
+    }
+
+    /// The count clicked with real mouse events; while AppKit tracks the menu it opens, its items
+    /// are read against the tabs' own and the tab `choosing` (from 1) chosen, as a click on it does.
+    private func tabsMenu(_ listed: Int, choosing: Int?, within seconds: Double) async -> (Bool, String) {
+        let strip = workbench.strip, count = strip.count
+        guard !count.isHiddenOrHasHiddenAncestor else { return (false, "no count shows with \(strip.tabs.count) tabs") }
+        let make = strip.onCount, wanted = Self.said(workbench.tabItems())
+        var opened: NSMenu?, said: [String] = [], up = false
+        strip.onCount = {
+            let menu = make()
+            opened = menu
+            return menu
+        }
+        defer { strip.onCount = make }
+        let act = Timer(timeInterval: 0.3, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                guard let menu = opened else { return }
+                up = NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue }
+                said = Self.said(menu.items)
+                menu.cancelTracking()
+                if let choosing, menu.items.indices.contains(choosing - 1) { menu.performActionForItem(at: choosing - 1) }
+            }
+        }
+        RunLoop.main.add(act, forMode: .common)
+        _ = await click(count, at: NSPoint(x: count.bounds.midX, y: count.bounds.midY))
+        let lists = up && said.count == listed && said == wanted
+        var detail = (up ? "the menu opened, listing " : "no menu opened; it would list ") + said.joined(separator: " | ") + (said == wanted ? "" : "; the tabs': " + wanted.joined(separator: " | "))
+        guard let choosing else { return (lists, detail) }
+        let index = choosing - 1, model = workbench.model
+        let chosen = await waitUntil(seconds) {
+            model.tabs.indices.contains(index) && self.workbench.model.selected == model.tabs[index].id && self.workbench.strip.row.shows(index)
+        }
+        detail += "; tab \(choosing) \(chosen ? "selected and shown" : "not selected and shown"), the strip from tab \(workbench.strip.row.first + 1)"
+        return (lists && chosen, detail)
+    }
+
+    /// The count's menu open as a click on the count opens it, the whole screen taken a second
+    /// later, then the menu closed.
+    private func captureWithTheCountsMenuOpen(to file: URL) async {
+        let strip = workbench.strip, count = strip.count, make = strip.onCount
+        guard !count.isHiddenOrHasHiddenAncestor else { return print("no count shows") }
+        strip.onCount = {
+            let menu = make()
+            menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 2.5, inModes: [.common])
+            return menu
+        }
+        defer { strip.onCount = make }
+        guard let shot = Shot.begin(.menu, to: file) else { return }
+        _ = await click(count, at: NSPoint(x: count.bounds.midX, y: count.bounds.midY))
+        await shot.taken()
     }
 
     /// The focused pane's context menu, popped up as a right-click shows it, the whole screen taken

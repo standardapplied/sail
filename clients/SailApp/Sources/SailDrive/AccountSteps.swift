@@ -156,7 +156,7 @@ extension Driver {
         let buttons = Rail.Item.allCases.compactMap { shell.rail.button($0) }.filter { !$0.isHiddenOrHasHiddenAncestor }
         let order = buttons.sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }.map { $0.toolTip ?? "" }
         let chosen = shell.rail.selected?.rawValue ?? "nothing"
-        return (order == ["Workspaces", "Terminals", "Account"] && chosen == selected, "the rail reads \(order.joined(separator: ", ")), \(chosen) chosen")
+        return (order == ["Workspaces", "Sessions", "Account"] && chosen == selected, "the rail reads \(order.joined(separator: ", ")), \(chosen) chosen")
     }
 
     /// A signed build's session token, kept for the sweep.
@@ -567,11 +567,11 @@ extension Driver {
         )
     }
 
-    /// The band as AppKit and the shell laid it out, said in window points: its height (AppKit's,
-    /// or in full screen the one the window draws) against `bandHeight`; each window button's frame
+    /// The band as AppKit and the shell laid it out, said in window points: its title row (AppKit's,
+    /// or in full screen the one the window draws) against `titleRow`; each window button's frame
     /// and its centre against the band's, within 1 pt; the shown tabs' centres, within half a point;
     /// the room from the buttons to the nearest of the strip's tabs and `+`, `buttonsGap` within half a point;
-    /// the card's top flush under the band; and no view of the shell over a button.
+    /// the card's top `bandHeight` down, under the band; and no view of the shell over a button.
     func bandGeometry() -> (Bool, String) {
         let window = shell.window
         guard let root = window.contentView, let card = shell.thisMac.superview else { return (false, "the window has no content") }
@@ -583,8 +583,8 @@ extension Driver {
         let controls = ((strip.tabs as [NSView]) + [strip.add]).filter { !$0.isHiddenOrHasHiddenAncestor }.map { $0.convert($0.bounds, to: nil) }
         var misses: [String] = []
         var said = [String(format: "the band %.1f pt", band), String(format: "the card's top at %.1f", cardTop)]
-        if abs(band - ShellApp.bandHeight) >= 0.5 { misses.append(String(format: "the band is %.1f pt, not %.0f", band, ShellApp.bandHeight)) }
-        if abs(cardTop - band) >= 0.5 { misses.append("the card is not flush under the band") }
+        if abs(band - ShellApp.titleRow) >= 0.5 { misses.append(String(format: "the title row is %.1f pt, not %.0f", band, ShellApp.titleRow)) }
+        if abs(cardTop - ShellApp.bandHeight) >= 0.5 { misses.append(String(format: "the card is not %.0f pt down, under the band", ShellApp.bandHeight)) }
         for tab in strip.tabs where !tab.isHiddenOrHasHiddenAncestor {
             let frame = tab.convert(tab.bounds, to: nil)
             if abs(Double(frame.midY) - middle) >= 0.5 { misses.append(String(format: "a tab's centre is %.1f pt off the band's", Double(frame.midY) - middle)) }

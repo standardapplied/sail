@@ -9,10 +9,11 @@ import SailWorkbench
 /// "Sail": one window, 1180 by 800 and no smaller than `leastFrame`, laid out as Mast's shell: one
 /// band across the window's top in the chrome, the window buttons' home and its drag surface; under
 /// it the icon rail on the chrome at the left, and beside the rail the selected pane (Workspaces,
-/// or the welcome while no one is signed in; Terminals, the tabs and splits; or the account) as a
-/// card with 6 pt corners and a 2 pt margin of chrome. The band is the title bar–toolbar area of a
-/// full-size-content window with an empty toolbar in the compact unified style, so AppKit gives it
-/// its height and centres the window buttons in it; its row after the buttons is a title bar
+/// or the welcome while no one is signed in; Sessions, the tabs and splits; or the account) as a
+/// card with 6 pt corners and a 2 pt margin of chrome. The band's title row is the title bar–toolbar
+/// area of a full-size-content window with an empty toolbar in the compact unified style, so AppKit
+/// gives it its height and centres the window buttons in it, 4 pt of chrome under it before the
+/// card; its row after the buttons is a title bar
 /// accessory (`.left`) holding the tab strip, whose empty part is inside the title bar's own view:
 /// a drag there moves the window and a double-click does what System Settings says, as AppKit does
 /// it. The tabs start `buttonsGap` past where AppKit put the buttons. In full screen, where macOS
@@ -222,7 +223,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Shows `item`'s pane; the account, with no one signed in, is the welcome on Workspaces.
     public func select(_ item: Rail.Item) {
         let item = item == .account && flow.standing == nil ? .workspaces : item
-        thisMac.isHidden = item != .terminals
+        thisMac.isHidden = item != .sessions
         thisMac.strip.showsTabs = !thisMac.isHidden
         workspaces.isHidden = item != .workspaces || welcoming
         welcome.isHidden = item != .workspaces || !welcoming
@@ -231,7 +232,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         paintChrome()
         thisMac.connectFiles()
         switch item {
-        case .terminals:
+        case .sessions:
             thisMac.shown()
             thisMac.apply()
         case .workspaces:
@@ -259,7 +260,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Where the keys rest in the pane shown: the focused terminal, the welcome's field.
     private var restingResponder: NSResponder? {
         switch rail.selected {
-        case .terminals?: thisMac.focused?.terminal
+        case .sessions?: thisMac.focused?.terminal
         case .workspaces? where welcoming: welcome.field?.field
         default: nil
         }
@@ -313,7 +314,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if byAPerson {
             select(.workspaces)
-        } else if let shown = rail.selected, shown != .terminals {
+        } else if let shown = rail.selected, shown != .sessions {
             select(shown)
         }
     }
@@ -327,13 +328,13 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if endedOn != nil || (waited && rail.selected == .workspaces) { select(.workspaces) }
     }
 
-    /// What a person does on This Mac's page, done in Terminals: a row's Open shows its tab with
+    /// What a person does on This Mac's page, done in Sessions: a row's Open shows its tab with
     /// that terminal focused, New Shell opens a shell there at once, End Session ends it as Close does.
     private func onThisMac(_ act: LocalProjectView.Act) {
         switch act {
         case let .open(pane):
             thisMac.focus(pane)
-            select(.terminals)
+            select(.sessions)
         case .newShell: thisMac.newTab(nil)
         case let .end(pane): thisMac.endSession(pane)
         }
@@ -381,17 +382,19 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         fitTheStrip()
     }
 
-    /// The band's height in full screen, where the band is drawn by the window: the compact unified
-    /// title bar–toolbar area's in a window (AppKit sets that one).
-    package static let bandHeight = 38.0
+    /// The row the window buttons and the tabs are centred in: the compact unified title bar–toolbar
+    /// area's height in a window (AppKit sets that one), and the strip's in full screen.
+    package static let titleRow = 38.0
+    /// The chrome over the card: the title row and 4 pt under it, so the tabs do not sit on the card.
+    package static let bandHeight = titleRow + 4
     /// The least frame the window takes. AppKit keeps the compact toolbar's row out of `minSize` and
     /// adds it above: with `minSize` 600 a frame asked for at 100 pt is held at 610, the 38 pt band
     /// less a 28 pt title bar. So `minSize` is this less that row, and the drive and the tests read
     /// this alone.
     public static let leastFrame = NSSize(width: 480, height: 610)
-    /// The unified toolbar's row: the band less a plain title bar.
+    /// The unified toolbar's row: the title row less a plain title bar.
     static var toolbarRow: Double {
-        bandHeight - Double(NSWindow.frameRect(forContentRect: .zero, styleMask: [.titled]).height)
+        titleRow - Double(NSWindow.frameRect(forContentRect: .zero, styleMask: [.titled]).height)
     }
     /// The band's room between the window buttons and the first tab, wherever AppKit put the buttons.
     package static let buttonsGap = Look.Space.l
@@ -434,7 +437,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             root.addSubview(strip)
             stripInTheWindow = [
                 strip.leadingAnchor.constraint(equalTo: root.leadingAnchor), strip.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-                strip.topAnchor.constraint(equalTo: root.topAnchor), strip.heightAnchor.constraint(equalToConstant: Self.bandHeight),
+                strip.topAnchor.constraint(equalTo: root.topAnchor), strip.heightAnchor.constraint(equalToConstant: Self.titleRow),
             ]
             NSLayoutConstraint.activate(stripInTheWindow)
         } else {
@@ -533,7 +536,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         thisMac.strip.showsTabs = false
         window.contentView = root
         let belowTheTitleBar = (window.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? root.topAnchor
-        let underTheRow = content.topAnchor.constraint(equalTo: belowTheTitleBar)
+        let underTheRow = content.topAnchor.constraint(equalTo: belowTheTitleBar, constant: Self.bandHeight - Self.titleRow)
         underTheRow.priority = .defaultHigh
         NSLayoutConstraint.activate([
             rail.leadingAnchor.constraint(equalTo: root.leadingAnchor), rail.topAnchor.constraint(equalTo: content.topAnchor),
@@ -558,7 +561,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.account.show()
             self?.updateMenu()
         }
-        welcome.onTerminals = { [weak self] in self?.select(.terminals) }
+        welcome.onTerminals = { [weak self] in self?.select(.sessions) }
         userMenu.popover.fallback = { [weak self] in self?.restingResponder }
         thisMac.signedIn = { [weak self] in self?.signedIn() }
         thisMac.controlPlane = { [weak self] in self?.workspaces.person.controlPlane ?? "" }
@@ -595,11 +598,12 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.thisMac.startSession(start, project: project, name: name)
         }
         thisMac.onShow = { [weak self] in
-            guard let self, rail.selected != .terminals else { return }
-            select(.terminals)
+            guard let self, rail.selected != .sessions else { return }
+            select(.sessions)
         }
+        thisMac.onTabsListed = { [weak self] in self?.listTabs() }
         thisMac.onTitle = { [weak self] title in
-            guard let self, rail.selected == .terminals else { return }
+            guard let self, rail.selected == .sessions else { return }
             window.title = title
         }
     }
@@ -635,13 +639,6 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             UnicodeScalar(UInt16(key)).map { String(Character($0)) } ?? ""
         }
         let terminals = thisMac
-        let tabs = (1 ... 8).map { number in
-            let tab = hidden(item("Select Tab \(number)", #selector(WorkbenchView.selectTab(_:)), "\(number)", target: terminals))
-            tab.tag = number
-            return tab
-        }
-        let last = hidden(item("Select Last Tab", #selector(WorkbenchView.selectTab(_:)), "9", target: terminals))
-        last.tag = 9
         let app: [NSMenuItem] = [
             item("Account", #selector(ShellApp.showAccount(_:)), ",", target: self),
             item("Sign Out", #selector(AccountPane.signOutHere(_:)), "", target: account), .separator(),
@@ -693,21 +690,39 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item("Show Previous Tab", #selector(WorkbenchView.showPreviousTab(_:)), "{", [.command, .shift], target: terminals),
             item("Show Next Tab", #selector(WorkbenchView.showNextTab(_:)), "}", [.command, .shift], target: terminals),
         ]
-        windows += tabs
-        windows.append(last)
+        windowShipped = windows.count
+        windows += Self.listed(thisMac.tabItems())
         bar.addItem(submenu(Self.title, app))
         bar.addItem(submenu("File", file))
         bar.addItem(submenu("Edit", edit))
         bar.addItem(submenu("View", view))
-        bar.addItem(submenu("Window", windows))
+        let windowItem = submenu("Window", windows)
+        windowMenu = windowItem.submenu
+        bar.addItem(windowItem)
         return bar
+    }
+
+    /// The Window menu of the menu bar made last, and how many of its items come before the tabs.
+    private weak var windowMenu: NSMenu?
+    private var windowShipped = 0
+
+    /// The tabs as the Window menu lists them after its own items: a separator, then every tab.
+    private static func listed(_ tabs: [NSMenuItem]) -> [NSMenuItem] {
+        tabs.isEmpty ? [] : [.separator()] + tabs
+    }
+
+    /// The Window menu's tabs listed again, as the strip now holds them.
+    private func listTabs() {
+        guard let windowMenu else { return }
+        while windowMenu.items.count > windowShipped { windowMenu.removeItem(at: windowShipped) }
+        Self.listed(thisMac.tabItems()).forEach(windowMenu.addItem)
     }
 
     /// ⌃⌘S, one View item for what is in front: a workspace's tab shows or hides its files; the
     /// Workspaces section, its projects sidebar.
     @objc func toggleSidebar(_ sender: Any?) {
         switch rail.selected {
-        case .terminals: thisMac.toggleFiles(sender)
+        case .sessions: thisMac.toggleFiles(sender)
         case .workspaces: workspaces.toggleSidebar(sender)
         default: break
         }
@@ -717,7 +732,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var sidebarCommand: (title: String, enabled: Bool, reason: String?) {
         guard window.attachedSheet == nil else { return ("Show Sidebar", false, "A sheet is open.") }
         switch rail.selected {
-        case .terminals: return thisMac.filesCommand
+        case .sessions: return thisMac.filesCommand
         case .workspaces: return welcoming ? ("Show Sidebar", false, "The sidebar lists projects once you sign in.") : workspaces.sidebarCommand
         default: return ("Show Sidebar", false, "The account has no sidebar.")
         }

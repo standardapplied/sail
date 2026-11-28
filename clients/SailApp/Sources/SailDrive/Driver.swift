@@ -138,7 +138,7 @@ final class Driver {
 
     /// Whether the steps are on Terminals with a session drawn.
     var onTerminal: Bool {
-        shell.rail.selected == .terminals && pane?.session != nil
+        shell.rail.selected == .sessions && pane?.session != nil
     }
 
     /// Runs the script once, holding no process activity: the app is measured as a person runs it,

@@ -74,7 +74,7 @@
   {"name": "kit-empty-states", "kit": "empty"},
   {"name": "kit-quiet-scroller", "kit": "scroller"},
   {"name": "kit-sheets", "kit": "sheet"},
-  {"name": "kit-this-mac", "select": "terminals"},
+  {"name": "kit-this-mac", "select": "sessions"},
   {"name": "kit-this-mac-attached", "attached": true, "seconds": 30},
   {"name": "kit-title-bar-over-this-mac", "titleBar": true}
 ]}

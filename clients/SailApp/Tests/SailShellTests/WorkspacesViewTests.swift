@@ -1123,10 +1123,10 @@ import Testing
         shell.thisMac.apply()
         #expect(shell.thisMac.localSessions.map(\.pane) == [first, second] && shell.thisMac.localSessions.map(\.title) == ["This Mac", "This Mac 2"])
         shell.workspaces.local.on(.open(first))
-        #expect(shell.rail.selected == .terminals && shell.thisMac.model.focusedPane?.id == first)
+        #expect(shell.rail.selected == .sessions && shell.thisMac.model.focusedPane?.id == first)
         shell.select(.workspaces)
         shell.workspaces.local.on(.newShell)
-        #expect(shell.rail.selected == .terminals)
+        #expect(shell.rail.selected == .sessions)
         shell.select(.workspaces)
         for id in [first, second] {
             let pane = try #require(shell.thisMac.model.panes[id])
@@ -1149,7 +1149,7 @@ import Testing
         shell.workspaces.shown()
         #expect(!shell.thisMac.started, "the terminals were restored before This Mac was chosen")
         shell.workspaces.panel.onChoose(WorkspacesModel.thisMac)
-        #expect(shell.thisMac.started && shell.rail.selected != .terminals, "choosing This Mac restored nothing")
+        #expect(shell.thisMac.started && shell.rail.selected != .sessions, "choosing This Mac restored nothing")
         #expect(shell.workspaces.sessions == .listing && !shell.workspaces.text.contains(LocalProjectView.noShell), "\(shell.workspaces.text)")
     }
 

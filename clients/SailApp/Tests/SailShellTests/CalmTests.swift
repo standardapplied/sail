@@ -156,7 +156,7 @@ import Testing
         let focused = try #require(bench.model.focusedPane.flatMap { bench.panes[$0.id] })
         #expect(window.makeFirstResponder(focused.terminal) && focused.terminal.holdsTheKeys, "the focused pane holds no keys")
         let rail = Rail(look: look)
-        rail.show(.terminals)
+        rail.show(.sessions)
         let page = Count(marks(in: window)) + Count(marks(in: bench.strip)) + Count(rail.drawnMarks)
         #expect(page == Count([.accentLine, .accentLine, .accentLine]), "the terminal page draws \(page)")
         let chosen = try #require(bench.strip.tabs.first { !$0.bar.isHidden })

@@ -543,7 +543,7 @@ final class Reached: Sendable {
         let shell = try ShellApp(
             fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in Signs() }, connect: { _ in server }, vault: MemoryVaultOf(), defaults: defaults
         )
-        shell.select(.terminals)
+        shell.select(.sessions)
         _ = await AccountFlowTests.signIn(shell.flow)
         #expect(shell.flow.standing?.fde == "uday" && shell.rail.selected == .workspaces, "signed in, the window shows \(shell.rail.selected?.rawValue ?? "nothing")")
     }
@@ -555,16 +555,16 @@ final class Reached: Sendable {
         #expect(shell.rail.selected == .workspaces && !shell.welcome.isHidden && shell.account.isHidden)
     }
 
-    /// The rail, top to bottom: Workspaces, Terminals, then Account at the foot; each says its
+    /// The rail, top to bottom: Workspaces, Sessions, then Account at the foot; each says its
     /// name as its tooltip and to VoiceOver.
-    @Test func theRailReadsWorkspacesTerminalsAccount() throws {
+    @Test func theRailReadsWorkspacesSessionsAccount() throws {
         let shell = try WorkbenchLookTests.shell(.light)
         shell.window.contentView?.layoutSubtreeIfNeeded()
         let buttons = try Rail.Item.allCases.map { try #require(shell.rail.button($0)) }
         #expect(buttons.allSatisfy { !$0.isHidden }, "signed out, an item is off the rail")
         let order = buttons.sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
-        #expect(order.map { $0.toolTip ?? "" } == ["Workspaces", "Terminals", "Account"] && order.map { $0.accessibilityLabel() ?? "" } == ["Workspaces", "Terminals", "Account"])
-        #expect(Rail.Item.terminals.rawValue == "terminals")
+        #expect(order.map { $0.toolTip ?? "" } == ["Workspaces", "Sessions", "Account"] && order.map { $0.accessibilityLabel() ?? "" } == ["Workspaces", "Sessions", "Account"])
+        #expect(Rail.Item.sessions.rawValue == "sessions")
     }
 
     /// A relaunch holding no session, after a sign-in, is Welcome back by name: a second shell over
@@ -623,7 +623,7 @@ final class Reached: Sendable {
     @Test func returnStartsNoSignInWhileTheWelcomeIsNotShown() throws {
         let shell = try WelcomeViewTests.shell(RecordedServer([]), defaults: WelcomeViewTests.signedInBefore())
         try #require(shell.welcome.welcome.screen == .back && shell.welcome.signIn.keyEquivalent == "\r")
-        shell.select(.terminals)
+        shell.select(.sessions)
         #expect(shell.welcome.signIn.keyEquivalent.isEmpty, "Sign In with Passkey holds Return on Terminals")
         let returnKey = try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "\r", charactersIgnoringModifiers: "\r",

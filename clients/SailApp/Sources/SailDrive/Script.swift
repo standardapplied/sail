@@ -88,7 +88,7 @@ struct Step: Decodable {
     var attached: Bool?
     /// The view's font size must be this many points.
     var fontPoints: Double?
-    /// The rail's item to select: "workspaces", "terminals" or "account" (through the user menu).
+    /// The rail's item to select: "workspaces", "sessions" or "account" (through the user menu).
     var select: String?
     /// The control plane's address, typed into the welcome's field (Change pressed first when
     /// another screen shows).
@@ -102,7 +102,7 @@ struct Step: Decodable {
     var typeTicket: String?
     /// The welcome's primary says this "-ing" word while an action is under way, within `seconds`.
     var welcomeBusy: String?
-    /// The rail reads Workspaces, Terminals, Account, top to bottom, with this item chosen.
+    /// The rail reads Workspaces, Sessions, Account, top to bottom, with this item chosen.
     var rail: String?
     /// The welcome in a state as the page draws it, for its frames: "welcome", "connecting",
     /// "unreachable", "enroll", "creating", "signing-after-enrolling", "ticket-refused", "back",
@@ -680,6 +680,16 @@ struct Step: Decodable {
     /// Keeps the focused pane's top line; `sameTop` finds it there still.
     var markTop: Bool?
     var sameTop: Bool?
+
+    /// The strip's count clicked as a person clicks it, and while AppKit tracks its menu the menu
+    /// must list this many tabs as the Window menu does (titles, keys, the selected checked); then
+    /// `chooseTab` (from 1) is chosen, and that tab must come to be selected and shown whole.
+    var tabsMenu: Int?
+    var chooseTab: Int?
+    /// The count's menu open, the whole screen taken while it shows, in both looks.
+    var tabsMenuShot: String?
+    /// The menu bar's Window menu lists this many tabs, each as the count's menu lists it.
+    var windowMenuTabs: Int?
 
     /// The workbench: panes in each tab, the selected tab and focused pane (from 0, reading order),
     /// the selected tab's pane frames as fractions of its room `[x, y, width, height]`, and points

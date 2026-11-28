@@ -179,15 +179,20 @@ import Testing
         let content = try #require(window.contentView)
         #expect(window.contentLayoutRect.height < content.bounds.height, "\(name): the content view does not reach under the title bar")
         #expect(shell.rail.layer?.backgroundColor == NSColor.clear.cgColor, "\(name): the rail hides the chrome")
-        shell.select(.terminals)
-        let chosen = try #require(shell.rail.bar(.terminals))
+        shell.select(.sessions)
+        let chosen = try #require(shell.rail.bar(.sessions))
         #expect(!chosen.isHidden && chosen.layer?.backgroundColor == NSColor(look.accent).cgColor, "\(name): the rail's chosen item has no accent bar, as a tab's")
         #expect(shell.rail.drawnMarks == [.accentLine], "\(name): the rail's chosen item draws \(shell.rail.drawnMarks), not one accent bar on ink")
         shell.window.contentView?.layoutSubtreeIfNeeded()
         let wash = try #require(shell.rail.chosenWash)
-        #expect(near(wash.size.width, Rail.item) && near(wash.size.height, Rail.item) && wash.colour == NSColor(Tint(look.chromeWash)).cgColor, "\(name): the rail's chosen wash is \(wash)")
+        #expect(near(wash.size.width, Rail.wash) && near(wash.size.height, Rail.wash) && wash.colour == NSColor(Tint(look.chromeWash)).cgColor, "\(name): the rail's chosen wash is \(wash)")
+        let washed = try #require(shell.rail.wash(.sessions)).frame
+        #expect(near(washed.minX, 12) && near(Rail.width - washed.maxX, 12), "\(name): the chosen wash \(washed) keeps no 12 pt of chrome from the rail's sides")
+        let sessions = try #require(shell.rail.button(.sessions))
+        #expect(sessions.toolTip == "Sessions" && NSImage(systemSymbolName: "apple.terminal.on.rectangle", accessibilityDescription: nil) != nil, "\(name): the rail's second item is \(sessions.toolTip ?? "")")
+        #expect(sessions.image === SymbolInk.image("apple.terminal.on.rectangle", points: 20, weight: .regular, colour: look.railChosen.ink, accessibility: "Sessions"), "\(name): Sessions is not the stacked terminals")
         #expect(near(wash.button.height - (wash.insets.top + wash.insets.bottom), Rail.item), "\(name): the button's frame \(wash.button) is not its 42 pt alignment rect and insets \(wash.insets)")
-        for item in [Rail.Item.account, .terminals] {
+        for item in [Rail.Item.account, .sessions] {
             shell.select(item)
             #expect(content.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name) \(item): the band under the title bar is not the chrome")
         }

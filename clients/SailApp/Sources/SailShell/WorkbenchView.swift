@@ -34,6 +34,10 @@ public final class WorkbenchView: NSView {
     /// This Mac's terminals changed (one opened, went, was titled, moved folder or ended) or could
     /// not be listed, which This Mac's page says (``terminals``).
     var onSessions: @MainActor () -> Void = {}
+    /// The tabs' list changed (one opened, closed, moved, renamed, retitled or selected): the Window
+    /// menu lists them again.
+    var onTabsListed: @MainActor () -> Void = {}
+    private var listed = TabMenu(Workbench())
     /// How each of this Mac's panes whose session ended, the pane kept, ended ("exited 3 · 11:02").
     private var endings: [PaneID: String] = [:]
     /// The window is closed or in the Dock: no workspace's files are followed.
@@ -108,7 +112,7 @@ public final class WorkbenchView: NSView {
             throw .resources("the terminal's fonts cannot be read: \(error)")
         }
         banner = Card(look: look)
-        strip = TabStrip(look: look)
+        strip = TabStrip(look: look, mono: labels)
         newTerminal = SailButton("New Terminal", kind: .primary, look: look, target: nil, action: #selector(WorkbenchView.newTab(_:)))
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         compose()
@@ -286,6 +290,11 @@ public final class WorkbenchView: NSView {
             )
         }
         strip.show(items, selected: model.selected)
+        let tabs = TabMenu(model)
+        if tabs != listed {
+            listed = tabs
+            onTabsListed()
+        }
         onTitle(model.selectedTab.map { model.title(of: $0.id) } ?? ShellApp.title)
         onSessions()
     }
@@ -842,12 +851,41 @@ public final class WorkbenchView: NSView {
         change { $0.selectNeighbourTab(next: true) }
     }
 
-    /// The menu item's tag names the tab, 1 to 8, or 9 for the last.
+    /// The tab the menu item names, chosen from the strip's count or the Window menu, or by its key:
+    /// selected, and the tabs shown.
     @objc public func selectTab(_ sender: NSMenuItem) {
-        let index = sender.tag
-        change { bench in
-            if index == 9 { bench.selectLastTab() } else { bench.selectTab(at: index - 1) }
+        guard let id = sender.representedObject as? TabID else { return }
+        change { $0.select(id) }
+        onShow()
+    }
+
+    /// The widest a tab's title is listed in a menu before it is cut in the middle.
+    static let listedTitleWidth = 280.0
+
+    /// Every tab as a menu item, in the strip's order (``TabMenu``): a slot for its mark and its
+    /// form's icon, its title as the strip names it, cut in the middle past ``listedTitleWidth`` and
+    /// whole in its tooltip, its key, the selected one checked. The strip's count and the Window
+    /// menu list these.
+    package func tabItems() -> [NSMenuItem] {
+        let font = NSFont.menuFont(ofSize: 0)
+        return TabMenu(model).entries.map { entry in
+            let title = NSAttributedString(string: entry.title, attributes: [.font: font]).cutInTheMiddle(to: Self.listedTitleWidth).string
+            let item = NSMenuItem(title: title, action: #selector(selectTab(_:)), keyEquivalent: entry.key ?? "")
+            item.keyEquivalentModifierMask = .command
+            item.target = self
+            item.representedObject = entry.id
+            item.state = entry.selected ? .on : .off
+            item.toolTip = entry.title
+            item.image = TabMark.terminal
+            return item
         }
+    }
+
+    /// The menu the strip's count opens.
+    func tabsMenu() -> NSMenu {
+        let menu = NSMenu()
+        tabItems().forEach(menu.addItem)
+        return menu
     }
 
     @objc public func renameTab(_ sender: Any?) {
@@ -912,6 +950,7 @@ public final class WorkbenchView: NSView {
             close(tab)
         }
         strip.onNew = { [weak self] in self?.newTab(nil) }
+        strip.onCount = { [weak self] in self?.tabsMenu() ?? NSMenu() }
         strip.onRename = { [weak self] id, name in
             if let name { self?.model.rename(id, to: name) }
             self?.applySoon()
@@ -943,7 +982,7 @@ extension WorkbenchView: NSMenuItemValidation {
         guard window?.attachedSheet == nil else { return false }
         let panes = model.selectedTab?.layout.leaves.count ?? 0
         switch item.action {
-        case #selector(newTab(_:)): return true
+        case #selector(newTab(_:)), #selector(selectTab(_:)): return true
         case #selector(closeOtherTabs(_:)): return !isHidden && model.tabs.count > 1
         case #selector(zoomSplit(_:)), #selector(equalizeSplits(_:)), #selector(selectNextSplit(_:)), #selector(selectPreviousSplit(_:)):
             return !isHidden && panes > 1

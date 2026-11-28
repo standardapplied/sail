@@ -2,23 +2,24 @@ import AppKit
 import SailLook
 import SailTerminalView
 
-/// The icon rail, 60 pt wide on the window's chrome under the band: Workspaces on top, Terminals
+/// The icon rail, 60 pt wide on the window's chrome under the band: Workspaces on top, Sessions
 /// under it, the account at the bottom, as Mast's `.rail` (8 pt in at the top under the compact
-/// band, 12 at the bottom, 42 pt items). The selected item takes the accent fill and a 2 pt bar at
-/// its leading edge.
+/// band, 12 at the bottom, 42 pt items). The selected item takes the accent fill, 12 pt in from
+/// each side of the rail, and a 2 pt bar at its leading edge.
 @MainActor
 public final class Rail: NSView {
     public static let width = 60.0
-    /// Mast's `.rail` measures: 8 pt in at the top, 12 at the bottom, 42 pt items, a 2 pt bar.
-    static let top = 8.0, bottom = 12.0, item = 42.0, bar = 2.0, barHeight = 24.0, gap = 4.0
+    /// Mast's `.rail` measures: 8 pt in at the top, 12 at the bottom, 42 pt items, a 2 pt bar; the
+    /// chosen item's wash 36 pt, so it keeps 12 pt of chrome from each side of the rail.
+    static let top = 8.0, bottom = 12.0, item = 42.0, wash = 36.0, bar = 2.0, barHeight = 24.0, gap = 4.0
 
     public enum Item: String, CaseIterable, Sendable {
-        case workspaces, terminals, account
+        case workspaces, sessions, account
 
         var title: String {
             switch self {
             case .workspaces: "Workspaces"
-            case .terminals: "Terminals"
+            case .sessions: "Sessions"
             case .account: "Account"
             }
         }
@@ -26,7 +27,7 @@ public final class Rail: NSView {
         var symbol: String {
             switch self {
             case .workspaces: "shippingbox"
-            case .terminals: "terminal"
+            case .sessions: "apple.terminal.on.rectangle"
             case .account: "person.crop.circle"
             }
         }
@@ -41,7 +42,7 @@ public final class Rail: NSView {
     }
 
     private var buttons: [Item: NSButton] = [:]
-    /// The wash under each item, shown under the chosen one: a plain view sized 42 pt square by its
+    /// The wash under each item, shown under the chosen one: a plain view sized ``wash`` square by its
     /// constraints, so its size does not depend on how a button draws its own frame.
     private var washes: [Item: NSView] = [:]
     private var bars: [Item: NSView] = [:]
@@ -76,7 +77,7 @@ public final class Rail: NSView {
             bars[item] = bar
             let placed: NSLayoutConstraint = switch item {
             case .workspaces: button.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
-            case .terminals: button.topAnchor.constraint(equalTo: buttons[.workspaces]?.bottomAnchor ?? topAnchor, constant: Self.gap)
+            case .sessions: button.topAnchor.constraint(equalTo: buttons[.workspaces]?.bottomAnchor ?? topAnchor, constant: Self.gap)
             case .account: button.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom)
             }
             NSLayoutConstraint.activate([
@@ -85,7 +86,7 @@ public final class Rail: NSView {
                 bar.widthAnchor.constraint(equalToConstant: Self.bar), bar.centerYAnchor.constraint(equalTo: button.centerYAnchor),
                 bar.heightAnchor.constraint(equalToConstant: Self.barHeight), placed,
                 wash.centerXAnchor.constraint(equalTo: button.centerXAnchor), wash.centerYAnchor.constraint(equalTo: button.centerYAnchor),
-                wash.widthAnchor.constraint(equalToConstant: Self.item), wash.heightAnchor.constraint(equalToConstant: Self.item),
+                wash.widthAnchor.constraint(equalToConstant: Self.wash), wash.heightAnchor.constraint(equalToConstant: Self.wash),
             ])
         }
         widthAnchor.constraint(equalToConstant: Self.width).isActive = true

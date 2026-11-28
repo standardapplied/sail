@@ -182,7 +182,7 @@ final class Told: Sendable {
         let shell = try await Self.signedIn(desk)
         defer { shell.window.orderOut(nil) }
         let client = try #require(shell.workspaces.client)
-        shell.select(.terminals)
+        shell.select(.sessions)
         for route in ["GET /v1/projects", "POST /v1/projects/harbor/workspaces/dock/start"] {
             await desk.answer(try Self.ending(route))
         }
