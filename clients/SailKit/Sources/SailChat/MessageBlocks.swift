@@ -53,7 +53,7 @@ public struct MessageBlocks: Sendable {
     public var blocks: [Block] { settled + open }
 
     public static func split(_ text: String) -> [Block] {
-        Reader(lines: Reader.lines(text), depth: 0).all().map(\.block)
+        Reader.blocks(Reader.lines(text), depth: 0)
     }
 
     /// Reads only from the first open block's line on: what settled is never read again.
@@ -76,11 +76,6 @@ private struct Reader {
     let lines: [Substring]
     let depth: Int
     var at = 0
-
-    init(lines: [Substring], depth: Int) {
-        self.lines = lines
-        self.depth = depth
-    }
 
     static func lines(_ text: String) -> [Substring] {
         let bytes = text.utf8

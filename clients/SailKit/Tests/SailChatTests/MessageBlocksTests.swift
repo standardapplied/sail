@@ -303,7 +303,7 @@ enum Examples {
 /// comes, so the view lays a settled block out once.
 @Suite(.timeLimit(.minutes(1))) struct MessageBlocksStreamTests {
     static func texts() throws -> [String] {
-        try Replies.names.map(Replies.text) + Examples.all.map(\.0) + ["Some text\n# Title\nmore", "| a |\n| - |\n| 1 |\n---x\n\nend"]
+        try Replies.names.map(Replies.text) + Examples.all.map(\.0) + ["Some text\n# Title\nmore", "| a |\n| - |\n| 1 |\n---x\n\nend", "Text\n| a |\n| -x |"]
     }
 
     static func prefixes(of text: String) -> [String] {
