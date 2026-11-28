@@ -70,7 +70,7 @@ package final class PageColumn: NSView {
         nil
     }
 
-    override var isFlipped: Bool {
+    override package var isFlipped: Bool {
         true
     }
 
