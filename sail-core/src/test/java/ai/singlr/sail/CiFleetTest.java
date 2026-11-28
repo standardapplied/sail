@@ -27,7 +27,9 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -67,9 +69,21 @@ class CiFleetTest {
 
   /**
    * A check limit whose timer, the stand-in {@code sleep}, runs out only once the check's remote
-   * command writes to the FIFO {@code go}; a minute's grace after it runs out at once.
+   * command writes to the FIFO {@code go}; a minute's grace after it runs out at once, or never
+   * where the test makes the FIFO {@code grace}. Each of the two adds its own pid and its parent's,
+   * the timer's shell, to {@code timers}.
    */
   private static final String LIMIT = "1000";
+
+  /**
+   * {@code wait} shadowed, as a check calls it, by one that lets it go on only once the check's
+   * timer has started and its body has ended and been reaped, and a foreground command has run
+   * after that, at which bash -c drops the ended job from its job table: the order a busy runner
+   * gives at random, every time.
+   */
+  private static final String WAITS_ONCE_THE_BODY_HAS_ENDED =
+      "wait() { until [[ -s $FLEET_TEST/timers ]]; do :; done;"
+          + " while kill -0 \"$job\" 2> /dev/null; do :; done; env true; builtin wait \"$@\"; } && ";
 
   @TempDir Path dir;
   private Path runs;
@@ -100,13 +114,37 @@ class CiFleetTest {
         bin.resolve("sleep"),
         """
         case $1 in
+          %s | 60) echo "$$ $PPID" >> "$FLEET_TEST/timers" ;;
+        esac
+        case $1 in
           %s) exec cat "$FLEET_TEST/go" ;;
-          60) exit 0 ;;
+          60) [[ -p $FLEET_TEST/grace ]] && exec cat "$FLEET_TEST/grace"; exit 0 ;;
         esac
         PATH=${PATH#*:} exec sleep "$@"
         """
-            .formatted(LIMIT));
+            .formatted(LIMIT, LIMIT));
     remote(READS_ITS_INPUT);
+  }
+
+  /**
+   * A timer a failed test left waiting on one of the test's FIFOs is ended with the test; its shell
+   * then runs to its end. A pid taken since by a process that names no file of the test's is left.
+   */
+  @AfterEach
+  void noTimerOutlivesItsTest() throws IOException {
+    var timers = dir.resolve("timers");
+    if (Files.exists(timers)) {
+      for (var line : Files.readAllLines(timers)) {
+        for (var pid : line.split(" ")) {
+          ProcessHandle.of(Long.parseLong(pid))
+              .filter(
+                  process ->
+                      Stream.of(process.info().arguments().orElse(new String[0]))
+                          .anyMatch(argument -> argument.startsWith(dir.toString())))
+              .ifPresent(ProcessHandle::destroyForcibly);
+        }
+      }
+    }
   }
 
   @Test
@@ -714,13 +752,14 @@ class CiFleetTest {
       assertFalse(
           ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
           "the remote command outlived its check");
+      assertEveryTimerEnds();
     }
   }
 
   @Test
   void aCheckThatIgnoresTermIsKilledAfterItsGraceAndTheRunGoesOn() throws Exception {
     var never = dir.resolve("never");
-    run("mkfifo", never.toString(), dir.resolve("go").toString());
+    run("mkfifo", never.toString(), dir.resolve("go").toString(), dir.resolve("grace").toString());
 
     try (var held = new RandomAccessFile(never.toFile(), "rw")) {
       var ended =
@@ -742,19 +781,51 @@ class CiFleetTest {
       assertFalse(
           ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
           "the check that ignored TERM outlived its grace");
+      assertEveryTimerEnds();
+    }
+  }
+
+  @Test
+  void aCheckWhoseOwnShellIgnoresTermIsKilledWhenItsGraceRunsOutAndTheRunGoesOn() throws Exception {
+    var never = dir.resolve("never");
+    run("mkfifo", never.toString(), dir.resolve("go").toString());
+
+    try (var held = new RandomAccessFile(never.toFile(), "rw")) {
+      var ended =
+          Child.run(
+              shell(
+                  SOURCED
+                      + "stubborn() { trap '' TERM; echo $BASHPID > \"$FLEET_TEST/pid\";"
+                      + " echo > \"$FLEET_TEST/go\"; exec cat \"$FLEET_TEST/never\"; }"
+                      + " && { check_within %s stubborn 'ignores TERM' stubborn || true; }"
+                          .formatted(LIMIT)
+                      + " && check stubborn after true",
+                  SCRIPT.toString()));
+
+      assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
+      var log = runs.resolve("stubborn").resolve(logOf("ignores TERM"));
+      assertEquals(
+          List.of("FAIL ignores TERM (did not end within 1000 s; see " + log + ")", "PASS after"),
+          report("stubborn"));
+      var pid = Long.parseLong(Files.readString(dir.resolve("pid")).strip());
+      assertFalse(
+          ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
+          "the check that ignored TERM outlived its grace");
+      assertEveryTimerEnds();
     }
   }
 
   @ParameterizedTest
   @CsvSource({"HUP, 129", "INT, 130", "TERM, 143"})
-  void aRunStoppedWhileACheckRunsEndsTheChecksRemoteCommandAndExitsByTheSignal(
+  void aRunStoppedWhileACheckRunsEndsTheChecksRemoteCommandAndTimerAndExitsByTheSignal(
       String signal, int exit) throws Exception {
     var never = dir.resolve("never");
     var ready = dir.resolve("ready");
-    run("mkfifo", never.toString(), ready.toString());
+    run("mkfifo", never.toString(), ready.toString(), dir.resolve("go").toString());
     remote(
         """
         if [[ $1 == client ]]; then
+          until [[ -s $FLEET_TEST/timers ]]; do :; done
           echo $$ > "$FLEET_TEST/ready"
           exec cat "$FLEET_TEST/never"
         fi
@@ -763,7 +834,7 @@ class CiFleetTest {
 
     try (var held = new RandomAccessFile(never.toFile(), "rw")) {
       var script =
-          fleet(Map.of(), "containers", "stopped")
+          fleet(Map.of("FLEET_CHECK_LIMIT", LIMIT), "containers", "stopped")
               .redirectInput(Child.NO_INPUT)
               .redirectErrorStream(true)
               .redirectOutput(dir.resolve("said").toFile())
@@ -781,10 +852,56 @@ class CiFleetTest {
         assertTrue(script.waitFor(Child.PATIENCE.toMillis(), TimeUnit.MILLISECONDS));
         assertEquals(exit, script.exitValue(), Files.readString(dir.resolve("said")));
         hung.onExit().get(Child.PATIENCE.toMillis(), TimeUnit.MILLISECONDS);
+        assertEveryTimerEnds();
       } finally {
         Child.end(script);
       }
     }
+  }
+
+  /**
+   * The stop that lands in the one place no command can be hooked, after the timer's fork and
+   * before {@code timer=$!}: a DEBUG trap sends it as {@code timer=$!} is about to run, once the
+   * timer has started, and bash runs the stop's trap before that assignment.
+   */
+  @Test
+  void aCheckStoppedAsItsTimerStartsEndsTheTimerToo() throws Exception {
+    var never = dir.resolve("never");
+    run("mkfifo", never.toString(), dir.resolve("go").toString());
+
+    try (var held = new RandomAccessFile(never.toFile(), "rw")) {
+      var ended =
+          Child.run(
+              shell(
+                  SOURCED
+                      + "set -T && trap '[[ $BASH_COMMAND == \"timer=\\$!\" ]]"
+                      + " && { until [[ -s $FLEET_TEST/timers ]]; do :; done; kill -TERM $$; }'"
+                      + " DEBUG && check_within %s stopped 'stopped as its timer starts' cat"
+                          .formatted(LIMIT)
+                      + " \"$FLEET_TEST/never\"",
+                  SCRIPT.toString()));
+
+      assertEquals(143, ended.exit(), ended.stdout() + ended.stderr());
+      assertFalse(Files.exists(runs.resolve("stopped").resolve("report.txt")), "it reported");
+      assertEveryTimerEnds();
+    }
+  }
+
+  @Test
+  void aRunStartedWithTermIgnoredRefusesToRunAnyCheckAndSaysWhy() throws Exception {
+    var command = new ArrayList<>(List.of("env", "--ignore-signal=TERM", SCRIPT.toString()));
+    command.addAll(List.of("containers", "ignored"));
+    var ended =
+        Child.run(
+            builder(Map.of("FLEET_CHECK_LIMIT", LIMIT), command).redirectInput(Child.NO_INPUT));
+
+    assertEquals(2, ended.exit(), ended.stdout() + ended.stderr());
+    assertEquals(
+        "ci/fleet: SIGTERM is ignored where it was started, so no check could be stopped; start it"
+            + " where TERM is delivered.\n",
+        ended.stderr());
+    assertFalse(Files.exists(runs.resolve("ignored")), "a check ran");
+    assertEquals(List.of(), calls());
   }
 
   @Test
@@ -831,6 +948,60 @@ class CiFleetTest {
 
     assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
     assertEquals(List.of("PASS goes on"), report("body-run"));
+  }
+
+  @Test
+  void aCheckWhoseBodyEndedBeforeItsWaitPassesAtOnceAndLeavesNoTimerRunning() throws Exception {
+    var ended = beforeItsWait("ended before its wait", "true");
+
+    assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
+    assertEquals(List.of("PASS ended before its wait"), report("early"));
+  }
+
+  @Test
+  void aCheckWhoseBodyFailedBeforeItsWaitFailsByItsBodyNotByItsTimer() throws Exception {
+    var ended = beforeItsWait("failed before its wait", "bash -c 'echo said; exit 3'");
+
+    assertEquals(1, ended.exit(), ended.stdout() + ended.stderr());
+    var log = runs.resolve("early").resolve(logOf("failed before its wait"));
+    assertEquals(List.of("FAIL failed before its wait (see " + log + ")"), report("early"));
+    assertEquals("said\n", Files.readString(log));
+  }
+
+  /**
+   * The check {@code name} of {@code body} at {@link #LIMIT}, its body over before its wait is
+   * reached; then every process of its timer ends.
+   */
+  private Child.Ended beforeItsWait(String name, String body) throws Exception {
+    run("mkfifo", dir.resolve("go").toString());
+    var ended =
+        Child.run(
+            shell(
+                SOURCED
+                    + WAITS_ONCE_THE_BODY_HAS_ENDED
+                    + "check_within %s early '%s' %s".formatted(LIMIT, name, body),
+                SCRIPT.toString()));
+    assertEveryTimerEnds();
+    return ended;
+  }
+
+  /**
+   * Every timer a check started, its shell and its {@code sleep}, ends. Its shell has ended when
+   * the check returns; its {@code sleep}, signalled with it, may finish dying just after.
+   */
+  private void assertEveryTimerEnds() throws Exception {
+    var timers = Files.readAllLines(dir.resolve("timers"));
+    assertFalse(timers.isEmpty(), "no check started a timer");
+    for (var pid : timers.stream().flatMap(timer -> Stream.of(timer.split(" "))).toList()) {
+      var process = ProcessHandle.of(Long.parseLong(pid));
+      if (process.isPresent()) {
+        try {
+          process.get().onExit().get(Child.PATIENCE.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException running) {
+          throw new AssertionError("the timer's process " + pid + " outlived its check", running);
+        }
+      }
+    }
   }
 
   @Test
