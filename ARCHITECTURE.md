@@ -4524,10 +4524,14 @@ logs `answered {request, decision, message?, answers?, by}`, takes the held step
 writes one `control_response` (`LiveReply.reply`), and answers `{"seq"}` (an answer whose log write
 fails leaves the step held, so its retry is the one): an allow hands back the
 step's own input, `allow_always` its own `permission_suggestions` exactly and only when its item
-offers an `always` (never for a Bash rule whose text holds `>` or `<`, inside quotes too: Claude
-Code 2.1.332 asked again for a command writing through `>` with its exact rule kept, in its own
-process and in one that read the rule at start, `chat-probe6`), a denial the person's words
-untrimmed (at most `CONTENT_CODE_POINTS`, else "The person did not allow this."), and an answer
+offers an `always` (`HarnessChat.always`, the one decision for the card and this gate; never for
+a Bash request whose command holds `>` or `<`, nor a Bash rule whose text does, inside quotes too,
+whatever rule is suggested: Claude Code 2.1.332 asked again for a command writing through `>` with
+a kept rule that allowed it, exact (`chat-probe6`) or a prefix with no `>` that it suggested itself
+(`chat-probe7`), in its own process and in one that read the rule at start, while a kept prefix
+rule did let a command through that does not redirect, so a prefix card says it does not cover a
+write through `>`; the refusal, `HarnessChat.noAlways`, says which of these withheld it), a denial
+the person's words untrimmed (at most `CONTENT_CODE_POINTS`, else "The person did not allow this."), and an answer
 one per question by its exact text, labels of its own choices joined by `", "` as Claude Code reads
 them, or the person's own words (`chat-probe5` 02, 03).
 A request this sail's process does not hold is refused from what the log says of it
