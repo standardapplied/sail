@@ -53,7 +53,10 @@ public interface AgentProcess {
     /** The process's pid inside the container, read from its pid file; empty until written. */
     OptionalInt pid();
 
-    /** Sends {@code signal} to the process inside the container; a process already gone is fine. */
+    /**
+     * Sends {@code signal} to the process inside the container while it is the one its wrapper
+     * recorded, and to nothing else; a process already gone is fine.
+     */
     void signal(Signal signal);
 
     /**
