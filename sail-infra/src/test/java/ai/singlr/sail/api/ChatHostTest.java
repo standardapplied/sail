@@ -44,9 +44,9 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * A chat as its host holds it: opened as a pty agent starts, one process a conversation started
  * only by a message, every item logged before it is read and read from where a reader left off, a
- * message held while a turn is open, a request held and withdrawn in plain words at its bound, the
- * process ended when idle, when its chat ends and when sail stops, and the turn a restart cut
- * closed as cut. Each process stands in, fed what Claude Code 2.1.332 wrote.
+ * message held while a turn is open, a request held until its person answers it, the process ended
+ * when idle, when its chat ends and when sail stops, and the turn a restart cut closed as cut. Each
+ * process stands in, fed what Claude Code 2.1.332 wrote.
  */
 class ChatHostTest {
 

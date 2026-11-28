@@ -623,6 +623,50 @@ class CiFleetTest {
     assertTrue(Files.readString(log).contains(says), Files.readString(log));
   }
 
+  /**
+   * The answers row's wait for a turn after a command was allowed always ends as soon as the
+   * command asks again, as Claude Code 2.1.332 did on the fleet for a command writing through a
+   * redirect, so the row names that at once instead of waiting it out as a turn that never ends;
+   * and a failing step prints what the chat said since it began, never an empty page alone.
+   */
+  @Test
+  void theAnswersRowsWaitEndsOnARequestAskedAgainAndItsFailureSaysWhatTheChatSaid()
+      throws Exception {
+    var row = constant("CHAT_ANSWERS");
+    var start = row.indexOf("<<\"PY\"\n") + "<<\"PY\"\n".length();
+    var step = dir.resolve("chat-step.py");
+    Files.writeString(
+        step, row.substring(start, row.indexOf("\nPY\n", start)).replace("/tmp/", dir + "/"));
+    Files.writeString(
+        dir.resolve("chat-items.json"),
+        YamlUtil.dumpJson(
+            List.of(
+                Map.of("seq", 22, "type", "turn_ended"),
+                Map.of("seq", 23, "type", "message", "text", "Use the Bash tool"),
+                Map.of(
+                    "seq",
+                    25,
+                    "type",
+                    "permission",
+                    "id",
+                    "607188f7",
+                    "words",
+                    "Write fleet-7341 to always.txt"))));
+
+    var settled = run("python3", "-I", step.toString(), "settled", "22", "-").stdout().strip();
+    var unasked = run("python3", "-I", step.toString(), "unasked", "22", "-").stdout().strip();
+    var nothingYet = run("python3", "-I", step.toString(), "settled", "25", "-").stdout().strip();
+    var since = run("python3", "-I", step.toString(), "since", "22", "-").stdout();
+
+    assertEquals(List.of("yes", "asked", "-"), List.of(settled, unasked, nothingYet));
+    assertEquals(
+        List.of(
+            "what the chat said since seq 22:",
+            "  23 message {}",
+            "  25 permission {\"id\": \"607188f7\", \"words\": \"Write fleet-7341 to always.txt\"}"),
+        since.strip().lines().toList());
+  }
+
   @Test
   void aPersonsOwnSshPassesTheInputTheyGiveItOn() throws Exception {
     var ended =

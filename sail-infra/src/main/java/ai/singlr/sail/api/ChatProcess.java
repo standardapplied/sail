@@ -10,12 +10,15 @@ import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ChatWire;
 import ai.singlr.sail.engine.LiveChat;
+import ai.singlr.sail.engine.LiveReply;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.harness.HarnessChat;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -27,8 +30,10 @@ import java.util.Objects;
  * read whole is refused at once ({@link #refuseNow}), or, naming nothing to answer, its turn is
  * stopped ({@link #stopTurn}). At a turn's end what it left open is closed, and when the process
  * ends, however it ends, a turn it left open is cut ({@link ChatLog#cut}): its requests die with
- * it, and a resume replays none. However its reading stops, the process is ended. Every field a
- * line or a message moves is guarded by it, which is also the guard a turn starts under.
+ * it, and a resume replays none. However its reading stops, the process is ended. Each request a
+ * person can answer is held, its step whole, until it is answered once ({@link #answer}),
+ * withdrawn, its turn ends or the process ends: nothing else ever answers one. Every field a line
+ * or a message moves is guarded by it, which is also the guard a turn starts under.
  */
 final class ChatProcess {
 
@@ -49,6 +54,8 @@ final class ChatProcess {
   private final Duration maxIdle;
   private final Host host;
   private final ChatEnd end;
+  private final String broken;
+  private final Map<String, Step> asked = new HashMap<>();
   private ChatItem.Session lastSession;
   private Instant lastActivity;
   private Instant stopAsked;
@@ -78,6 +85,10 @@ final class ChatProcess {
     this.maxIdle = Objects.requireNonNull(maxIdle, "maxIdle");
     this.host = Objects.requireNonNull(host, "host");
     this.end = new ChatEnd(this, session, agent, handle, timing);
+    this.broken =
+        agent
+            + "'s process stopped taking what Sail wrote to it, so Sail ended it; your next message"
+            + " starts it again.";
     this.lastActivity = timing.clock().get();
   }
 
@@ -125,6 +136,9 @@ final class ChatProcess {
       default -> {}
     }
     for (var item : LiveChat.items(step, chat)) {
+      if (item instanceof ChatItem.Request request) {
+        asked.put(request.id(), step);
+      }
       take(item);
     }
     notifyAll();
@@ -140,20 +154,28 @@ final class ChatProcess {
     if (unreadable.requestId() == null) {
       stopTurn();
     } else {
-      write(LiveChat.refuseUnreadable(unreadable));
+      write(LiveChat.refuseUnreadable(unreadable), broken);
     }
   }
 
-  /** Stops the open turn; the process stays, and takes the next message as a new turn. */
+  /**
+   * Stops the open turn; the process stays, and takes the next message as a new turn. One that has
+   * not stopped {@link ChatTiming#stopBound} after is ended ({@link #overBound}).
+   */
   private void stopTurn() {
-    write(LiveChat.interrupt(Ids.newId().toString()));
+    stopAsked = timing.clock().get();
+    write(LiveChat.interrupt(Ids.newId().toString()), broken);
   }
 
   /**
    * The mode the harness said it is in, which a resume launches in; its first chat mode when what
-   * it said is no mode's name a launch may pass on.
+   * it said is no mode's name a launch may pass on; none while the process ends, whose word no
+   * longer sets the mode the next one starts in.
    */
   private String inForce(String said) {
+    if (end.ending()) {
+      return null;
+    }
     try {
       return new HarnessChat.Launch(said, null, null).mode();
     } catch (IllegalArgumentException unsafe) {
@@ -167,6 +189,9 @@ final class ChatProcess {
    * message waiting handed on.
    */
   private void take(ChatItem item) {
+    if (item instanceof ChatItem.Withdrawn withdrawn && asked.remove(withdrawn.id()) == null) {
+      return;
+    }
     if (item instanceof ChatItem.Session said) {
       if (said.equals(lastSession)) {
         return;
@@ -174,6 +199,7 @@ final class ChatProcess {
       lastSession = said;
     }
     if (item instanceof ChatItem.TurnEnded ended) {
+      asked.clear();
       log.turnEnded(ended);
       turnOpen = false;
       stopAsked = null;
@@ -214,7 +240,84 @@ final class ChatProcess {
    * read, so nothing it answers goes unread. Called under the monitor.
    */
   private boolean takes() {
-    return !turnOpen && !end.ending() && reading;
+    return !turnOpen && writable();
+  }
+
+  /** Whether the process takes a line now: it is not ending, and it is still read. */
+  private boolean writable() {
+    return !end.ending() && reading;
+  }
+
+  /**
+   * Answers the request {@code id} it holds with {@code reply}, the person {@code by}'s, once:
+   * {@code answered} logged, the step taken out, then the answer written, so the log never says
+   * less than the agent was told, and an answer that could not be logged leaves the request held
+   * for the next. Returns the seq it was logged as, or 0, logging and writing nothing, when it
+   * holds no such request.
+   *
+   * @throws ApiException {@code withdrawn} when it holds it but takes no answer: it is ending, no
+   *     longer read or its turn is being stopped, or the answer was not taken, said in the cut of
+   *     the turn
+   * @throws IllegalArgumentException for a reply the request does not take, which leaves it held
+   */
+  synchronized long answer(String id, LiveReply.Reply reply, String by, ApiException withdrawn) {
+    var step = asked.get(id);
+    if (step == null) {
+      return 0;
+    }
+    if (!writable() || stopAsked != null) {
+      throw withdrawn;
+    }
+    var line = LiveReply.reply(step, reply, chat);
+    var seq =
+        log.log(new ChatWire.Answered(id, reply.decision(), reply.message(), reply.answers(), by));
+    asked.remove(id);
+    if (!write(
+        line,
+        agent
+            + " did not get your answer: its process stopped taking what Sail wrote to it, so Sail"
+            + " ended it; your next message starts it again.")) {
+      throw withdrawn;
+    }
+    return seq;
+  }
+
+  /**
+   * Stops the open turn, once: an interrupt is written only when none is in flight and the process
+   * takes it. Returns whether a turn is stopping, one ending with its process included.
+   */
+  synchronized boolean stop() {
+    if (!turnOpen) {
+      return false;
+    }
+    if (stopAsked == null && writable()) {
+      stopTurn();
+    }
+    return true;
+  }
+
+  /**
+   * Puts the process in {@code mode}, the person {@code by}'s choice, between turns: logged, then
+   * asked of the harness under an id of its own, which its answer names; one that takes no line, or
+   * does not take this one, keeps it as the mode the next process starts in. Returns the seq it was
+   * logged as.
+   *
+   * @throws ApiException {@code turnOpen} while a turn is open
+   */
+  synchronized long setMode(String mode, String by, ApiException turnOpen) {
+    if (this.turnOpen) {
+      throw turnOpen;
+    }
+    if (!writable()) {
+      log.said(null, mode);
+      return log.log(new ChatWire.ModeSet(mode, null, by));
+    }
+    var request = Ids.newId().toString();
+    var seq = log.log(new ChatWire.ModeSet(mode, request, by));
+    if (!write(LiveChat.setMode(request, mode), broken)) {
+      log.said(null, mode);
+    }
+    return seq;
   }
 
   /**
@@ -227,7 +330,7 @@ final class ChatProcess {
       return;
     }
     var message = ChatLog.fields(next.get());
-    if (!write(LiveStream.userMessage((String) message.get("text")))) {
+    if (!write(LiveStream.userMessage((String) message.get("text")), broken)) {
       return;
     }
     took = true;
@@ -235,29 +338,27 @@ final class ChatProcess {
     if (Boolean.TRUE.equals(message.get("queued"))) {
       log.log(new ChatWire.Delivered(next.get().seq()));
     }
-    lastActivity = timing.clock().get();
     turnOpen = true;
     log.turn(true);
   }
 
   /**
    * Writes {@code line} on the process's stdin; returns whether it took it. A process that no
-   * longer reads is ended, on a thread of its own.
+   * longer reads begins its end at once, so the turn it cuts says {@code why} however soon its
+   * output ends, and is ended on a thread of its own. Called under the monitor.
    */
-  private boolean write(String line) {
+  private boolean write(String line, String why) {
     try {
       handle.stdin().write(line);
+      lastActivity = timing.clock().get();
       return true;
-    } catch (IOException broken) {
+    } catch (IOException refused) {
+      if (!end.ending()) {
+        end.begin(why);
+      }
       Thread.ofVirtual()
           .name("sail-chat-broken-" + session)
-          .start(
-              () ->
-                  end.end(
-                      timing.grace().afterInt(),
-                      agent
-                          + "'s process stopped taking what Sail wrote to it, so Sail ended it;"
-                          + " your next message starts it again."));
+          .start(() -> end.end(timing.grace().afterInt(), why));
       return false;
     }
   }
@@ -303,30 +404,12 @@ final class ChatProcess {
   }
 
   /**
-   * Holds the open turn's requests to {@code bound} at {@code now}: once one has waited it out, the
-   * person is told and the turn stopped, the process kept (one whose stdin is closed is ended, as a
-   * write it no longer takes ends it). Returns whether the process must be ended: its turn not
-   * stopped a bound after it was asked to.
+   * Whether the process must be ended at {@code now}: its turn not stopped {@code bound} after Sail
+   * asked it to stop. A request is never held to a time: only an answer, or the harness withdrawing
+   * it, ends its wait, for days if need be.
    */
   synchronized boolean overBound(Instant now, Duration bound) {
-    if (!turnOpen) {
-      return false;
-    }
-    if (stopAsked != null) {
-      return !now.isBefore(stopAsked.plus(bound));
-    }
-    if (log.open().requests().values().stream()
-        .allMatch(since -> now.isBefore(since.plus(bound)))) {
-      return false;
-    }
-    log.log(
-        new ChatWire.Told(
-            "Nobody can answer the agent's request in this version of Sail, so after "
-                + bound.toMinutes()
-                + " minutes Sail stopped its turn and withdrew the request."));
-    stopAsked = now;
-    stopTurn();
-    return false;
+    return turnOpen && stopAsked != null && !now.isBefore(stopAsked.plus(bound));
   }
 
   /**

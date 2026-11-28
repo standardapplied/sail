@@ -1,0 +1,359 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat?after=0"
+  },
+  "response": {
+    "body": {
+      "ended": false,
+      "items": [
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "by": "dana",
+          "mode": "acceptEdits",
+          "seq": 1,
+          "type": "mode_set"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "queued": false,
+          "seq": 2,
+          "text": "hi",
+          "type": "message"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "clipped": false,
+          "commands": [
+            "sail-portal",
+            "spec-board",
+            "deep-research",
+            "design",
+            "design-sync",
+            "dataviz",
+            "update-config",
+            "verify",
+            "debug",
+            "code-review",
+            "simplify",
+            "batch",
+            "fewer-permission-prompts",
+            "doctor",
+            "claude-approvals",
+            "loop",
+            "claude-api",
+            "workflow-authoring",
+            "run",
+            "run-skill-generator",
+            "plugin-authoring",
+            "advisor",
+            "agents",
+            "auto-mode-setup",
+            "autocompact",
+            "clear",
+            "color",
+            "compact",
+            "config",
+            "output-style",
+            "context",
+            "effort",
+            "fast",
+            "focus",
+            "heapdump",
+            "init",
+            "mcp",
+            "import",
+            "model",
+            "__remote-workflow",
+            "workflow-launch-exec",
+            "reload-plugins",
+            "reload-skills",
+            "rename",
+            "security-review",
+            "usage",
+            "insights",
+            "recap",
+            "skill-doctor",
+            "goal",
+            "design-consent",
+            "design-revoke",
+            "list-agents",
+            "team-onboarding"
+          ],
+          "mode": "default",
+          "model": "claude-haiku-5-5",
+          "seq": 3,
+          "skills": [
+            "sail-portal",
+            "spec-board",
+            "deep-research",
+            "design",
+            "design-sync",
+            "dataviz",
+            "update-config",
+            "verify",
+            "debug",
+            "code-review",
+            "simplify",
+            "batch",
+            "fewer-permission-prompts",
+            "doctor",
+            "claude-approvals",
+            "loop",
+            "claude-api",
+            "workflow-authoring",
+            "run",
+            "run-skill-generator",
+            "plugin-authoring"
+          ],
+          "type": "session"
+        },
+        {
+          "always": [],
+          "at": "2026-11-11T09:00:00.656Z",
+          "call": "toolu_0141vQp3ZLZeTkyPqpEQpvda",
+          "clipped": false,
+          "detail": {
+            "background": false,
+            "clipped": false,
+            "line": "printf twice > twice.txt",
+            "type": "command"
+          },
+          "id": "00000000-0000-7000-8000-000000000007",
+          "kind": "command",
+          "seq": 4,
+          "type": "permission",
+          "words": "Write twice to twice.txt via printf"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "by": "dana",
+          "decision": "deny",
+          "message": "use the existing spinner instead",
+          "request": "00000000-0000-7000-8000-000000000007",
+          "seq": 5,
+          "type": "answered"
+        },
+        {
+          "always": [
+            {
+              "words": [
+                "Allow this exact command: `touch always.txt`, also when another command such as timeout, nice or nohup starts it, and as part of a longer line whose other commands need no asking, from now on, for every Claude Code chat and terminal in this workspace (kept in the workspace's .claude/settings.local.json).",
+                "Let it work in the folder `/home/dev/workspace`, for this session only.",
+                "Switch this chat to Edits freely: Edits files, and runs file commands such as rm, mv, cp and sed, inside this workspace and any folder you let it work in, without asking; it still asks before such a command anywhere else. It stays for the rest of this chat."
+              ]
+            }
+          ],
+          "at": "2026-11-11T09:00:00.656Z",
+          "call": "toolu_01VH3wM1frxF9fXQX779TBXL",
+          "clipped": false,
+          "detail": {
+            "background": false,
+            "clipped": false,
+            "line": "touch always.txt",
+            "type": "command"
+          },
+          "id": "00000000-0000-7000-8000-000000000009",
+          "kind": "command",
+          "seq": 6,
+          "type": "permission",
+          "words": "Create empty always.txt file"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "by": "dana",
+          "decision": "allow_always",
+          "request": "00000000-0000-7000-8000-000000000009",
+          "seq": 7,
+          "type": "answered"
+        },
+        {
+          "always": [],
+          "at": "2026-11-11T09:00:00.656Z",
+          "call": "toolu_01UVrA58BQqEVNtdVs5d7oDG",
+          "clipped": false,
+          "detail": {
+            "background": false,
+            "clipped": false,
+            "line": "echo probe-c.txt | xargs touch",
+            "type": "command"
+          },
+          "id": "00000000-0000-7000-8000-000000000010",
+          "kind": "command",
+          "seq": 8,
+          "type": "permission",
+          "words": "Create probe-c.txt via xargs touch"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "by": "dana",
+          "decision": "allow",
+          "request": "00000000-0000-7000-8000-000000000010",
+          "seq": 9,
+          "type": "answered"
+        },
+        {
+          "always": [],
+          "at": "2026-11-11T09:00:00.656Z",
+          "call": "toolu_01C2VMe9ubaU1aFMnnUS5nxC",
+          "clipped": false,
+          "detail": {
+            "background": false,
+            "clipped": false,
+            "line": "date > stamp.txt",
+            "type": "command"
+          },
+          "id": "00000000-0000-7000-8000-000000000011",
+          "kind": "command",
+          "seq": 10,
+          "type": "permission",
+          "words": "Write current date into stamp.txt"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "by": "dana",
+          "decision": "allow",
+          "request": "00000000-0000-7000-8000-000000000011",
+          "seq": 11,
+          "type": "answered"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "call": "toolu_014Q2Cg49azFoLYDbBw638LT",
+          "id": "00000000-0000-7000-8000-000000000012",
+          "questions": [
+            {
+              "choices": [
+                {
+                  "about": "Select Red",
+                  "clipped": false,
+                  "label": "Red"
+                },
+                {
+                  "about": "Select Blue",
+                  "clipped": false,
+                  "label": "Blue"
+                },
+                {
+                  "about": "Select Green",
+                  "clipped": false,
+                  "label": "Green"
+                }
+              ],
+              "clipped": false,
+              "header": "Colors",
+              "multi_select": true,
+              "question": "Which colors?"
+            },
+            {
+              "choices": [
+                {
+                  "about": "Select Small",
+                  "clipped": false,
+                  "label": "Small"
+                },
+                {
+                  "about": "Select Large",
+                  "clipped": false,
+                  "label": "Large"
+                }
+              ],
+              "clipped": false,
+              "header": "Size",
+              "multi_select": false,
+              "question": "Which size?"
+            }
+          ],
+          "seq": 12,
+          "type": "question"
+        },
+        {
+          "answers": [
+            {
+              "chosen": [
+                "Red",
+                "Blue"
+              ],
+              "question": "Which colors?"
+            },
+            {
+              "chosen": [],
+              "own": "teal, but only on weekends",
+              "question": "Which size?"
+            }
+          ],
+          "at": "2026-11-11T09:00:00.656Z",
+          "by": "dana",
+          "decision": "answer",
+          "request": "00000000-0000-7000-8000-000000000012",
+          "seq": 13,
+          "type": "answered"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "call": "toolu_013gcyynq43U4qWvaJZkUQ9Q",
+          "clipped": false,
+          "id": "00000000-0000-7000-8000-000000000013",
+          "plan": "Create /home/dev/workspace/hello.txt containing \"bye\".\n",
+          "seq": 14,
+          "type": "plan"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "by": "dana",
+          "decision": "allow",
+          "request": "00000000-0000-7000-8000-000000000013",
+          "seq": 15,
+          "type": "answered"
+        },
+        {
+          "always": [],
+          "at": "2026-11-11T09:00:00.656Z",
+          "call": "toolu_01R3SmtEvaz5G8nyrbNmWyt2",
+          "clipped": false,
+          "detail": {
+            "background": false,
+            "clipped": false,
+            "line": "date > c.txt",
+            "type": "command"
+          },
+          "id": "00000000-0000-7000-8000-000000000014",
+          "kind": "command",
+          "seq": 16,
+          "type": "permission",
+          "words": "Write current date into c.txt"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "id": "00000000-0000-7000-8000-000000000014",
+          "seq": 17,
+          "type": "withdrawn"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "seq": 18,
+          "type": "interrupted"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "cost_usd": 2.68005E-4,
+          "duration_ms": 2849,
+          "seq": 19,
+          "tokens_in": 11014,
+          "tokens_out": 81,
+          "type": "turn_ended"
+        },
+        {
+          "at": "2026-11-11T09:00:00.656Z",
+          "by": "dana",
+          "mode": "plan",
+          "request": "00000000-0000-7000-8000-000000000015",
+          "seq": 20,
+          "type": "mode_set"
+        }
+      ],
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

@@ -13,14 +13,15 @@ import java.util.function.Supplier;
 /**
  * Time as a chat's host reads it, injectable so tests never sleep: the clock, how a pause is waited
  * (the text window), how a read waits for an item ({@code patience}) and the most it waits ({@code
- * poll}), how long a request is held unanswered, and the ending grace.
+ * poll}), how long a turn Sail asked to stop is given to stop ({@code stopBound}) before its
+ * process is ended, and the ending grace.
  */
 record ChatTiming(
     Supplier<Instant> clock,
     RoomWakeReactor.Delay delay,
     ChatTiming.Patience patience,
     Duration poll,
-    Duration requestBound,
+    Duration stopBound,
     ProcessEnd.Grace grace) {
 
   /**

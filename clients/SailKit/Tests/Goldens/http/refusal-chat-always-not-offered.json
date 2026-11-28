@@ -1,0 +1,20 @@
+{
+  "request": {
+    "body": {
+      "decision": "allow_always"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/requests/00000000-0000-7000-8000-000000000010"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "Sail does not offer always for this call: it cannot say whole, in plain words, what Claude Code would keep; allow it once instead."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

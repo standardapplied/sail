@@ -58,11 +58,15 @@ final class ClaudeCodeAlways {
 
   /**
    * What a prefix Bash rule also covered in probe 2 (01b): the exact rule's reach, and the command
-   * behind {@code xargs}, with whatever {@code xargs} is fed added to it.
+   * behind {@code xargs}, with whatever {@code xargs} is fed added to it; and what it did not: a
+   * command it starts that writes to a file through {@code >}, which Claude Code 2.1.332 asked for
+   * again with the rule kept, in its own process and in one that read it at start (probe 7, 03:115,
+   * 04:49).
    */
   private static final String PREFIX_ALSO =
-      "also when another command such as xargs, timeout, nice or nohup starts it, xargs adding"
-          + " whatever it is fed, and as part of a longer line whose other commands need no asking";
+      "except one that writes to a file with `>`, also when another command such as xargs,"
+          + " timeout, nice or nohup starts it, xargs adding whatever it is fed, and as part of a"
+          + " longer line whose other commands need no asking";
 
   /**
    * What a folder kept for the session reaches: the process's life, which ends sooner than the
@@ -78,6 +82,16 @@ final class ClaudeCodeAlways {
   private static final List<String> COMPOUND = List.of("&", ";", "|", "$(");
 
   /**
+   * What makes a command or a rule's command redirect, {@code >} (and so {@code >>}, {@code 2>}) or
+   * {@code <} (and so a here-document), read as written, inside quotes too: Claude Code 2.1.332
+   * asked again for a command that writes through {@code >} with a kept rule that allowed it, exact
+   * (probe 6) or a prefix it suggested itself with no {@code >} in it (probe 7, 01:46, 01:105,
+   * 01:144), in its own process and in one that read it at start; what one of the other shapes
+   * covers was never recorded.
+   */
+  private static final List<String> REDIRECTS = List.of(">", "<");
+
+  /**
    * A rule that runs {@code xargs} anywhere a word of it starts, after a wrapper ({@code timeout 5
    * xargs}, {@code nice xargs}, {@code env xargs}) or by its path ({@code /usr/bin/xargs}): what a
    * kept one covers, with whatever {@code xargs} is fed, was never recorded.
@@ -87,14 +101,20 @@ final class ClaudeCodeAlways {
   private ClaudeCodeAlways() {}
 
   /**
-   * The one way to allow a call always that Claude Code offers: all its suggestions, kept together,
-   * none when their sentences together are longer than a person is shown whole ({@link
-   * LiveStream#CONTENT_CODE_POINTS}), as 02b recorded each of them: a rule that allows a command
-   * ({@code addRules}), a folder it may work in ({@code addDirectories}) and a chat mode ({@code
-   * setMode}), each kept for the session or in the workspace's own settings file. None when any one
-   * is of another shape, since what Sail cannot say a person cannot consent to.
+   * The one way to allow the call of {@code tool} with {@code input} always that Claude Code
+   * offers: all its suggestions, kept together, none when their sentences together are longer than
+   * a person is shown whole ({@link LiveStream#CONTENT_CODE_POINTS}), as 02b recorded each of them:
+   * a rule that allows a command ({@code addRules}), a folder it may work in ({@code
+   * addDirectories}) and a chat mode ({@code setMode}), each kept for the session or in the
+   * workspace's own settings file. None when any one is of another shape, since what Sail cannot
+   * say a person cannot consent to, and none for a command that {@link #redirects}, whatever rule
+   * is suggested for it.
    */
-  static List<ChatItem.Always> of(List<Object> suggestions, List<Harness.Mode> modes) {
+  static List<ChatItem.Always> of(
+      String tool, Map<String, Object> input, List<Object> suggestions, List<Harness.Mode> modes) {
+    if (redirects(tool, input)) {
+      return List.of();
+    }
     var words = new ArrayList<String>();
     for (var suggestion : suggestions) {
       var said = sentences(suggestion, modes);
@@ -108,6 +128,39 @@ final class ClaudeCodeAlways {
                 > LiveStream.CONTENT_CODE_POINTS
         ? List.of()
         : List.of(new ChatItem.Always(words));
+  }
+
+  /**
+   * Why a person asking to allow always the call of {@code tool} with {@code input}, which {@link
+   * #of} offers no always, is refused, naming the harness as a person reads it ({@code harness}):
+   * it suggested nothing; or the call is a command that {@link #redirects}; or Sail cannot say
+   * whole, in plain words, what its suggestions would keep.
+   */
+  static String refusal(
+      String tool, Map<String, Object> input, List<Object> suggestions, String harness) {
+    if (redirects(tool, input)) {
+      return "Sail does not offer always for a command that redirects with > or <: "
+          + harness
+          + " asks again for one that writes to a file with >, even with its rule kept; allow it"
+          + " once instead.";
+    }
+    return suggestions.isEmpty()
+        ? harness + " offered no way to allow this always; allow it once instead."
+        : "Sail does not offer always for this call: it cannot say whole, in plain words, what "
+            + harness
+            + " would keep; allow it once instead.";
+  }
+
+  /**
+   * Whether the call of {@code tool} with {@code input} is a Bash command that holds a redirect
+   * ({@link #REDIRECTS}), or one whose command is not text: Claude Code may suggest a prefix rule
+   * with no {@code >} for a command that writes through one (02b:72, probe 5's 04:17 and 05:16,
+   * probe 7's 01:46), and asked for such a command again with that rule kept (probe 7).
+   */
+  private static boolean redirects(String tool, Map<String, Object> input) {
+    return "Bash".equals(tool)
+        && !(input.get("command") instanceof String command
+            && REDIRECTS.stream().noneMatch(command::contains));
   }
 
   /**
@@ -149,9 +202,10 @@ final class ClaudeCodeAlways {
    * recorded it covering: one with no {@code *} allows that exact command; one whose only {@code *}
    * ends it (written {@code " *"}, {@code ":*"} or {@code "*"}) allows every command that starts
    * with what comes before. A compound command is not said: Claude Code matches each of its
-   * commands alone, so it may never match again. Nor is a rule {@code xargs} starts, which Claude
-   * Code suggests for a pipeline into it (01:108, 01:260): what such a kept rule covers, with
-   * whatever it is fed, was never recorded.
+   * commands alone, so it may never match again; nor is one that redirects, which Claude Code asked
+   * for again with it kept (probes 6 and 7). Nor is a rule {@code xargs} starts, which Claude Code
+   * suggests for a pipeline into it (01:108, 01:260): what such a kept rule covers, with whatever
+   * it is fed, was never recorded.
    */
   private static Optional<String> command(Object rule) {
     var said = rule instanceof Map<?, ?> map ? map : Map.of();
@@ -159,6 +213,7 @@ final class ClaudeCodeAlways {
         || !"Bash".equals(said.get("toolName"))
         || !(said.get("ruleContent") instanceof String content)
         || COMPOUND.stream().anyMatch(content::contains)
+        || REDIRECTS.stream().anyMatch(content::contains)
         || XARGS.matcher(content).find()) {
       return Optional.empty();
     }

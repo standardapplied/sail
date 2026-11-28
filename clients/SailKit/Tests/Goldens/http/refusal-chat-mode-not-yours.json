@@ -1,0 +1,20 @@
+{
+  "request": {
+    "body": {
+      "mode": "plan"
+    },
+    "method": "PUT",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/mode"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "not_found",
+        "field_errors": [],
+        "message": "There is no chat 00000000-0000-7000-8000-000000000006 of yours here."
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}

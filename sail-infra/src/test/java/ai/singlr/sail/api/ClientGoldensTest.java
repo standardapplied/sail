@@ -438,6 +438,7 @@ class ClientGoldensTest {
       box.record(http, "workspaces-made", "GET", workspaces, dana, null);
       box.recordAgents(http, ana, dana);
       box.recordChats(http, ana, dana);
+      box.recordChatAnswers(http, ana, dana);
       box.recordPreferences(http, dana);
       box.recordDriveAgents(http);
       box.recordChatList(http);
@@ -1828,6 +1829,171 @@ class ClientGoldensTest {
       record(goldens, "chat-items-ended", "GET", session + "/chat?after=10", dana, null);
       record(goldens, "refusal-chat-ended", "POST", messages, dana, Map.of("text", "more"));
       Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
+    }
+
+    /**
+     * Records every answer, stop and change of mode a chat's person makes, and each refusal, as the
+     * app meets them: dana opens a chat in berth and sets its mode before any process holds it; its
+     * turn asks to run a command, which she denies with her words, then to run another always, to
+     * run one it offers no always for, and one that writes through a redirect, a question she
+     * answers with two choices and her own words, and a plan she approves; a request she stops; and
+     * a mode set between turns. A second answer, one to a request withdrawn or never asked, a reply
+     * a request does not take, a change of mode mid-turn or to one no chat takes, another person at
+     * each route, and an answer to a chat ended are refused.
+     */
+    void recordChatAnswers(Map<String, String> goldens, String ana, String dana) throws Exception {
+      Acting.system(
+          () ->
+              new ProjectStore(db)
+                  .upsert(
+                      TestDefinitions.yaml(
+                          "name: harbor\nagent:\n  type: claude-code\n  install: [claude-code]\n")));
+      lists(workspace("berth", "Running", "dana", idOf("dana")));
+      var opened =
+          send(
+              "POST",
+              "/v1/projects/" + PROJECT + "/workspaces/berth/chats",
+              dana,
+              Map.of("harness", "claude-code", "mode", "default", "inside", false));
+      var session = "/v1/sessions/" + YamlUtil.parseJsonLine(opened.body(), 1 << 16).get("session");
+      var requests = session + "/chat/requests/";
+      var mode = session + "/chat/mode";
+      record(goldens, "chat-mode-kept", "PUT", mode, dana, Map.of("mode", "acceptEdits"));
+      send("POST", session + "/chat/messages", dana, Map.of("text", "hi"));
+      said(
+          Recorded.line("04b-set-permission-mode-and-background-task", 148),
+          Recorded.line("05-answer-twice", 16));
+      var asked = "bda0b4cf-c4f6-4219-bd84-0f0617292889";
+      record(goldens, "refusal-chat-mode-turn-open", "PUT", mode, dana, Map.of("mode", "plan"));
+      record(
+          goldens,
+          "refusal-chat-mode-not-a-chat-mode",
+          "PUT",
+          mode,
+          dana,
+          Map.of("mode", "bypassPermissions"));
+      record(goldens, "refusal-chat-request-not-yours", "POST", requests + asked, ana, allow());
+      record(
+          goldens,
+          "refusal-chat-interrupt-not-yours",
+          "POST",
+          session + "/chat:interrupt",
+          ana,
+          null);
+      record(goldens, "refusal-chat-mode-not-yours", "PUT", mode, ana, Map.of("mode", "plan"));
+      record(
+          goldens,
+          "refusal-chat-request-not-found",
+          "POST",
+          requests + "7f35b673-a8fa-4967-a1d0-a52e2b28cf73",
+          dana,
+          allow());
+      record(
+          goldens,
+          "refusal-chat-answer-invalid",
+          "POST",
+          requests + asked,
+          dana,
+          Map.of("decision", "allow_always", "rules", List.of("Bash(*)")));
+      record(
+          goldens,
+          "refusal-chat-answer-not-taken",
+          "POST",
+          requests + asked,
+          dana,
+          Map.of("decision", "answer", "answers", Map.of("Which color?", Map.of("own", "teal"))));
+      record(
+          goldens,
+          "chat-request-denied",
+          "POST",
+          requests + asked,
+          dana,
+          Map.of("decision", "deny", "message", "use the existing spinner instead"));
+      record(goldens, "refusal-chat-request-answered", "POST", requests + asked, dana, allow());
+      said(Recorded.line("02b-relay-stdio", 99));
+      record(
+          goldens,
+          "chat-request-allowed-always",
+          "POST",
+          requests + "d3b09c29-b79d-4151-b490-d70fdf7adb18",
+          dana,
+          Map.of("decision", "allow_always"));
+      said(Recorded.line("01-always-rule-wrappers", 108));
+      var unsaid = (String) Recorded.parsed("01-always-rule-wrappers", 108).get("request_id");
+      record(
+          goldens,
+          "refusal-chat-always-not-offered",
+          "POST",
+          requests + unsaid,
+          dana,
+          Map.of("decision", "allow_always"));
+      record(goldens, "chat-request-allowed", "POST", requests + unsaid, dana, allow());
+      said(Recorded.line("02b-relay-stdio", 16));
+      var redirects = requests + "a871f652-0656-42bf-8cc8-860ad0a34b79";
+      record(
+          goldens,
+          "refusal-chat-always-not-offered-redirect",
+          "POST",
+          redirects,
+          dana,
+          Map.of("decision", "allow_always"));
+      send("POST", redirects, dana, allow());
+      said(Recorded.line("02-question-multi-select-and-own-words", 32));
+      var question = requests + "82da6f15-368c-4201-9a85-f925427a7c03";
+      record(
+          goldens,
+          "refusal-chat-answer-not-a-choice",
+          "POST",
+          question,
+          dana,
+          answers(Map.of("chosen", List.of("Teal"))));
+      record(
+          goldens,
+          "chat-question-answered",
+          "POST",
+          question,
+          dana,
+          answers(Map.of("chosen", List.of("Red", "Blue"))));
+      said(Recorded.line("03b-plan-exit-plan-mode", 58));
+      record(
+          goldens,
+          "chat-plan-approved",
+          "POST",
+          requests + "712631d6-6601-4153-9c1e-397ba123bb15",
+          dana,
+          allow());
+      said(Recorded.line("04a-cancel-request-by-interrupt", 16));
+      record(goldens, "chat-stopping", "POST", session + "/chat:interrupt", dana, null);
+      said(
+          Recorded.line("04a-cancel-request-by-interrupt", 20),
+          Recorded.line("04a-cancel-request-by-interrupt", 21),
+          Recorded.line("04a-cancel-request-by-interrupt", 23),
+          Recorded.line("04a-cancel-request-by-interrupt", 24));
+      record(
+          goldens,
+          "refusal-chat-request-withdrawn",
+          "POST",
+          requests + "dc0b76a9-43c6-4484-a47b-1b7c1e5a4b10",
+          dana,
+          allow());
+      record(goldens, "chat-not-stopping", "POST", session + "/chat:interrupt", dana, null);
+      record(goldens, "chat-mode-set", "PUT", mode, dana, Map.of("mode", "plan"));
+      record(goldens, "chat-items-answered", "GET", session + "/chat?after=0", dana, null);
+      send("POST", session + ":end", dana, null);
+      record(goldens, "refusal-chat-answer-ended", "POST", requests + asked, dana, allow());
+      Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
+    }
+
+    private static Map<String, Object> allow() {
+      return Map.of("decision", "allow");
+    }
+
+    /** Dana's answer to probe 5's two questions: colors as {@code colors}, size in her words. */
+    private static Map<String, Object> answers(Map<String, Object> colors) {
+      var answers = new LinkedHashMap<String, Object>();
+      answers.put("Which colors?", colors);
+      answers.put("Which size?", Map.of("chosen", List.of(), "own", "teal, but only on weekends"));
+      return Map.of("decision", "answer", "answers", answers);
     }
 
     /**

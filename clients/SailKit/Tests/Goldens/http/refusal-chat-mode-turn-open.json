@@ -1,0 +1,20 @@
+{
+  "request": {
+    "body": {
+      "mode": "plan"
+    },
+    "method": "PUT",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/mode"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "turn_open",
+        "field_errors": [],
+        "message": "Claude Code is working on a turn; change its mode when the turn ends, or stop it first."
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

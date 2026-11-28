@@ -186,6 +186,18 @@
       "status": 409
     },
     {
+      "code": "request_answered",
+      "status": 409
+    },
+    {
+      "code": "request_withdrawn",
+      "status": 409
+    },
+    {
+      "code": "turn_open",
+      "status": 409
+    },
+    {
       "code": "runner_busy",
       "status": 503
     },

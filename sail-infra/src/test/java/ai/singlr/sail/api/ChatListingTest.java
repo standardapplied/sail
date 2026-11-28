@@ -115,6 +115,30 @@ class ChatListingTest {
     assertEquals("your_turn", stateOf(session), "stopped by a person, the turn is theirs");
   }
 
+  /**
+   * A request the person answered needs them no more: the listing reads it working from the moment
+   * {@code answered} is logged, before Claude Code says anything further.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void anAnsweredRequestNeedsThePersonNoMore() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    bench.says(INIT, ASKS);
+    assertEquals("needs_you", stateOf(session));
+
+    as(
+        "sam",
+        () ->
+            bench
+                .host
+                .answers()
+                .answer(
+                    session, "a871f652-0656-42bf-8cc8-860ad0a34b79", Map.of("decision", "allow")));
+
+    assertEquals("working", stateOf(session), "answered, the turn goes on without the person");
+  }
+
   /** C12: whether a process holds the chat is never a state: an idle end and a cut are not seen. */
   @Test
   @Timeout(value = 60, unit = TimeUnit.SECONDS)

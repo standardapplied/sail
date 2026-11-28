@@ -1,0 +1,20 @@
+{
+  "request": {
+    "body": {
+      "decision": "allow_always"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/requests/00000000-0000-7000-8000-000000000011"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "Sail does not offer always for a command that redirects with > or <: Claude Code asks again for one that writes to a file with >, even with its rule kept; allow it once instead."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

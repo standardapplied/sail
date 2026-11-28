@@ -1,0 +1,25 @@
+{
+  "request": {
+    "body": {
+      "answers": {
+        "Which color?": {
+          "own": "teal"
+        }
+      },
+      "decision": "answer"
+    },
+    "method": "POST",
+    "path": "/v1/sessions/00000000-0000-7000-8000-000000000006/chat/requests/00000000-0000-7000-8000-000000000007"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "Claude Code asks to make this call: allow it, allow it always, or deny it."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

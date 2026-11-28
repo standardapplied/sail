@@ -235,25 +235,31 @@ final class ChatBench implements AutoCloseable {
    * once that end is held up in the host or is done; past {@link #PATIENCE}, the test fails.
    */
   Thread endsAsItStarts(String session) {
-    var ending =
-        Thread.ofPlatform()
-            .name("sail-test-end-" + session)
-            .start(
-                () ->
-                    as(
-                        "sam",
-                        () -> {
-                          host.end(session);
-                          return null;
-                        }));
+    return heldInTheHost(
+        "sail-test-end-" + session,
+        () ->
+            as(
+                "sam",
+                () -> {
+                  host.end(session);
+                  return null;
+                }));
+  }
+
+  /**
+   * Runs {@code work} on a thread of its own, named {@code name}, and returns once it is held up in
+   * a lock of the host's or is done; past {@link #PATIENCE}, the test fails.
+   */
+  Thread heldInTheHost(String name, Runnable work) {
+    var running = Thread.ofPlatform().name(name).start(work);
     var deadline = System.nanoTime() + PATIENCE.toNanos();
-    while (ending.isAlive() && !heldInTheHost(ending)) {
+    while (running.isAlive() && !heldInTheHost(running)) {
       if (System.nanoTime() > deadline) {
-        throw new AssertionError("the end of chat " + session + " was neither held nor done");
+        throw new AssertionError(name + " was neither held nor done");
       }
       Thread.onSpinWait();
     }
-    return ending;
+    return running;
   }
 
   /** Whether {@code thread} waits to enter a lock of the host's own. */
