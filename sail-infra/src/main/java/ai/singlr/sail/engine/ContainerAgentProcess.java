@@ -31,9 +31,10 @@ import java.util.function.UnaryOperator;
  * so the pid file names the agent itself, the run probes alive exactly as a unit's does, and a halt
  * can tell the agent from a later process given its pid; the agent's stderr is appended to the
  * run's log, which leaves stdout to carry nothing but its lines. A Java {@code Process} can only
- * signal the host-side client, so a signal is a {@code kill} run in the container against the pid
- * the file names, as an argument, and only while that client runs: once it has exited, the pid file
- * may name the process started after it.
+ * signal the host-side client, so a signal is sent in the container, only while that client runs
+ * (once it has exited, the pid file may name the process started after it) and only to the process
+ * its wrapper recorded ({@link AgentSession#SIGNAL_STARTED_SCRIPT}), the rule a halt goes by too:
+ * the pid file outlives its process, and the box may have given its pid to another.
  */
 public final class ContainerAgentProcess implements AgentProcess {
 
@@ -195,7 +196,15 @@ public final class ContainerAgentProcess implements AgentProcess {
       if (!process.isAlive()) {
         return;
       }
-      pid().ifPresent(pid -> ask(List.of("kill", "-" + signal.name(), String.valueOf(pid))));
+      ask(
+          List.of(
+              "sh",
+              "-c",
+              AgentSession.SIGNAL_STARTED_SCRIPT,
+              "sh",
+              pidFile,
+              AgentUnit.startPath(pidFile),
+              signal.name()));
     }
 
     /** What the container answered, or empty when it ran nothing. */

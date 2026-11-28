@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.LoginStore;
 import java.io.IOException;
@@ -424,24 +425,236 @@ class ContainerAgentProcessTest {
                 "/p/launch.env"));
   }
 
+  /**
+   * The pid file of each lane whose processes the wrapper starts over pipes, under the test's
+   * folder: a chat's, in the chat's own folder, and a live member's, in its run's.
+   */
+  private List<Path> lanes() {
+    var id = Ids.newId().toString();
+    return Stream.of(AgentUnit.chat(id), AgentUnit.live(id))
+        .map(unit -> Path.of(dir.toString(), unit.pidPath()))
+        .toList();
+  }
+
+  /**
+   * A process the wrapper started for real, its pid file at {@code pidFile} and its signals sent
+   * through {@code shell}: it has said it started, and echoes each line it is written until its
+   * stdin closes.
+   */
+  private AgentProcess.Handle wrapped(ShellExec shell, Path pidFile) throws IOException {
+    var handle =
+        held(
+            new ContainerAgentProcess(shell, LOCALLY)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of("bash", "-c", "echo started; exec cat"),
+                    pidFile.toString(),
+                    pidFile.resolveSibling("agent.log").toString(),
+                    launchEnv("SAIL_RUN_CREDENTIAL=c1")));
+    assertEquals("started", handle.stdout().read());
+    return handle;
+  }
+
+  /** Whether {@code handle}'s process still runs: it echoes a line, which an ended one cannot. */
+  private static boolean answers(AgentProcess.Handle handle) throws IOException {
+    try {
+      handle.stdin().write("still");
+    } catch (IOException gone) {
+      return false;
+    }
+    return "still".equals(handle.stdout().read());
+  }
+
+  private final List<Process> others = new ArrayList<>();
+
+  /**
+   * Another process of the person's, which no wrapper started, ended when the test does: it echoes
+   * each line it is written.
+   */
+  private Process another() throws IOException {
+    var process = new ProcessBuilder("cat").redirectError(ProcessBuilder.Redirect.DISCARD).start();
+    others.add(process);
+    return process;
+  }
+
+  /** Whether {@code process} still runs: it echoes a line, which an ended one cannot. */
+  private static boolean answers(Process process) {
+    try {
+      var in = process.outputWriter();
+      in.write("still\n");
+      in.flush();
+      return "still".equals(process.inputReader().readLine());
+    } catch (IOException gone) {
+      return false;
+    }
+  }
+
+  @AfterEach
+  void endTheOthers() throws Exception {
+    for (var process : others) {
+      Child.end(process);
+    }
+  }
+
+  /** The start record beside {@code pidFile}. */
+  private static Path record(Path pidFile) {
+    return Path.of(AgentUnit.startPath(pidFile.toString()));
+  }
+
+  /**
+   * A signal goes to the process its wrapper recorded, in each lane: once, with the signal asked,
+   * by one script in the container whose paths and signal are its arguments.
+   */
   @Test
   @EnabledOnOs(OS.LINUX)
-  void aSignalIsAKillInTheContainerOfThePidTheFileNames() throws Exception {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("cat /p/agent.pid", "4242\n");
-    var handle = running(shell);
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aSignalReachesTheProcessItsWrapperRecordedOnceWithTheSignalAsked() throws Exception {
+    for (var pidFile : lanes()) {
+      var here = new Here();
+      var interrupted = wrapped(here, pidFile);
+      interrupted.signal(AgentProcess.Signal.INT);
+      assertEquals(OptionalInt.of(130), interrupted.waitFor(PATIENCE), "by SIGINT: " + pidFile);
+      var terminated = wrapped(here, pidFile);
+      terminated.signal(AgentProcess.Signal.TERM);
+      assertEquals(OptionalInt.of(143), terminated.waitFor(PATIENCE), "by SIGTERM: " + pidFile);
 
-    handle.signal(AgentProcess.Signal.INT);
-    handle.signal(AgentProcess.Signal.TERM);
+      assertEquals(
+          Stream.of("INT", "TERM")
+              .map(
+                  signal ->
+                      ContainerExec.asDevUser(
+                          "acme",
+                          List.of(
+                              "sh",
+                              "-c",
+                              AgentSession.SIGNAL_STARTED_SCRIPT,
+                              "sh",
+                              pidFile.toString(),
+                              record(pidFile).toString(),
+                              signal)))
+              .toList(),
+          here.commands,
+          "one script a signal");
+    }
+  }
 
-    assertEquals(
+  /**
+   * The pid file outlives its process, so after a restart its pid can name another process of the
+   * person's: in each lane, that process is never signalled, and nothing is removed. The record is
+   * of a process that started long before it (this test's own, standing for the one gone), as a
+   * pid's earlier holder always did: a start is counted in ticks of 10 ms, which two processes
+   * started one after the other share.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aStalePidFileNamingAnotherLiveProcessSignalsNothing() throws Exception {
+    var gone =
+        Files.readString(Path.of("/proc", String.valueOf(ProcessHandle.current().pid()), "stat"));
+    for (var pidFile : lanes()) {
+      var handle = wrapped(new Here(), pidFile);
+      var other = another();
+      Files.writeString(pidFile, other.pid() + "\n");
+      Files.writeString(record(pidFile), gone);
+      var recorded = Files.readString(record(pidFile));
+
+      handle.signal(AgentProcess.Signal.INT);
+      handle.signal(AgentProcess.Signal.TERM);
+
+      assertTrue(answers(other), "the process that holds the pid now is not signalled");
+      assertTrue(answers(handle), "nor the handle's own");
+      assertEquals(other.pid() + "\n", Files.readString(pidFile), "the pid file is kept");
+      assertEquals(recorded, Files.readString(record(pidFile)), "and its record");
+    }
+  }
+
+  /** A process whose start is not recorded is never signalled: its identity cannot be told. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aProcessWithNoStartRecordedIsNotSignalled() throws Exception {
+    for (var pidFile : lanes()) {
+      var handle = wrapped(new Here(), pidFile);
+      Files.delete(record(pidFile));
+
+      handle.signal(AgentProcess.Signal.TERM);
+
+      assertTrue(answers(handle), pidFile.toString());
+      assertTrue(Files.exists(pidFile), "the pid file is kept");
+    }
+  }
+
+  /** A start record that cannot be read as one is no identity: nothing is signalled. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aGarbledStartRecordSignalsNothing() throws Exception {
+    for (var pidFile : lanes()) {
+      var handle = wrapped(new Here(), pidFile);
+      var stat = Files.readString(record(pidFile));
+      var ticks = String.valueOf(AgentSession.parseStartTicks(stat));
+      var later = stat.replace(" " + ticks + " ", " " + (Long.parseLong(ticks) + 1) + " ");
+      for (var garbled : List.of("", "\n", "garbage", "1 (cat) S 1 1", later)) {
+        Files.writeString(record(pidFile), garbled);
+
+        handle.signal(AgentProcess.Signal.TERM);
+
+        assertTrue(answers(handle), "record " + garbled);
+        assertEquals(garbled, Files.readString(record(pidFile)), "the record is kept");
+      }
+    }
+  }
+
+  /**
+   * A pid file is the container's to write: what it holds is the script's data, never its text, so
+   * no content of it signals the process the record is of, or anything else.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aPidFileThatNamesNoProcessSignalsNothing() throws Exception {
+    var pidFile = lanes().getFirst();
+    var here = new Here();
+    var handle = wrapped(here, pidFile);
+    for (var content : List.of("", "0", "-1", "1; kill -9 $$", "$(kill $PPID)", "9999999999")) {
+      Files.writeString(pidFile, content);
+
+      handle.signal(AgentProcess.Signal.TERM);
+
+      assertTrue(answers(handle), "pid file " + content);
+      assertEquals(content, Files.readString(pidFile), "the pid file is kept");
+    }
+  }
+
+  /**
+   * A signal whose script fails, or that the container never runs, is unknown: nothing is
+   * signalled, nothing is removed, and the caller is not failed by it.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aSignalTheContainerDoesNotRunChangesNothing() throws Exception {
+    var shells =
         List.of(
-            ContainerExec.asDevUser("acme", List.of("cat", "/p/agent.pid")),
-            ContainerExec.asDevUser("acme", List.of("kill", "-INT", "4242")),
-            ContainerExec.asDevUser("acme", List.of("cat", "/p/agent.pid")),
-            ContainerExec.asDevUser("acme", List.of("kill", "-TERM", "4242"))),
-        shell.arguments());
+            new ScriptedShellExecutor()
+                .on("sh -c", new ShellExec.Result(1, "", "Error: websocket: close 1006")),
+            new ScriptedShellExecutor().onThrow("sh -c", new IOException("incus not found")));
+    for (var shell : shells) {
+      var pidFile = lanes().getLast();
+      var handle = wrapped(shell, pidFile);
+      var pid = Files.readString(pidFile);
+      var recorded = Files.readString(record(pidFile));
+
+      handle.signal(AgentProcess.Signal.INT);
+      handle.signal(AgentProcess.Signal.TERM);
+
+      assertTrue(answers(handle));
+      assertEquals(pid, Files.readString(pidFile));
+      assertEquals(recorded, Files.readString(record(pidFile)));
+      assertEquals(2, shell.invocations().size(), "the one script, asked once a signal");
+    }
   }
 
   /**
@@ -466,39 +679,23 @@ class ContainerAgentProcessTest {
 
   @Test
   @EnabledOnOs(OS.LINUX)
-  void aPidFileThatNamesNoProcessSignalsNothing() throws Exception {
+  void aPidFileThatNamesNoPidNamesNone() throws Exception {
     for (var content : List.of("", "0", "-1", "12 34", "1; rm -rf /", "9999999999")) {
-      var shell =
-          new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-              .onOk("cat /p/agent.pid", content);
-      var handle = running(shell);
-
-      handle.signal(AgentProcess.Signal.TERM);
+      var handle = idle(new ScriptedShellExecutor().onOk("cat /p/agent.pid", content));
 
       assertEquals(OptionalInt.empty(), handle.pid(), content);
-      assertEquals(
-          0,
-          shell.arguments().stream().filter(argv -> argv.contains("kill")).count(),
-          "a pid file is the container's to write: only digits ever reach kill, got " + content);
     }
   }
 
   @Test
   @EnabledOnOs(OS.LINUX)
-  void aContainerThatDoesNotAnswerNamesNoPidAndFailsNoSignal() throws Exception {
+  void aContainerThatDoesNotAnswerNamesNoPid() throws Exception {
     var unreadable = idle(new ScriptedShellExecutor());
     var throwing =
         idle(new ScriptedShellExecutor().onThrow("cat", new IOException("incus not found")));
-    var undelivered =
-        running(
-            new ScriptedShellExecutor()
-                .onOk("cat /p/agent.pid", "4242")
-                .onThrow("kill", new IOException("incus not found")));
 
     assertEquals(OptionalInt.empty(), unreadable.pid());
     assertEquals(OptionalInt.empty(), throwing.pid());
-    undelivered.signal(AgentProcess.Signal.INT);
-    assertEquals(OptionalInt.of(4242), undelivered.pid());
   }
 
   @Test
