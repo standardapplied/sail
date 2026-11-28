@@ -41,6 +41,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -575,9 +576,9 @@ class AgentAttachCommandTest {
   }
 
   /**
-   * A terminal resuming a spec's conversation writes its process into its workspace's terminal pid
-   * file before it execs the harness, so a claim of the workspace ends it by that file and a live
-   * member sees it; the dry run prints this very command.
+   * A terminal resuming a spec's conversation records its start and then writes its process into
+   * its workspace's terminal pid file before it execs the harness, so a claim of the workspace ends
+   * it by that file and a live member sees it; the dry run prints this very command.
    */
   @Test
   void aSpecsTerminalNamesItsProcessForTheWorkspaceThenExecsTheConversation() {
@@ -587,13 +588,50 @@ class AgentAttachCommandTest {
         List.of(
             "bash",
             "-lc",
-            "echo $$ > /home/dev/.sail/terminal.pid && cd ~/workspace && exec claude --resume abc"),
+            "cat /proc/$$/stat > /home/dev/.sail/terminal.pid.start && echo $$ >"
+                + " /home/dev/.sail/terminal.pid && cd ~/workspace && exec claude --resume abc"),
         AgentAttachCommand.inTheWorkspace(command));
     assertEquals(
         Optional.of(
             AgentAttachCommand.buildIncusExecWithTty(
                 "acme-spec-r1", AgentAttachCommand.inTheWorkspace(command))),
         AgentAttachCommand.direct(row("r1", "completed"), "acme", "abc", command));
+  }
+
+  /**
+   * Run here for real, its files under the test's folder: the terminal records the start of the
+   * process its pid names, the one that execs the conversation, so a claim can tell it from a later
+   * process the box gives its pid.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aSpecsTerminalRecordsTheStartOfTheProcessItsPidNames() throws Exception {
+    var pidFile = dir.resolve("terminal.pid");
+    var line =
+        AgentAttachCommand.inTheWorkspace(List.of("bash", "-lc", "echo ready; read -r line"))
+            .stream()
+            .map(arg -> arg.replace(AgentUnit.TERMINAL.pidPath(), pidFile.toString()))
+            .toList();
+    var builder = new ProcessBuilder(line).redirectError(ProcessBuilder.Redirect.DISCARD);
+    builder.environment().put("HOME", dir.toString());
+    var terminal = builder.start();
+    try {
+      assertEquals("ready", terminal.inputReader().readLine());
+      var pid = Files.readString(pidFile).strip();
+      var recorded = Files.readString(Path.of(AgentUnit.startPath(pidFile.toString())));
+
+      assertEquals(String.valueOf(terminal.pid()), pid);
+      assertEquals(
+          startTicks(Files.readString(Path.of("/proc", pid, "stat"))), startTicks(recorded));
+    } finally {
+      Child.end(terminal);
+    }
+  }
+
+  /** Field 22 of a {@code /proc/<pid>/stat} line: when the process started. */
+  private static String startTicks(String stat) {
+    return stat.substring(stat.lastIndexOf(')') + 2).split(" ")[19];
   }
 
   /** A run of a spec's workspace is in the way of resuming another of that spec, and no other. */
