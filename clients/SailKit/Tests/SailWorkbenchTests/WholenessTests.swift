@@ -2,6 +2,7 @@
 import CoreGraphics
 #endif
 import Foundation
+import SailAPI
 import SailWorkbench
 import Testing
 
@@ -184,6 +185,109 @@ import Testing
             walked.stepsRun > 100_000 && walked.restoredTabs > 10000 && walked.restoredPanes > walked.restoredTabs + 5000,
             "\(walked.stepsRun) steps, \(walked.restoredTabs) tabs and \(walked.restoredPanes) panes restored"
         )
+    }
+}
+
+/// Any sequence of opens, splits, binds, adopts and closes of chats, new chats and terminals leaves
+/// every session in one pane at most and every tab whole, and what is kept comes back as itself.
+@Suite(.timeLimit(.minutes(1))) struct ChatWholenessTests {
+    static let places = [Place.workspace(project: "harbor", name: "dock"), .workspace(project: "harbor", name: "pier")]
+    static let agents = [AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"), AgentStart(harness: "codex", display: "Codex CLI", mode: "default", inside: true)]
+    static let window = WholenessTests.Window(size: CGSize(width: 1120, height: 772), least: CGSize(width: 110, height: 70), scale: 1)
+
+    /// What a chat, a new chat and a terminal must be, beyond W1, each breach in words.
+    static func breaches(_ bench: Workbench) -> [String] {
+        WholenessTests.breaches(bench) + bench.panes.values.compactMap { pane in
+            switch pane.form {
+            case .terminal where pane.agent != nil && !pane.place.onRunner: "\(pane.id) runs an agent on this Mac"
+            case .chat where pane.agent == nil || !pane.place.onRunner, .newChat where pane.agent == nil || !pane.place.onRunner:
+                "\(pane.id), a \(pane.form), is no agent's in a workspace"
+            case .newChat where !pane.session.hasPrefix(Pane.newChats): "\(pane.id), a new chat, holds \(pane.session)"
+            case .chat where pane.session.hasPrefix(Pane.newChats): "\(pane.id), a chat, holds no chat"
+            default: nil
+            }
+        }
+    }
+
+    static func listing(_ random: inout WholenessTests.Seeded) -> RunnerSessions {
+        let agent = RunnerAgent(harness: "claude-code", display: "Claude Code", mode: "plan", login: "stored")
+        func at() -> Date { Date(timeIntervalSince1970: Double(Int.random(in: 0 ..< 4, using: &random))) }
+        let terminals = (0 ..< Int.random(in: 0 ... 3, using: &random)).map { _ in
+            RunnerSession(
+                name: "app-\(Int.random(in: 0 ..< 6, using: &random))", live: Bool.random(using: &random), attached: 0, writer: "",
+                opener: ["uday", "ana"].randomElement(using: &random) ?? "", command: [], createdAt: at(), endedReason: nil
+            )
+        }
+        let chats = (0 ..< Int.random(in: 0 ... 3, using: &random)).map { _ in
+            ChatRow(
+                name: "chat-\(Int.random(in: 0 ..< 6, using: &random))", live: Bool.random(using: &random),
+                state: .known(ChatState.allCases.randomElement(using: &random) ?? .idle), opener: ["uday", "ana"].randomElement(using: &random) ?? "",
+                agent: agent, createdAt: at()
+            )
+        }
+        return RunnerSessions(sessions: terminals, chats: chats)
+    }
+
+    static func randomStep(_ bench: inout Workbench, _ random: inout WholenessTests.Seeded, made: inout Int) -> String {
+        let place = places.randomElement(using: &random) ?? places[0]
+        let agent = agents.randomElement(using: &random) ?? agents[0]
+        let panes = bench.panes.values.sorted { $0.id < $1.id }
+        let unbound = panes.filter { $0.form == .newChat }
+        let window = Self.window
+        made += 1
+        switch Int.random(in: 0 ..< 12, using: &random) {
+        case 0: bench.newTab(session: "app-made-\(made)", place: place, agent: Bool.random(using: &random) ? agent : nil); return "terminal"
+        case 1, 2: bench.newChat(in: place, agent: agent); return "new chat"
+        case 3:
+            let into = bench.placeForSplit(hostNames: [], isFolder: { _ in true }, home: "/")
+            _ = bench.split(.sideBySide, session: "app-split-\(made)", place: into, in: window.size, minimum: window.least, scale: window.scale); return "split"
+        case 4, 5:
+            guard let pane = unbound.randomElement(using: &random) else { return "no bind" }
+            bench.bind(pane.id, to: "chat-\(Int.random(in: 0 ..< 6, using: &random))"); return "bind"
+        case 6: bench.adopt(listing: listing(&random), in: place, for: "uday"); return "adopt"
+        case 7: if let pane = bench.focusedPane { bench.close(pane.id) }; return "close"
+        case 8: if let tab = bench.tabs.randomElement(using: &random) { bench.closeTab(tab.id) }; return "close tab"
+        case 9: if let pane = unbound.randomElement(using: &random) { bench.move(newChat: pane.id, to: place, agent: agent) }; return "move"
+        case 10:
+            if let pane = panes.randomElement(using: &random) {
+                bench.setChatState(.known(ChatState.allCases.randomElement(using: &random) ?? .idle), of: pane.id)
+                bench.setDraft("draft \(made)", of: pane.id)
+            }
+            return "state"
+        default: if let pane = panes.randomElement(using: &random) { bench.focus(pane.id) }; return "focus"
+        }
+    }
+
+    static func walk() -> (issues: [String], steps: [String: Int]) {
+        var random = WholenessTests.Seeded(state: 0xC4A7)
+        var issues: [String] = []
+        var steps: [String: Int] = [:]
+        for sequence in 0 ..< 3000 where issues.isEmpty {
+            var bench = Workbench()
+            var made = 0
+            var trail: [String] = []
+            for _ in 0 ..< Int.random(in: 1 ... 30, using: &random) {
+                trail.append(randomStep(&bench, &random, made: &made))
+                steps[trail.last ?? "", default: 0] += 1
+                let breaches = breaches(bench)
+                guard breaches.isEmpty else {
+                    issues.append("sequence \(sequence) after \(trail.joined(separator: ", ")): \(breaches.joined(separator: "; "))")
+                    break
+                }
+            }
+            let kept = bench.arrangement(runner: "uday", holding: [])
+            let restored = Workbench.restore(kept, live: kept.runnerSessions(for: "uday"), home: "/", for: "uday")
+            if !breaches(restored).isEmpty || restored.arrangement(runner: "uday", holding: []) != kept, issues.isEmpty {
+                issues.append("sequence \(sequence) after \(trail.joined(separator: ", ")): restored \(breaches(restored))")
+            }
+        }
+        return (issues, steps)
+    }
+
+    @Test func everySessionIsInOnePaneAtMostAndEveryTabWhole() async {
+        let (issues, steps) = await onOwnThread(Self.walk)
+        #expect(issues.isEmpty, "\(issues.prefix(3))")
+        #expect(["bind", "adopt", "split", "move", "close"].allSatisfy { steps[$0, default: 0] > 2000 }, "\(steps)")
     }
 }
 

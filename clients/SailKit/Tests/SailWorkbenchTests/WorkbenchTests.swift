@@ -2,6 +2,8 @@
 import CoreGraphics
 #endif
 import Foundation
+import SailAPI
+import SailKitTestSupport
 import SailTerminalWire
 import SailWorkbench
 import Testing
@@ -384,12 +386,12 @@ import Testing
         #expect(Workbench.restore(bench.arrangement, live: [], home: "/").tabs.isEmpty)
         bench.rename(bench.tabs[0].id, to: "named")
         var future = bench.arrangement
-        future.version = 2
+        future.version = Arrangement.currentVersion + 1
         let strays = Workbench.restore(future, live: ["mac-t1", "mac-t2"], home: "/")
         #expect(strays.tabs.count == 2 && strays.tabs.allSatisfy { $0.name == nil })
         #expect(Workbench.restore(nil, live: ["mac-t1"], home: "/").tabs.count == 1)
         bench.selectTab(at: 0)
-        let twice = Arrangement(version: 1, tabs: bench.arrangement.tabs + bench.arrangement.tabs, selected: 3)
+        let twice = Arrangement(tabs: bench.arrangement.tabs + bench.arrangement.tabs, selected: 3)
         let restored = Workbench.restore(twice, live: ["mac-t1", "mac-t2"], home: "/")
         #expect(restored.tabs.count == 2 && restored.selectedTab?.id == restored.tabs[1].id)
     }
@@ -539,5 +541,347 @@ import Testing
         #expect(bench.selected == ids[2])
         bench.moveTab(ids[2], to: 99)
         #expect(bench.tabs.map(\.id) == [ids[0], ids[1], ids[2]])
+    }
+}
+
+/// The chat app's tabs (`sail-app-a-tab-holds-a-chat-or-a-terminal`), scenarios 4 to 12: a tab holds
+/// a chat, a new chat or a terminal, ⌘T opens one like the tab in front, live sessions are adopted
+/// as last tabs, and a tab says one mark.
+@Suite(.timeLimit(.minutes(1))) struct ChatTabTests {
+    static let dock = Place.workspace(project: "harbor", name: "dock")
+    static let pier = Place.workspace(project: "harbor", name: "pier")
+    static let claude = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
+    static let codex = AgentStart(harness: "codex", display: "Codex CLI", mode: "default", inside: true)
+    static let room = CGSize(width: 1001, height: 601)
+    static let least = CGSize(width: 110, height: 70)
+
+    static func listing(_ golden: String = "workspace-sessions-chats", altered: [(path: [any JSONPathStep], value: Any?)] = []) throws -> RunnerSessions {
+        let exchange = try altered.reduce(try Exchange(golden)) { try $0.altered(at: $1.path, to: $1.value) }
+        return try Endpoint.sessions(workspace: "dock", project: "harbor").decode(HTTPResponse(status: exchange.status, body: exchange.body))
+    }
+
+    static func chatID(_ last: String) -> String {
+        "00000000-0000-7000-8000-0000000000\(last)"
+    }
+
+    static func sessions(_ bench: Workbench) -> [[String]] {
+        bench.tabs.map { $0.layout.leaves.compactMap { bench.panes[$0]?.session } }
+    }
+
+    static func likeFront(_ bench: Workbench, chatFirst: Bool = false, agent: AgentStart? = claude) -> Opening {
+        bench.likeFront(chatFirst: chatFirst, agent: agent, hostNames: ["mac"], isFolder: { _ in true }, home: "/home/u")
+    }
+
+    /// Scenario 4: ⌘T on a chat opens a new chat in its workspace with its harness, mode and way
+    /// in, as a last tab, selected; on a new chat too.
+    @Test func commandTOnAChatOpensANewChatInItsWorkspace() throws {
+        var bench = Workbench()
+        bench.newTab(session: "mac-1", place: .thisMac(folder: "/"))
+        bench.adopt(listing: try Self.listing(altered: [(["sessions", 2, "agent", "mode"], "plan")]), in: Self.dock, for: "uday")
+        let chat = try #require(bench.panes.values.first { $0.session == Self.chatID("18") })
+        bench.focus(chat.id)
+        let opening = Self.likeFront(bench)
+        #expect(opening == .newChat(Self.dock, agent: Self.claude))
+        guard case let .newChat(place, agent) = opening else { return }
+        let made = bench.newChat(in: place, agent: agent)
+        #expect(bench.tabs.last?.layout == .pane(made) && bench.selectedTab?.id == bench.tabs.last?.id)
+        let pane = try #require(bench.panes[made])
+        #expect(pane.form == .newChat && pane.place == Self.dock && pane.agent == Self.claude && pane.session.hasPrefix(Pane.newChats))
+        #expect(Self.likeFront(bench) == .newChat(Self.dock, agent: Self.claude))
+    }
+
+    /// ⌘T on a terminal opens one like it: a workspace's shell a shell there, an agent the same
+    /// agent and mode there, a This Mac shell a This Mac shell in its reported folder.
+    @Test func commandTOnATerminalOpensOneLikeIt() {
+        var bench = Workbench()
+        let shell = bench.newTab(session: "app-shell", place: Self.dock)
+        #expect(Self.likeFront(bench, chatFirst: true) == .terminal(Self.dock, agent: nil))
+        bench.newTab(session: "app-agent", place: Self.pier, agent: Self.codex)
+        #expect(Self.likeFront(bench) == .terminal(Self.pier, agent: Self.codex))
+        let mac = bench.newTab(session: "mac-1", place: .thisMac(folder: "/home/u"))
+        bench.setFolder("file://mac/srv/app", of: mac)
+        #expect(Self.likeFront(bench, chatFirst: true) == .terminal(.thisMac(folder: "/srv/app"), agent: nil))
+        bench.focus(shell)
+        #expect(Self.likeFront(bench) == .terminal(Self.dock, agent: nil))
+    }
+
+    /// Scenario 5: with no tab, a person who starts in Chat gets a new chat in the workspace of
+    /// the runner pane focused last; anyone else, or with no workspace yet, a This Mac shell.
+    @Test func commandTWithNoTabOpensANewChatInTheLastWorkspaceForAChatPerson() {
+        var bench = Workbench()
+        #expect(Self.likeFront(bench, chatFirst: true) == .terminal(.thisMac(folder: "/home/u"), agent: nil))
+        let dock = bench.newTab(session: "app-1", place: Self.dock)
+        let pier = bench.newTab(session: "app-2", place: Self.pier)
+        bench.newTab(session: "mac-1", place: .thisMac(folder: "/"))
+        #expect(bench.lastWorkspace == Self.pier)
+        bench.focus(dock)
+        bench.focus(pier)
+        bench.closeTab(bench.tabs[2].id)
+        bench.closeTab(bench.tabs[0].id)
+        bench.closeTab(bench.tabs[0].id)
+        #expect(bench.tabs.isEmpty && bench.lastWorkspace == Self.pier)
+        #expect(Self.likeFront(bench, chatFirst: true) == .newChat(Self.pier, agent: Self.claude))
+        #expect(Self.likeFront(bench, chatFirst: false) == .terminal(.thisMac(folder: "/home/u"), agent: nil))
+        #expect(Self.likeFront(bench, chatFirst: true, agent: nil) == .terminal(.thisMac(folder: "/home/u"), agent: nil))
+    }
+
+    /// The last workspace is kept with the arrangement and comes back for its person alone.
+    @Test func theLastWorkspaceComesBackForItsPersonAlone() {
+        var bench = Workbench()
+        bench.newTab(session: "app-1", place: Self.pier)
+        bench.closeTab(bench.tabs[0].id)
+        let kept = bench.arrangement(runner: "uday", holding: [])
+        #expect(kept.lastWorkspace == Self.pier)
+        #expect(Workbench.restore(kept, live: [], home: "/", for: "uday").lastWorkspace == Self.pier)
+        #expect(Workbench.restore(kept, live: [], home: "/", for: "ana").lastWorkspace == nil)
+        #expect(Workbench.restore(kept, live: [], home: "/").lastWorkspace == nil)
+    }
+
+    /// Scenario 6: a new chat's workspace and harness change until its first message binds it,
+    /// once, to the chat it opened; then it holds that chat, in its place for good.
+    @Test func aNewChatChangesUntilItIsBoundOnce() throws {
+        var bench = Workbench()
+        let pane = bench.newChat(in: Self.dock, agent: Self.claude)
+        bench.move(newChat: pane, to: Self.pier, agent: Self.codex)
+        #expect(bench.panes[pane]?.place == Self.pier && bench.panes[pane]?.agent == Self.codex && bench.lastWorkspace == Self.pier)
+        #expect(bench.bind(pane, to: Self.chatID("05")) == nil)
+        let bound = try #require(bench.panes[pane])
+        #expect(bound.form == .chat && bound.session == Self.chatID("05") && bound.place == Self.pier && bound.agent == Self.codex)
+        #expect(Self.likeFront(bench) == .newChat(Self.pier, agent: Self.codex))
+    }
+
+    @Test func aBoundChatIsNeverBoundAgain() async {
+        await #expect(processExitsWith: .failure) {
+            var bench = Workbench()
+            let pane = bench.newChat(in: Place.workspace(project: "harbor", name: "dock"), agent: AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"))
+            bench.bind(pane, to: "00000000-0000-7000-8000-000000000005")
+            bench.bind(pane, to: "00000000-0000-7000-8000-000000000006")
+        }
+    }
+
+    @Test func aBoundChatNeverChangesItsPlace() async {
+        await #expect(processExitsWith: .failure) {
+            var bench = Workbench()
+            let start = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
+            let pane = bench.newChat(in: Place.workspace(project: "harbor", name: "dock"), agent: start)
+            bench.bind(pane, to: "00000000-0000-7000-8000-000000000005")
+            bench.move(newChat: pane, to: Place.workspace(project: "harbor", name: "pier"), agent: start)
+        }
+    }
+
+    /// A chat a listing adopted before its first message's answer came is the bound pane's alone:
+    /// the adopted tab closes, its state the bound pane's.
+    @Test func aChatAdoptedBeforeItsBindIsHeldOnce() throws {
+        var bench = Workbench()
+        let pane = bench.newChat(in: Self.dock, agent: Self.claude)
+        let adopted = bench.adopt(listing: try Self.listing("workspace-sessions-no-terminal-door"), in: Self.dock, for: "uday")
+        #expect(adopted.count == 5)
+        let closed = bench.bind(pane, to: Self.chatID("20"))
+        #expect(closed?.session == Self.chatID("20") && bench.panes.values.filter { $0.session == Self.chatID("20") }.map(\.id) == [pane])
+        #expect(bench.panes[pane]?.chatState == .known(.working) && bench.tabs.count == 5)
+    }
+
+    /// Scenario 7, and the order: each live session of the person no pane holds opens as a last
+    /// tab, oldest first; ended ones never; the same listing again adds none, and the selected tab
+    /// stays.
+    @Test func liveSessionsAreAdoptedAsLastTabsOnce() throws {
+        var bench = Workbench()
+        bench.newTab(session: "mac-1", place: .thisMac(folder: "/"))
+        let front = bench.selected
+        let listing = try Self.listing()
+        let made = bench.adopt(listing: listing, in: Self.dock, for: "uday")
+        #expect(Self.sessions(bench) == [["mac-1"], ["app-1f2e3d4c"]] + ["21", "20", "19", "18", "17"].map { [Self.chatID($0)] })
+        #expect(made.compactMap { bench.panes[$0]?.form } == [.terminal] + Array(repeating: .chat, count: 5))
+        #expect(bench.panes[made[0]]?.agent == AgentStart(harness: "claude-code", display: "Claude Code", mode: "default"))
+        #expect(bench.selected == front)
+        #expect(bench.adopt(listing: listing, in: Self.dock, for: "uday").isEmpty && bench.selected == front && bench.tabs.count == 7)
+    }
+
+    /// A chat started on another Mac is one last tab; with no tab before, the first adopted is
+    /// selected.
+    @Test func aChatFromAnotherMacArrivesAsOneLastTab() throws {
+        var bench = Workbench()
+        let listing = try Self.listing("workspace-sessions-no-terminal-door")
+        bench.adopt(listing: RunnerSessions(sessions: [], chats: Array(listing.chats.dropFirst(2))), in: Self.dock, for: "uday")
+        #expect(bench.selectedTab?.id == bench.tabs.first?.id)
+        let front = bench.selected
+        #expect(bench.adopt(listing: listing, in: Self.dock, for: "uday").compactMap { bench.panes[$0]?.session } == [Self.chatID("17")])
+        #expect(bench.tabs.last?.layout.leaves.compactMap { bench.panes[$0]?.session } == [Self.chatID("17")] && bench.selected == front)
+    }
+
+    /// Scenario 8, and a held tab: another person's rows (an admin's listing holds them), unknown
+    /// forms and sessions a held-aside tab holds are never adopted.
+    @Test func anotherPersonsRowsAndHeldSessionsAreNotAdopted() throws {
+        var bench = Workbench()
+        let theirs = try Self.listing(altered: [(["sessions", 6, "opener"], "ana"), (["sessions", 5, "opener"], "ana"), (["sessions", 4, "form"], "drydock")])
+        let made = bench.adopt(listing: theirs, in: Self.dock, for: "uday")
+        #expect(made.compactMap { bench.panes[$0]?.session } == ["19", "18", "17"].map(Self.chatID))
+        var other = Workbench()
+        let held = [Arrangement.Tab(name: nil, focused: Self.chatID("17"), layout: .pane(session: Self.chatID("17"), place: Self.dock, agent: Self.claude, form: .chat))]
+        other.adopt(listing: try Self.listing(), in: Self.dock, for: "uday", beside: held)
+        #expect(!other.panes.values.contains { $0.session == Self.chatID("17") } && other.tabs.count == 5)
+    }
+
+    /// Scenario 9: a turn that ends while its tab is not in front marks an unseen turn until the
+    /// tab is selected; one that ends in front of a window that is not key, until it is key.
+    @Test func aTurnEndedOutOfSightIsUnseenUntilShown() throws {
+        var bench = Workbench()
+        bench.adopt(listing: try Self.listing("workspace-sessions-no-terminal-door"), in: Self.dock, for: "uday")
+        let working = try #require(bench.panes.values.first { $0.session == Self.chatID("20") })
+        let tab = try #require(bench.tab(holding: working.id)).id
+        #expect(bench.mark(of: tab) == .working)
+        bench.selectTab(at: 0)
+        bench.setChatState(.known(.yourTurn), of: working.id)
+        #expect(bench.mark(of: tab) == .unseenTurn)
+        bench.setChatState(.known(.yourTurn), of: working.id)
+        #expect(bench.mark(of: tab) == .unseenTurn)
+        bench.select(tab)
+        #expect(bench.mark(of: tab) == .none)
+        bench.setChatState(.known(.working), of: working.id)
+        bench.setWindowKey(false)
+        bench.setChatState(.known(.yourTurn), of: working.id)
+        #expect(bench.mark(of: tab) == .unseenTurn)
+        bench.setWindowKey(true)
+        #expect(bench.mark(of: tab) == .none)
+        bench.setChatState(.known(.working), of: working.id)
+        bench.setChatState(.known(.yourTurn), of: working.id)
+        #expect(bench.mark(of: tab) == .none, "a turn ended in front of a key window was taken for unseen")
+    }
+
+    /// A first state is no turn's end, and a new state ends an unseen turn.
+    @Test func aFirstStateIsNoTurnsEnd() throws {
+        var bench = Workbench()
+        bench.newTab(session: "mac-1", place: .thisMac(folder: "/"))
+        bench.adopt(listing: try Self.listing("workspace-sessions-no-terminal-door"), in: Self.dock, for: "uday")
+        let yours = try #require(bench.panes.values.first { $0.session == Self.chatID("18") })
+        #expect(bench.mark(of: try #require(bench.tab(holding: yours.id)).id) == .none)
+        let working = try #require(bench.panes.values.first { $0.session == Self.chatID("20") })
+        let tab = try #require(bench.tab(holding: working.id)).id
+        bench.setChatState(.known(.yourTurn), of: working.id)
+        bench.setChatState(.known(.needsYou), of: working.id)
+        #expect(bench.mark(of: tab) == .needsYou && bench.panes[working.id]?.unseen == false)
+    }
+
+    /// The listing tells a held chat where it stands and its title, an ended turn's included.
+    @Test func aListingRefreshesTheChatsItHolds() throws {
+        var bench = Workbench()
+        bench.newTab(session: "mac-1", place: .thisMac(folder: "/"))
+        bench.adopt(listing: try Self.listing("workspace-sessions-no-terminal-door"), in: Self.dock, for: "uday")
+        let tab = try #require(bench.panes.values.first { $0.session == Self.chatID("20") }.flatMap { bench.tab(holding: $0.id) }).id
+        let later = try Self.listing("workspace-sessions-no-terminal-door", altered: [(["sessions", 4, "state"], "your_turn"), (["sessions", 4, "title"], "Fix the tide table rounding")])
+        #expect(bench.adopt(listing: later, in: Self.dock, for: "uday").isEmpty)
+        #expect(bench.mark(of: tab) == .unseenTurn && bench.title(of: tab) == "Fix the tide table rounding")
+    }
+
+    /// Scenario 10, and the order of marks: a tab says the most urgent of its chats'; a split of a
+    /// chat opens a terminal in the chat's workspace, which says none.
+    @Test func aTabSaysTheMostUrgentMarkOfItsChats() throws {
+        var bench = Workbench()
+        bench.newTab(session: "mac-1", place: .thisMac(folder: "/"))
+        bench.adopt(listing: try Self.listing("workspace-sessions-no-terminal-door"), in: Self.dock, for: "uday")
+        let working = try #require(bench.panes.values.first { $0.session == Self.chatID("20") })
+        bench.focus(working.id)
+        let place = bench.placeForSplit(hostNames: [], isFolder: { _ in true }, home: "/")
+        #expect(place == Self.dock)
+        let split = bench.split(.sideBySide, session: "app-beside", place: place, in: Self.room, minimum: Self.least, scale: 2)
+        let shell = try #require(split)
+        #expect(bench.panes[shell]?.form == .terminal && bench.panes[shell]?.agent == nil && bench.panes[shell]?.mark == TabMark.none)
+        let tab = try #require(bench.selected)
+        #expect(bench.mark(of: tab) == .working)
+        #expect(bench.mark(of: bench.tabs[0].id) == .none)
+        #expect(TabMark.allCases.sorted(by: >) == [.needsYou, .error, .unseenTurn, .working, .ended, .none])
+        let marks = bench.tabs.dropFirst().map { bench.mark(of: $0.id) }
+        #expect(marks == [.none, .working, .needsYou, .none, .error], "\(marks)")
+        let kept = Arrangement.Node.split(
+            axis: .sideBySide, ratio: 0.5,
+            first: .pane(session: Self.chatID("30"), place: Self.dock, agent: Self.claude, form: .chat),
+            second: .pane(session: Self.chatID("31"), place: Self.dock, agent: Self.claude, form: .chat)
+        )
+        var two = Workbench.restore(Arrangement(tabs: [.init(name: nil, focused: Self.chatID("30"), layout: kept)], selected: 0), live: [Self.chatID("30"), Self.chatID("31")], home: "/")
+        let leaves = try #require(two.tabs.first).layout.leaves
+        try #require(leaves.count == 2)
+        let (one, other) = (leaves[0], leaves[1])
+        two.setChatState(.known(.ended), of: one)
+        two.setChatState(.known(.error), of: other)
+        #expect(two.mark(of: two.tabs[0].id) == .error)
+        two.setChatState(.known(.needsYou), of: one)
+        #expect(two.mark(of: two.tabs[0].id) == .needsYou)
+    }
+
+    /// Scenario 8 of the spec: a new chat is "New chat", a chat its listed title else "New chat",
+    /// a person's name stands over both, and two alike are numbered.
+    @Test func aChatTabIsTitledByItsTitleElseNewChat() throws {
+        var bench = Workbench()
+        let first = bench.newChat(in: Self.dock, agent: Self.claude)
+        bench.newChat(in: Self.pier, agent: Self.claude)
+        #expect(bench.tabs.map { bench.title(of: $0.id) } == ["New chat", "New chat 2"])
+        bench.bind(first, to: Self.chatID("20"))
+        #expect(bench.title(of: bench.tabs[0].id) == "New chat")
+        bench.adopt(listing: try Self.listing("workspace-sessions-no-terminal-door", altered: [(["sessions", 4, "title"], "Fix the tide table rounding")]), in: Self.dock, for: "uday")
+        #expect(bench.title(of: bench.tabs[0].id) == "Fix the tide table rounding")
+        bench.rename(bench.tabs[0].id, to: "tides")
+        #expect(bench.title(of: bench.tabs[0].id) == "tides")
+        #expect(bench.title(of: bench.tabs[2].id) == "New chat 3")
+    }
+
+    /// Scenario 11: a chat's and a new chat's drafts and forms are kept; signed out they are held,
+    /// and they come back for their own person's sign-in alone.
+    @Test func chatPanesAndDraftsComeBackForTheirPersonAlone() throws {
+        var bench = Workbench()
+        bench.newTab(session: "mac-1", place: .thisMac(folder: "/"))
+        let draft = bench.newChat(in: Self.dock, agent: Self.claude)
+        bench.setDraft("Why does PierTest time out", of: draft)
+        let chat = bench.newChat(in: Self.pier, agent: Self.codex)
+        bench.bind(chat, to: Self.chatID("05"))
+        bench.setDraft("and on CI?", of: chat)
+        let terminal = bench.newTab(session: "app-1", place: Self.dock)
+        bench.setDraft("typed into a shell", of: terminal)
+        #expect(bench.panes[terminal]?.draft == "")
+        let kept = try JSONDecoder().decode(Arrangement.self, from: JSONEncoder().encode(bench.arrangement(runner: "uday", holding: [])))
+        func back(_ restored: Workbench) -> [String: String] {
+            Dictionary(uniqueKeysWithValues: restored.panes.values.filter(\.converses).map { ($0.session, $0.draft) })
+        }
+        let uday = Workbench.restore(kept, live: ["mac-1"] + kept.runnerSessions(for: "uday"), home: "/", for: "uday")
+        #expect(back(uday) == [bench.panes[draft]?.session ?? "": "Why does PierTest time out", Self.chatID("05"): "and on CI?"])
+        #expect(uday.panes.values.first { $0.session == Self.chatID("05") }?.form == .chat)
+        let unbound = try #require(uday.panes.values.first { $0.form == .newChat })
+        #expect(unbound.place == Self.dock && unbound.agent == Self.claude)
+        #expect(uday.arrangement(runner: "uday", holding: []) == kept)
+        let ana = Workbench.restore(kept, live: ["mac-1"] + kept.runnerSessions(for: "ana"), home: "/", for: "ana")
+        #expect(Self.sessions(ana) == [["mac-1"]])
+        var signedOut = Workbench.restore(kept, live: ["mac-1"], home: "/")
+        #expect(Self.sessions(signedOut) == [["mac-1"]])
+        let held = kept.runnerTabs
+        #expect(held.count == 3)
+        #expect(signedOut.adopt(held).count == 3)
+        #expect(back(signedOut) == back(uday))
+        #expect(signedOut.adopt(held).isEmpty)
+    }
+
+    /// Scenario 12: an arrangement of the old version is dropped; its live sessions come back as
+    /// tabs from the listing.
+    @Test func anOldArrangementIsDroppedAndTheListingBringsItsSessionsBack() throws {
+        var bench = Workbench()
+        bench.adopt(listing: try Self.listing(), in: Self.dock, for: "uday")
+        bench.rename(bench.tabs[0].id, to: "agent")
+        var old = bench.arrangement(runner: "uday", holding: [])
+        old.version = 1
+        #expect(Arrangement.currentVersion == 2)
+        var restored = Workbench.restore(old, live: old.runnerSessions(for: "uday"), home: "/", for: "uday")
+        #expect(restored.tabs.isEmpty && restored.lastWorkspace == nil)
+        restored.adopt(listing: try Self.listing(), in: Self.dock, for: "uday")
+        #expect(Self.sessions(restored) == Self.sessions(bench) && restored.tabs.allSatisfy { $0.name == nil })
+    }
+
+    /// A kept chat that names no harness, or a chat on this Mac, is not whole and is dropped
+    /// rather than stopping the app.
+    @Test func aKeptChatThatIsNotWholeIsDropped() {
+        let broken = Arrangement(tabs: [
+            .init(name: nil, focused: "x", layout: .pane(session: "x", place: Self.dock, form: .chat)),
+            .init(name: nil, focused: "y", layout: .pane(session: "y", place: .thisMac(folder: "/"), agent: Self.claude, form: .newChat)),
+            .init(name: nil, focused: "z", layout: .pane(session: "z", place: Self.dock, agent: Self.claude, form: .chat)),
+        ], selected: 0)
+        let restored = Workbench.restore(broken, live: ["x", "y", "z"], home: "/")
+        #expect(Self.sessions(restored) == [["z"]])
     }
 }

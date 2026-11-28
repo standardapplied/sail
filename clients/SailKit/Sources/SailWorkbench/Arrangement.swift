@@ -47,6 +47,12 @@ public struct Arrangement: Codable, Equatable, Sendable {
         public var name: String?
         public var focused: String
         public var layout: Node
+
+        public init(name: String?, focused: String, layout: Node) {
+            self.name = name
+            self.focused = focused
+            self.layout = layout
+        }
     }
 
     public indirect enum Node: Codable, Equatable, Sendable {

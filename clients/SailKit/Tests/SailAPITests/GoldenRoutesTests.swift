@@ -55,6 +55,8 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "workspace-sessions": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
     "refusal-not-found-session": { _ = try await $0.send(.terminalTicket(attach: "app-gone")) },
     "workspace-sessions-not-theirs": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
+    "workspace-sessions-chats": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
+    "workspace-sessions-no-terminal-door": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
     "refusal-not-found-workspace": { _ = try await $0.send(.sessions(workspace: "gone", project: "harbor")) },
     "refusal-project-not-in-catalog-sessions": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
     "workspace-agents": { _ = try await $0.send(.agents(workspace: "berth", project: "harbor")) },
@@ -208,9 +210,7 @@ func answer<Response>(
 
     /// A workspace's terminal sessions as the runner's host lists them for the caller, newest first:
     /// one live with its keyboard held, one its workspace's stop ended, in the stop's words; another
-    /// person lists nothing of the owner's. A chat row is no terminal, so a listing with chats, or
-    /// with chats alone on a box with no terminal door, reads its terminals; a row with no form, as
-    /// an older server lists it, is a terminal.
+    /// person lists nothing of the owner's.
     @Test func aWorkspacesSessionsAreReadAsListed() throws {
         let sessions = Endpoint.sessions(workspace: "dock", project: "harbor")
         let listed = try sessions.decode(response(try Exchange("workspace-sessions")))
@@ -227,10 +227,58 @@ func answer<Response>(
             ),
         ]))
         #expect(try sessions.decode(response(try Exchange("workspace-sessions-not-theirs"))) == RunnerSessions(sessions: []))
-        let withChats = try sessions.decode(response(try Exchange("workspace-sessions-chats")))
-        #expect(withChats.sessions.map(\.name) == ["app-1f2e3d4c", "app-5a6b7c8d"])
-        #expect(try sessions.decode(response(try Exchange("workspace-sessions-no-terminal-door"))) == RunnerSessions(sessions: []))
         #expect(try SailJSON.decode(RunnerSessions.self, from: SailJSON.encode(listed), route: "sessions") == listed)
+    }
+
+    /// The caller's chats, newest first, one in each of the six states, the first ended.
+    static let chats: [ChatRow] = zip(["16", "17", "18", "19", "20", "21"], ChatState.allCases.reversed()).enumerated().map { index, row in
+        ChatRow(
+            name: "00000000-0000-7000-8000-0000000000\(row.0)", live: row.1 != .ended, state: .known(row.1), opener: "uday",
+            agent: RunnerAgent(harness: "claude-code", display: "Claude Code", mode: "default", login: "stored"),
+            createdAt: (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse("2026-11-11T09:00:0\(6 - index).656Z")) ?? .distantPast
+        )
+    }
+
+    /// Scenarios 1 and 3: a listing reads each row by its form, the chats beside the terminals,
+    /// every one of the six states, and a person's live terminals as they were; on a box with no
+    /// terminal door, chats alone. It is written back as it was read.
+    @Test func aListingReadsItsChatsBesideItsTerminals() throws {
+        let sessions = Endpoint.sessions(workspace: "dock", project: "harbor")
+        let terminals = try sessions.decode(response(try Exchange("workspace-sessions")))
+        let listed = try sessions.decode(response(try Exchange("workspace-sessions-chats")))
+        #expect(listed == RunnerSessions(sessions: terminals.sessions, chats: Self.chats))
+        #expect(Set(listed.chats.map(\.state)) == Set(ChatState.allCases.map(Open.known)))
+        #expect(listed.live(for: "uday") == terminals.live(for: "uday"))
+        #expect(listed.live(for: "uday").map(\.name) == ["app-1f2e3d4c"])
+        let chatsAlone = try sessions.decode(response(try Exchange("workspace-sessions-no-terminal-door")))
+        #expect(chatsAlone == RunnerSessions(sessions: [], chats: Self.chats))
+        #expect(try SailJSON.decode(RunnerSessions.self, from: SailJSON.encode(listed), route: "sessions") == listed)
+    }
+
+    /// Scenario 2: a row with no form fails the listing, naming it.
+    @Test func aRowWithNoFormFailsTheListing() throws {
+        for (golden, row) in [("workspace-sessions", 0), ("workspace-sessions-chats", 0), ("workspace-sessions-chats", 6)] {
+            let formless = try Exchange(golden).altered(at: ["sessions", row, "form"], to: nil)
+            expectUndecodable(route: "GET /v1/projects/harbor/workspaces/dock/sessions", field: "sessions[\(row)].form") {
+                try Endpoint.sessions(workspace: "dock", project: "harbor").decode(response(formless))
+            }
+        }
+    }
+
+    /// A row of a form this app does not know is kept apart, by its form, and is no terminal or
+    /// chat; a chat's title is read where it is listed; a state this app does not know is kept.
+    @Test func aListingKeepsAnUnknownFormApartAndReadsATitle() throws {
+        let sessions = Endpoint.sessions(workspace: "dock", project: "harbor")
+        let golden = try Exchange("workspace-sessions-chats")
+        let drydock = try golden.altered(at: ["sessions", 6, "form"], to: "drydock")
+        let listed = try sessions.decode(response(drydock))
+        #expect(listed.otherForms == ["drydock"])
+        #expect(listed.sessions.map(\.name) == ["app-5a6b7c8d"] && listed.chats.count == 6)
+        #expect(try SailJSON.decode(RunnerSessions.self, from: SailJSON.encode(listed), route: "sessions") == listed)
+        let titled = try sessions.decode(response(try golden.altered(at: ["sessions", 1, "title"], to: "Why does PierTest time out on CI")))
+        #expect(titled.chats.map(\.title) == [nil, "Why does PierTest time out on CI", nil, nil, nil, nil])
+        let newer = try sessions.decode(response(try golden.altered(at: ["sessions", 1, "state"], to: "compacting")))
+        #expect(newer.chats[1].state == .unknown("compacting"))
     }
 
     /// What can start in a workspace, each case as the server answers it: its owner signed in, with
@@ -627,7 +675,7 @@ let answersOfRoutesNotYetCalled: Set<String> = [
     "chat-mode-kept", "chat-request-denied", "chat-request-allowed-always", "chat-request-allowed",
     "chat-question-answered", "chat-plan-approved", "chat-stopping", "chat-not-stopping", "chat-mode-set",
     "chat-items-answered",
-    "workspace-sessions-chats", "workspace-sessions-no-terminal-door", "preferences", "preferences-set",
+    "preferences", "preferences-set",
 ]
 
 /// The member the golden writer seats in the room.
