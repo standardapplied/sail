@@ -384,6 +384,18 @@ class ChatListingTest {
   }
 
   /**
+   * T9: a title is made from the first {@link ChatListing#TITLE_READ} characters of the message
+   * alone, so no listing reads a message's whole 64 KiB.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aTitleIsMadeFromTheMessagesOpeningCharactersAlone() {
+    var blank = " ".repeat(ChatListing.TITLE_READ - 4);
+    assertEquals("late", titleOf(blank + "late words"));
+    assertFalse(only(listed(blank + "    late words")).containsKey("title"));
+  }
+
+  /**
    * T8: no control character or line break reaches a title: each, and each run of spaces, is one
    * space, and the first line with words in it is the first line; a NUL ends what SQLite reads.
    */

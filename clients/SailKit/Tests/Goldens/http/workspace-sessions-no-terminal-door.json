@@ -33,7 +33,8 @@
           "live": true,
           "name": "00000000-0000-7000-8000-000000000017",
           "opener": "uday",
-          "state": "error"
+          "state": "error",
+          "title": "hi"
         },
         {
           "agent": {
@@ -47,7 +48,8 @@
           "live": true,
           "name": "00000000-0000-7000-8000-000000000018",
           "opener": "uday",
-          "state": "your_turn"
+          "state": "your_turn",
+          "title": "hi"
         },
         {
           "agent": {
@@ -61,7 +63,8 @@
           "live": true,
           "name": "00000000-0000-7000-8000-000000000019",
           "opener": "uday",
-          "state": "needs_you"
+          "state": "needs_you",
+          "title": "hi"
         },
         {
           "agent": {
@@ -75,7 +78,8 @@
           "live": true,
           "name": "00000000-0000-7000-8000-000000000020",
           "opener": "uday",
-          "state": "working"
+          "state": "working",
+          "title": "hi"
         },
         {
           "agent": {
