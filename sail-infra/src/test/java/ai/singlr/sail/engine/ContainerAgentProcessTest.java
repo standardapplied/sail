@@ -542,23 +542,29 @@ class ContainerAgentProcessTest {
 
   /**
    * The pid file outlives its process, so after a restart its pid can name another process of the
-   * person's: in each lane, that process is never signalled, and nothing is removed.
+   * person's: in each lane, that process is never signalled, and nothing is removed. The record is
+   * of a process that started long before it (this test's own, standing for the one gone), as a
+   * pid's earlier holder always did: a start is counted in ticks of 10 ms, which two processes
+   * started one after the other share.
    */
   @Test
   @EnabledOnOs(OS.LINUX)
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aStalePidFileNamingAnotherLiveProcessSignalsNothing() throws Exception {
+    var gone =
+        Files.readString(Path.of("/proc", String.valueOf(ProcessHandle.current().pid()), "stat"));
     for (var pidFile : lanes()) {
       var handle = wrapped(new Here(), pidFile);
       var other = another();
       Files.writeString(pidFile, other.pid() + "\n");
+      Files.writeString(record(pidFile), gone);
       var recorded = Files.readString(record(pidFile));
 
       handle.signal(AgentProcess.Signal.INT);
       handle.signal(AgentProcess.Signal.TERM);
 
       assertTrue(answers(other), "the process that holds the pid now is not signalled");
-      assertTrue(answers(handle), "nor the one the record is of");
+      assertTrue(answers(handle), "nor the handle's own");
       assertEquals(other.pid() + "\n", Files.readString(pidFile), "the pid file is kept");
       assertEquals(recorded, Files.readString(record(pidFile)), "and its record");
     }
