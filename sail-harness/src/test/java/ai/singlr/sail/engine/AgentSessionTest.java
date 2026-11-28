@@ -929,7 +929,7 @@ class AgentSessionTest {
     inner.set(inner.indexOf(RUN_UNIT.logPath()), "/dev/stdout");
     inner.set(inner.indexOf(RUN_UNIT.pidPath()), pidFile.toString());
     inner.set(inner.indexOf(RUN_UNIT.startPath()), record);
-    inner.set(inner.indexOf("bash") + 2, "echo ready; read -r line");
+    inner.set(inner.lastIndexOf("bash") + 2, "echo ready; read -r line");
     var builder = new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD);
     builder.environment().put("HOME", dir.toString());
     var agent = builder.start();

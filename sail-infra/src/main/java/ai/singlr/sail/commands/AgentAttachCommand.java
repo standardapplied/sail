@@ -374,16 +374,21 @@ public final class AgentAttachCommand implements Runnable {
   }
 
   /**
-   * {@code command}, a {@code bash -lc} line, run as a spec's workspace's terminal: it writes its
-   * process into {@link AgentUnit#TERMINAL}'s pid file first, so that a claim of the workspace ends
-   * it ({@link ai.singlr.sail.api.RunReservation}), as a claim of the project's container ends a
-   * resumed host session, and a live member never starts beside it.
+   * {@code command}, a {@code bash -lc} line, run as a spec's workspace's terminal: it records its
+   * start and then writes its process into {@link AgentUnit#TERMINAL}'s pid file first, so that a
+   * claim of the workspace ends it ({@link ai.singlr.sail.api.RunReservation}), as a claim of the
+   * project's container ends a resumed host session, and a live member never starts beside it.
    */
   static List<String> inTheWorkspace(List<String> command) {
     return List.of(
         command.get(0),
         command.get(1),
-        "echo $$ > " + AgentUnit.TERMINAL.pidPath() + " && " + command.get(2));
+        "cat /proc/$$/stat > "
+            + AgentUnit.TERMINAL.startPath()
+            + " && echo $$ > "
+            + AgentUnit.TERMINAL.pidPath()
+            + " && "
+            + command.get(2));
   }
 
   /**
