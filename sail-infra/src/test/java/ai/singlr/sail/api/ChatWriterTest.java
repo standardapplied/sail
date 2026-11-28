@@ -124,6 +124,18 @@ class ChatWriterTest {
     assertNull(writer.stalled(NOW.plus(bound), bound), "once taken, nothing is stalled");
   }
 
+  @Test
+  void aWriterInterruptedClosesItsStdinAndTakesNoLine() throws Exception {
+    var thread = writer.start("sail-test-writer");
+
+    thread.interrupt();
+
+    assertTrue(thread.join(Duration.ofSeconds(20)), "the writer ended");
+    assertTrue(stdin.closed, "its stdin closed");
+    assertFalse(writer.wrote(offer("late")));
+    assertEquals(List.of("refused late"), told);
+  }
+
   /** A harness's stdin that can hold its first write, or refuse it. */
   private static final class Stdin implements AgentProcess.LineWriter {
 
@@ -132,6 +144,7 @@ class ChatWriterTest {
     private final CountDownLatch held = new CountDownLatch(1);
     private volatile boolean holds;
     private volatile boolean refuses;
+    private volatile boolean closed;
 
     void holdsTheFirst() {
       holds = true;
@@ -167,6 +180,8 @@ class ChatWriterTest {
     }
 
     @Override
-    public void close() {}
+    public void close() {
+      closed = true;
+    }
   }
 }

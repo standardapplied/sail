@@ -74,9 +74,12 @@ final class ChatWriter {
     this.patience = Objects.requireNonNull(patience, "patience");
   }
 
-  /** Starts writing, on a thread of its own named {@code name}. */
-  void start(String name) {
-    Thread.ofVirtual().name(name).start(this::writeAll);
+  /**
+   * Starts writing, on a thread of its own named {@code name}, which it returns: one interrupted
+   * takes no line from then on, and ends once those waiting are told.
+   */
+  Thread start(String name) {
+    return Thread.ofVirtual().name(name).start(this::writeAll);
   }
 
   /**

@@ -49,6 +49,9 @@ final class ChatProcess {
     void gone(ChatProcess process);
   }
 
+  /** What a line's taking or refusal does when nothing more is owed. */
+  private static final Runnable NOTHING = () -> {};
+
   private final String session;
   private final String agent;
   private final ChatLog log;
@@ -119,7 +122,7 @@ final class ChatProcess {
   void read() {
     writer.start("sail-chat-write-" + session);
     synchronized (this) {
-      wire.opening().forEach(line -> hand(line, broken, () -> {}, () -> {}));
+      wire.opening().forEach(line -> hand(line, broken, NOTHING, NOTHING));
     }
     Thread.ofVirtual().name("sail-chat-" + session).start(this::readToTheEnd);
   }
@@ -160,7 +163,7 @@ final class ChatProcess {
     }
     var last = heard.stop() ? stopTurn() : 0L;
     for (var reply : heard.replies()) {
-      last = Math.max(last, hand(reply, broken, () -> {}, () -> {}));
+      last = Math.max(last, hand(reply, broken, NOTHING, NOTHING));
     }
     for (var item : heard.items()) {
       if (item instanceof ChatItem.Request request) {
@@ -179,7 +182,7 @@ final class ChatProcess {
    */
   private long stopTurn() {
     stopAsked = timing.clock().get();
-    return hand(wire.interrupt(Ids.newId().toString()), broken, () -> {}, () -> {});
+    return hand(wire.interrupt(Ids.newId().toString()), broken, NOTHING, NOTHING);
   }
 
   /**
@@ -296,8 +299,8 @@ final class ChatProcess {
                 agent
                     + " did not get your answer: its process stopped taking what Sail wrote to it,"
                     + " so Sail ended it; your next message starts it again.",
-                () -> {},
-                () -> {})));
+                NOTHING,
+                NOTHING)));
   }
 
   /**
@@ -332,7 +335,7 @@ final class ChatProcess {
     }
     var request = Ids.newId().toString();
     var seq = log.log(new ChatWire.ModeSet(mode, request, by));
-    hand(wire.mode(request, mode), broken, () -> {}, () -> log.said(null, mode));
+    hand(wire.mode(request, mode), broken, NOTHING, () -> log.said(null, mode));
     return seq;
   }
 
@@ -370,7 +373,7 @@ final class ChatProcess {
     }
     var last = 0L;
     for (var index = 0; index < lines.size(); index++) {
-      last = hand(lines.get(index), broken, index == lines.size() - 1 ? taken : () -> {}, refused);
+      last = hand(lines.get(index), broken, index == lines.size() - 1 ? taken : NOTHING, refused);
     }
     return last;
   }

@@ -14,8 +14,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.store.ProjectStore;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -45,6 +47,7 @@ class ChatRpcTest {
 
   @TempDir Path dir;
   private ChatBench bench;
+  private ChatHost host;
 
   @BeforeEach
   void setUp() {
@@ -60,11 +63,22 @@ class ChatRpcTest {
                       case "displayName" -> "Rpc Agent";
                       default -> invoke(called, claude, args);
                     });
-    bench = new ChatBench(dir, name -> rpc);
+    bench = new ChatBench(dir);
+    host =
+        bench.restarted(
+            new ChatLaunch(
+                bench.door,
+                bench.fdes,
+                ProjectReader.ofCatalog(new ProjectStore(bench.db)),
+                bench.processes,
+                bench.processes.container(),
+                TestAuth.roles(bench.db, new SyncConfig("main", null, "ada", "box")),
+                name -> rpc));
   }
 
   @AfterEach
   void tearDown() {
+    host.close();
     bench.close();
   }
 
@@ -131,15 +145,16 @@ class ChatRpcTest {
                 }
               });
         });
-    var session = bench.samsChat();
+    var session =
+        as("sam", () -> host.open("acme", "try", "claude-code", "default", false)).session();
 
-    var sent = bench.send(session, "What day is it?");
+    var sent = as("sam", () -> host.send(session, "What day is it?"));
     opened.countDown();
     assertTrue(asked.await(20, TimeUnit.SECONDS), "the agent was never prompted");
     var fake = bench.processes.latest();
     fake.settle();
     var answered =
-        as("sam", () -> bench.host.answers().answer(session, "ask-1", Map.of("decision", "allow")));
+        as("sam", () -> host.answers().answer(session, "ask-1", Map.of("decision", "allow")));
     assertTrue(ended.await(20, TimeUnit.SECONDS), "the agent was never answered");
     fake.settle();
 
@@ -165,7 +180,7 @@ class ChatRpcTest {
             "text",
             "turn_ended"),
         bench.kinds(session));
-    var items = bench.items(session);
+    var items = as("sam", () -> host.read(session, 0)).items();
     assertEquals(
         List.of("ask-1", "t1", "command", "date"),
         List.of(

@@ -9,6 +9,7 @@ import static ai.singlr.sail.api.ChatBench.as;
 import static ai.singlr.sail.api.ChatBench.line;
 import static ai.singlr.sail.api.ChatBench.over;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -171,6 +172,39 @@ class ChatStdinTest {
         fake.written.stream()
             .map(said -> said.contains("\"subtype\": \"interrupt\"") ? "interrupt" : said)
             .toList());
+  }
+
+  /**
+   * A turn the harness ends before its message is marked handed (its answer read while the line
+   * that handed it is still being written) hands the message no second time: the next goes next.
+   */
+  @Test
+  void aTurnThatEndsBeforeItsMessageIsMarkedHandedIsNotHandedItAgain() throws Exception {
+    var answered = new CountDownLatch(1);
+    var first = new AtomicBoolean(true);
+    bench.processes.onStart(
+        fake -> {
+          fake.onClose(fake::exitsIfRunning);
+          fake.onWrite(
+              line -> {
+                if (first.getAndSet(false)) {
+                  fake.says(INIT, line("02b-relay-stdio", 138));
+                  fake.settle();
+                  answered.countDown();
+                }
+              });
+        });
+    var session = chat();
+
+    as("sam", () -> host.send(session, "hi"));
+    assertTrue(answered.await(20, TimeUnit.SECONDS), "the turn was never answered");
+    var next =
+        assertTimeoutPreemptively(RETURNS, () -> as("sam", () -> host.send(session, "next")));
+
+    assertFalse(next.queued(), "the turn it answered is over");
+    assertEquals(
+        List.of(LiveStream.userMessage("hi"), LiveStream.userMessage("next")),
+        bench.processes.latest().written);
   }
 
   /** Line {@code number} of {@code recording}, which Claude Code took, as Sail writes it. */
