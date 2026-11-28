@@ -955,6 +955,30 @@ import Testing
         #expect(!view.local.narrow && view.local.frame.minX >= -0.5 && view.local.frame.maxX <= view.bounds.maxX + 0.5, "the page \(view.local.frame) in \(view.bounds)")
     }
 
+    /// This Mac's header stands where a project's does at the drive's width, the owner's 1276 pt
+    /// window and a wider one: its title at the same origin, its New Shell ending where New
+    /// Workspace ends, its list starting at the same x, with the Mac's short name under the title.
+    @Test func thisMacsHeaderStandsWhereAProjectsDoesAtEveryWidth() async throws {
+        for window in [1024.0, 1276, 1600] {
+            let server = RecordedServer([try Exchange("projects"), try Exchange("workspaces-three")])
+            let (view, shown) = try Self.view(server, width: window - Rail.width - 4)
+            defer { shown.orderOut(nil) }
+            view.shown()
+            try #require(await RunnerTabTests.until { view.text.contains("dock") }, "nothing listed: \(view.text)")
+            view.layoutSubtreeIfNeeded()
+            let at = { (part: NSView) in view.convert(part.alignmentRect(forFrame: part.frame), from: part.superview) }
+            let project = (title: at(view.project.title), button: at(view.project.newWorkspace), list: at(view.project.list))
+            view.local.macName = "Uday’s MacBook Pro"
+            view.sessions = .listed(Self.shells)
+            view.panel.onChoose(WorkspacesModel.thisMac)
+            view.layoutSubtreeIfNeeded()
+            let local = (title: at(view.local.title), button: at(view.local.newShell), list: at(view.local.list))
+            #expect(near(local.title.minX, project.title.minX) && near(local.title.minY, project.title.minY), "\(window) pt: This Mac's title at \(local.title.origin), a project's at \(project.title.origin)")
+            #expect(near(local.button.maxX, project.button.maxX), "\(window) pt: New Shell ends at \(local.button.maxX), New Workspace at \(project.button.maxX)")
+            #expect(near(local.list.minX, project.list.minX) && near(local.list.width, project.list.width), "\(window) pt: This Mac's list \(local.list), a project's \(project.list)")
+        }
+    }
+
     /// This Mac's page alone, `width` wide, drawing `sessions`, its list holding the keys in a key window.
     static func local(width: Double, _ sessions: [LocalSession]) throws -> (LocalProjectView, NSWindow) {
         let local = LocalProjectView(look: .light, mono: try LabelFont(directory: LookTests.fonts), titleFont: try TitleFont(directory: LookTests.fonts))
