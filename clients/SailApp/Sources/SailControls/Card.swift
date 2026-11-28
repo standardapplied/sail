@@ -67,6 +67,7 @@ public final class Card: NSView {
         mark.layer?.mask = markShape
         addSubview(mark)
         message.font = .systemFont(ofSize: Look.Step.callout.points)
+        message.isSelectable = false
         primary.target = self
         primary.action = #selector(actPrimary)
         secondary.target = self

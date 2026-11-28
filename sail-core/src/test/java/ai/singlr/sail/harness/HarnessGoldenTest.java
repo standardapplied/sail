@@ -563,13 +563,6 @@ class HarnessGoldenTest {
         CLAUDE_CODE_CHAT.modes().stream()
             .map(mode -> mode.name() + "=" + mode.label() + (mode.risky() ? ", risky" : ""))
             .toList());
-    assertEquals(
-        "Asks before it edits a file or runs a command, except commands it counts as safe, such as"
-            + " sleep or echo, which run without asking.",
-        CLAUDE_CODE_CHAT.modes().getFirst().about(),
-        "never a claim that it asks where it was recorded not to"
-            + " (LiveChatTest.everyModeWordIsARecordedDecision)");
-    assertTrue(CLAUDE_CODE_CHAT.modes().stream().noneMatch(mode -> mode.about().isBlank()));
     assertTrue(
         CLAUDE_CODE.modes().stream().anyMatch(mode -> mode.name().equals("bypassPermissions")),
         "a terminal still offers it");
@@ -788,13 +781,6 @@ class HarnessGoldenTest {
   @Test
   void aModeSwitchSaysWhatTheModeAllowsAndThatItStaysForTheChat() {
     var edits = Harness.Mode.named(CLAUDE_CODE_CHAT.modes(), "acceptEdits", "claude-code");
-    assertEquals(
-        "Edits files, and runs file commands such as rm, mv, cp and sed, inside this workspace"
-            + " and any folder you let it work in, without asking; it still asks before such a"
-            + " command anywhere else.",
-        edits.about(),
-        "the mode's own words say only what was recorded (LiveChatTest"
-            + ".everyModeWordIsARecordedDecision), and the folders its documentation adds");
     assertEquals(
         List.of(
             new ChatItem.Always(
@@ -1039,7 +1025,8 @@ class HarnessGoldenTest {
 
   /**
    * Claude Code's modes are its own permission modes, each once and passed as it names them, after
-   * its own start with no flag; Codex has the one it runs in inside a container, and says why.
+   * its own start with no flag; Codex has the one it runs in inside a container. Each says in a
+   * line what it does to the person.
    */
   @Test
   void anInteractiveSessionStartsOnlyInAModeItsHarnessTakesInAWorkspace() {
@@ -1056,18 +1043,21 @@ class HarnessGoldenTest {
     assertEquals(
         List.of("full-access=Full access, risky: codex --dangerously-bypass-approvals-and-sandbox"),
         shown(CODEX));
-    assertEquals(Optional.empty(), CLAUDE_CODE.modesNote());
     assertEquals(
-        Optional.of(
-            "Sail starts Codex CLI in a workspace with full access, running every command without"
-                + " asking and without its sandbox: that sandbox, bubblewrap, cannot start in a"
-                + " workspace's container."),
-        CODEX.modesNote());
-    assertTrue(
+        List.of(
+            "default: Starts as Claude Code starts on its own.",
+            "manual: Asks before it edits or runs a command.",
+            "acceptEdits: Changes files without asking.",
+            "plan: Changes nothing until you approve its plan.",
+            "auto: Runs without asking, but blocks risky actions.",
+            "dontAsk: Runs only pre-approved actions; refuses the rest.",
+            "bypassPermissions: Runs everything without asking.",
+            "full-access: Runs every command without asking."),
         Stream.of(CLAUDE_CODE, CODEX)
             .flatMap(harness -> harness.modes().stream())
-            .noneMatch(mode -> mode.about().isBlank()),
-        "every mode says what it does");
+            .map(mode -> mode.name() + ": " + mode.about())
+            .toList(),
+        "every mode says what it does to the person in a line");
     assertEquals(
         "Codex CLI takes no mode 'default' in a workspace; it takes full-access.",
         assertThrows(IllegalArgumentException.class, () -> CODEX.interactive("default"))
@@ -1132,25 +1122,23 @@ class HarnessGoldenTest {
    * L4: every harness's own sign-in, by the name a person knows it by, in a sentence true for it,
    * and the one file under the dev user's home that holds it: Claude Code's {@code /login} keeps it
    * in {@code .credentials.json}, never in {@code .claude.json}, its own state; Codex's ChatGPT
-   * sign-in, by device code once ChatGPT allows it, in {@code auth.json}.
+   * sign-in, by device code once ChatGPT allows it, in {@code auth.json}; what a person turns on
+   * first, beyond the line, is its {@code more}.
    */
   @Test
   void eachHarnessNamesItsOwnSignInAndTheFileThatHoldsIt() {
     assertEquals(
         new SignIn(
             "Your Claude account",
-            Remedy.of(
-                "Claude Code asks you to sign in with your Claude account when it starts, once in"
-                    + " each workspace."),
+            Remedy.of("Sign in with Claude when it starts."),
+            Remedy.NONE,
             ".claude/.credentials.json"),
         CLAUDE_CODE.signIn());
     assertEquals(
         new SignIn(
             "Your ChatGPT account",
-            Remedy.of(
-                "Codex CLI asks you to sign in with your ChatGPT account when it starts, once in"
-                    + " each workspace. Choose “Sign in with Device Code” there, after"
-                    + " turning it on in your ChatGPT security settings."),
+            Remedy.of("Choose “Sign in with Device Code” when it starts."),
+            Remedy.of("First turn on device code sign-in in your ChatGPT security settings."),
             ".codex/auth.json"),
         CODEX.signIn());
   }

@@ -140,7 +140,7 @@
               "words": [
                 "Allow this exact command: `touch always.txt`, also when another command such as timeout, nice or nohup starts it, and as part of a longer line whose other commands need no asking, from now on, for every Claude Code chat and terminal in this workspace (kept in the workspace's .claude/settings.local.json).",
                 "Let it work in the folder `/home/dev/workspace`, for this session only.",
-                "Switch this chat to Edits freely: Edits files, and runs file commands such as rm, mv, cp and sed, inside this workspace and any folder you let it work in, without asking; it still asks before such a command anywhere else. It stays for the rest of this chat."
+                "Switch this chat to Edits freely: Changes files in this workspace without asking. It stays for the rest of this chat."
               ]
             }
           ],

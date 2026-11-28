@@ -215,14 +215,6 @@ public interface Harness {
   List<Mode> modes();
 
   /**
-   * Why this harness offers only the {@link #modes} it does, in a sentence a person can act on;
-   * empty when it offers each one it has.
-   */
-  default Optional<String> modesNote() {
-    return Optional.empty();
-  }
-
-  /**
    * The interactive command in {@code mode}, one of {@link #modes}.
    *
    * @throws IllegalArgumentException naming the modes it takes, for any other

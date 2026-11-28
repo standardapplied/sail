@@ -4343,8 +4343,9 @@ first is the one it starts in until a person chooses. Claude Code's are its own 
 (`default`: the project's `permissions.defaultMode`, else Auto where it is available, else Manual)
 and then each of its permission modes once, passed as it names them (`--permission-mode manual`,
 `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`; its own `default` is Manual, offered
-as `manual`, its alias). Codex's is `full-access` alone (`--dangerously-bypass-approvals-and-sandbox`),
-with why (`Harness.modesNote`): its sandbox, bubblewrap, cannot start in a workspace's container
+as `manual`, its alias). Each mode's words are one line of what it does to the person, never of how
+the harness works inside (`HarnessContractTest`). Codex's is `full-access` alone (`--dangerously-bypass-approvals-and-sandbox`),
+since its sandbox, bubblewrap, cannot start in a workspace's container
 (measured with Codex 0.171's `codex sandbox` in a workspace on Ubuntu 24.04, no model turn: `bwrap:
 setting up uid map: Permission denied`, and with its network cut `bwrap: loopback: Failed
 RTM_NEWADDR: Operation not permitted`, for the read-only and the workspace-write sandbox alike). No mode is named anywhere else, and no client branches on one. The harness's command is
@@ -4414,12 +4415,14 @@ asker's (`not_your_workspace`, which is what an admin sees in another person's, 
 nothing offered and nothing of that person's logins) is refused whole; otherwise every harness Sail
 knows is offered with its modes (`Harness.modes()`, `mode_default` the first, each with `risky`, true
 for a mode that skips the harness's own permission checks entirely: Claude Code's
-`bypassPermissions`, Codex's `full-access`) and `note`, the kinds
+`bypassPermissions`, Codex's `full-access`), the kinds
 of login it takes and how to make one, the person's default key of each harness the project
 installs (`login`, `{name, kind}`, never answered with its value; none when they have no default,
 which is no refusal: the harness's own sign-in is the other way in), with `inside` true and
 `sign_in`, the harness's own sign-in (`Harness.signIn`, a `SignIn`): its `name` ("Your Claude
-account", "Your ChatGPT account"), `how` it goes (words the New Session panel says) and `signed_in`,
+account", "Your ChatGPT account"), `how` it goes (the one line the New Session panel says), `more`,
+what a person must do first that the line cannot hold, said behind the panel's Learn more and only
+where there is something (Codex: turning on device code sign-in in ChatGPT), and `signed_in`,
 whether the workspace holds it: its `SignIn.file` (`~/.claude/.credentials.json`, never
 `~/.claude.json`, Claude Code's own state; `~/.codex/auth.json`) is a regular file and not empty, as
 `test -f` and `test -s` stat it through a link as the harness would read it, never opened

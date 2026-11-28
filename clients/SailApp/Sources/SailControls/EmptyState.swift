@@ -42,6 +42,7 @@ public final class EmptyState: NSView {
         super.init(frame: .zero)
         clipsToBounds = false
         for label in [self.title, self.body] {
+            label.isSelectable = false
             label.alignment = .center
             addSubview(label)
         }

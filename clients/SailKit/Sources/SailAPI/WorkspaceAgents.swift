@@ -33,7 +33,7 @@ public struct WorkspaceAgents: Codable, Equatable, Sendable {
 }
 
 /// One harness as a workspace offers it: its modes in its own words, the first the one it starts in
-/// until a person chooses (`modeDefault`), and why it has no others (`note`); its two ways in, the
+/// until a person chooses (`modeDefault`); its two ways in, the
 /// default key the person stored (`login`, of the `kinds` it takes) and its own sign-in inside the
 /// session (`signIn`, when a person may start it so: `inside`); and why it does not start at all
 /// (`refusal`), with the few words a row says of that (`unavailable`).
@@ -42,7 +42,6 @@ public struct AgentOffer: Codable, Equatable, Sendable {
     public let display: String
     public let modes: [AgentMode]
     public let modeDefault: String
-    public let note: String?
     public let login: AgentLogin?
     public let kinds: [AgentLoginKind]
     public let inside: Bool
@@ -51,28 +50,35 @@ public struct AgentOffer: Codable, Equatable, Sendable {
     public let unavailable: String?
 
     private enum CodingKeys: String, CodingKey {
-        case harness, display, modes, note, login, kinds, inside, refusal, unavailable
+        case harness, display, modes, login, kinds, inside, refusal, unavailable
         case modeDefault = "mode_default"
         case signIn = "sign_in"
     }
 }
 
 /// A harness's own sign-in, which the person makes inside its session and Sail never holds: the
-/// name they know it by, how it goes in the server's words, and whether the workspace holds it
-/// already; nil where the server could not tell.
+/// name they know it by, how it goes in the server's words, what a person must do first that its
+/// line cannot hold (`more`; nil for nothing), and whether the workspace holds it already; nil
+/// where the server could not tell.
 public struct AgentSignIn: Codable, Equatable, Sendable {
     public let name: String
     public let how: [RemedyPart]
+    public let more: [RemedyPart]?
     public let signedIn: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case name, how
+        case name, how, more
         case signedIn = "signed_in"
     }
 
     /// How it goes as a sentence a person reads; nil when it names a command.
     public var said: String? {
         how.sentence
+    }
+
+    /// What a person must do first as a sentence a person reads; nil for nothing or a command.
+    public var moreSaid: String? {
+        more?.sentence
     }
 }
 

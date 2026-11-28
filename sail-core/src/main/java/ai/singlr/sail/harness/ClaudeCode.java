@@ -281,9 +281,8 @@ final class ClaudeCode implements Harness {
   public SignIn signIn() {
     return new SignIn(
         "Your Claude account",
-        Remedy.of(
-            "Claude Code asks you to sign in with your Claude account when it starts, once in each"
-                + " workspace."),
+        Remedy.of("Sign in with Claude when it starts."),
+        Remedy.NONE,
         CREDENTIALS);
   }
 
@@ -312,40 +311,15 @@ final class ClaudeCode implements Harness {
   public List<Mode> modes() {
     return List.of(
         new Mode(
-            "default",
-            "Claude Code's own",
-            "Starts as Claude Code starts by itself: the project's default mode, else Auto where it"
-                + " is available, else Manual.",
-            "",
-            false),
+            "default", "Claude Code's own", "Starts as Claude Code starts on its own.", "", false),
+        permissionMode("manual", "Manual", "Asks before it edits or runs a command.", false),
+        permissionMode("acceptEdits", "Accept edits", "Changes files without asking.", false),
+        permissionMode("plan", "Plan", "Changes nothing until you approve its plan.", false),
+        permissionMode("auto", "Auto", "Runs without asking, but blocks risky actions.", false),
         permissionMode(
-            "manual", "Manual", "Asks before edits, shell commands and network actions.", false),
+            "dontAsk", "Don't ask", "Runs only pre-approved actions; refuses the rest.", false),
         permissionMode(
-            "acceptEdits",
-            "Accept edits",
-            "Makes file edits and common filesystem commands without asking.",
-            false),
-        permissionMode(
-            "plan",
-            "Plan",
-            "Researches and proposes changes, and edits nothing until you approve the plan.",
-            false),
-        permissionMode(
-            "auto",
-            "Auto",
-            "Runs everything, with a classifier reviewing each action first; Manual where auto is"
-                + " not available.",
-            false),
-        permissionMode(
-            "dontAsk",
-            "Don't ask",
-            "Refuses anything that would ask, and runs only what is approved beforehand.",
-            false),
-        permissionMode(
-            "bypassPermissions",
-            "Bypass permissions",
-            "Skips every permission prompt and safety check.",
-            true));
+            "bypassPermissions", "Bypass permissions", "Runs everything without asking.", true));
   }
 
   static Mode permissionMode(String name, String label, String about, boolean risky) {

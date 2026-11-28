@@ -52,9 +52,8 @@ class LiveChatTest {
       "Let it work in the folder `/home/dev/workspace`, for this session only.";
 
   private static final String EDITS_FREELY =
-      "Switch this chat to Edits freely: Edits files, and runs file commands such as rm, mv, cp"
-          + " and sed, inside this workspace and any folder you let it work in, without asking; it"
-          + " still asks before such a command anywhere else. It stays for the rest of this chat.";
+      "Switch this chat to Edits freely: Changes files in this workspace without asking. It stays"
+          + " for the rest of this chat.";
 
   private static Detail written(String path, String text) {
     return new Detail.Edit(
@@ -503,13 +502,24 @@ class LiveChatTest {
   }
 
   /**
-   * Every claim a chat mode's words make, against the recorded decision it rests on: in Asks first
-   * (init {@code default}) a file edit and a command asked, and commands Claude Code counts as safe
-   * ran without asking; in Edits freely (init {@code acceptEdits}) a file edit and file commands
-   * inside the workspace ran without asking, and {@code rm} outside it asked.
+   * Every claim a chat mode's words make, against the recorded decision it rests on. Asks first
+   * (init {@code default}) asks before edits (a Write asked) and commands ({@code date} asked),
+   * except safe ones ({@code sleep} and {@code echo} ran without asking). Edits freely (init {@code
+   * acceptEdits}) changes files in this workspace without asking (a Write, {@code rm}, {@code mv},
+   * {@code cp}, {@code sed -i} and {@code nice rm} inside it ran unasked), and claims nothing of
+   * elsewhere, where {@code rm} asked. Plans first's words rest on no decision here.
    */
   @Test
   void everyModeWordIsARecordedDecision() {
+    assertEquals(
+        List.of(
+            "default: Asks before edits and commands, except safe ones.",
+            "acceptEdits: Changes files in this workspace without asking."),
+        CLAUDE_CODE.modes().stream()
+            .filter(mode -> !mode.name().equals("plan"))
+            .map(mode -> mode.name() + ": " + mode.about())
+            .toList(),
+        "a word changed is a claim to check against the decisions below");
     assertEquals(
         List.of(
             "default: Write /home/dev/workspace/notes.txt asked",

@@ -33,7 +33,7 @@
           "sign_in": {
             "how": [
               {
-                "text": "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."
+                "text": "Sign in with Claude when it starts."
               }
             ],
             "name": "Your Claude account"
@@ -67,7 +67,12 @@
           "sign_in": {
             "how": [
               {
-                "text": "Codex CLI asks you to sign in with your ChatGPT account when it starts, once in each workspace. Choose “Sign in with Device Code” there, after turning it on in your ChatGPT security settings."
+                "text": "Choose “Sign in with Device Code” when it starts."
+              }
+            ],
+            "more": [
+              {
+                "text": "First turn on device code sign-in in your ChatGPT security settings."
               }
             ],
             "name": "Your ChatGPT account"

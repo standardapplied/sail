@@ -48,6 +48,9 @@ public final class Sheet: NSObject {
         let destructive = kind == .destructive || kind == .destructiveQuiet
         self.title = NSTextField(wrappingLabelWithString: title)
         self.body = NSTextField(wrappingLabelWithString: body)
+        for label in [self.title, self.body] {
+            label.isSelectable = false
+        }
         cancel = SailButton("Cancel", kind: .secondary, look: look, target: nil, action: nil)
         self.confirm = SailButton(confirm, kind: kind, look: look, target: nil, action: nil)
         let panel = SheetPanel(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 160), styleMask: [.titled], backing: .buffered, defer: true)

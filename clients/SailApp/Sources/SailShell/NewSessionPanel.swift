@@ -13,9 +13,10 @@ import SailWorkbench
 /// stays there while it is open; its rows scroll in what that leaves. Every kind is an equal row, the route's harnesses
 /// in its order then the Shell: a tile, the name, and how it signs in as its Sign in is set, or
 /// the server's few words for why it does not start. The chosen harness's options stand under its
-/// own name: Mode, a pop-up of its modes (one mode shown off, with the server's note), its words
-/// under it, in the warning tone where the server says the mode is risky; Sign in, a pop-up of its
-/// own sign-in, the person's key and Store a Key, and whether the workspace holds the sign-in. A harness that does
+/// own name: Mode, a pop-up of its modes (one mode said as a value), its words in one line under
+/// it, in the warning tone where the server says the mode is risky; Sign in, a pop-up of its own
+/// sign-in, the person's key and Store a Key, and its one line, with Learn more where a person
+/// must do something first, which opens in place. No word in it can be selected. A harness that does
 /// not start says why in place of its options. The one primary names the choice (Start Claude
 /// Code, Open Shell, which opens a new shell and is remembered as the kind opened last); there is
 /// none where the chosen harness does not start. Store a Key opens its sheet over the panel
@@ -251,16 +252,20 @@ package final class NewSessionPanel: NSObject {
         }.max() ?? 0
     }
 
-    /// `panel` with each of its kinds chosen, a harness in each of its modes.
+    /// `panel` with each of its kinds chosen, a harness in each of its modes, Learn more asked and not.
     private static func everyLook(_ panel: NewSession) -> [NewSession] {
-        panel.choices.flatMap { choice -> [NewSession] in
-            var chosen = panel
-            chosen.choose(choice)
-            guard case let .harness(harness) = choice, let offer = panel.offer(harness) else { return [chosen] }
-            return offer.modes.isEmpty ? [chosen] : offer.modes.map { mode in
-                var each = chosen
-                each.choose(mode: mode.mode)
-                return each
+        var opened = panel
+        opened.openMore()
+        return [panel, opened].flatMap { panel in
+            panel.choices.flatMap { choice -> [NewSession] in
+                var chosen = panel
+                chosen.choose(choice)
+                guard case let .harness(harness) = choice, let offer = panel.offer(harness) else { return [chosen] }
+                return offer.modes.isEmpty ? [chosen] : offer.modes.map { mode in
+                    var each = chosen
+                    each.choose(mode: mode.mode)
+                    return each
+                }
             }
         }
     }
@@ -294,6 +299,10 @@ package final class NewSessionPanel: NSObject {
         case let (.storeKey, .offered(panel)):
             guard case let .harness(harness) = panel.chosen, let offer = panel.offer(harness) else { return }
             return onStoreKey(offer)
+        case let (.learnMore, .offered(panel)):
+            var opened = panel
+            opened.openMore()
+            showing(opened)
         case (.start, _):
             return start()
         case (.shell, _):
@@ -472,7 +481,7 @@ package final class NewSessionView: NSView {
     }
 
     enum Act: Equatable {
-        case choose(NewSession.Choice), mode(String), way(Way), storeKey, start, shell, close
+        case choose(NewSession.Choice), mode(String), way(Way), storeKey, learnMore, start, shell, close
     }
 
     var look: Look {
@@ -492,6 +501,10 @@ package final class NewSessionView: NSView {
     package private(set) var secondary: SailButton?
     /// The chosen harness's mode pop-up, nil for a harness of one mode or none chosen.
     package private(set) var modes: SailButton?
+    /// A harness of one mode's mode, said as a value; nil otherwise.
+    package private(set) var modeValue: NSTextField?
+    /// Learn more under Sign in's line, while what a person must do first is not yet said.
+    package private(set) var learnMore: LinkButton?
     /// The chosen harness's Sign in pop-up: its own sign-in, the person's key, Store a Key; nil
     /// where it does not start.
     package private(set) var signIn: SailButton?
@@ -586,6 +599,8 @@ package final class NewSessionView: NSView {
         primary = nil
         secondary = nil
         modes = nil
+        modeValue = nil
+        learnMore = nil
         signIn = nil
         warned = nil
         hairlines = []
@@ -606,7 +621,7 @@ package final class NewSessionView: NSView {
             }
             hairlines.append(y)
             y = list(panel, workspace: workspace, y: y, width: width, room: room)
-            y = options(panel, workspace: workspace, line: line, y: y, width: width)
+            y = options(panel, line: line, y: y, width: width)
             hairlines.append(y)
             let start = NewSessionWords.primary(panel.readiness).map { title in
                 SailButton(title, kind: veiled ? .secondary : .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
@@ -714,7 +729,7 @@ package final class NewSessionView: NSView {
     /// The chosen harness's options under its name, from `y`: its Mode and Sign in with their
     /// words, `line` in the place of Sign in's, or why it does not start; none for the Shell. Where
     /// they end.
-    private func options(_ panel: NewSession, workspace: String, line: Line?, y top: Double, width: Double) -> Double {
+    private func options(_ panel: NewSession, line: Line?, y top: Double, width: Double) -> Double {
         guard case let .harness(harness) = panel.chosen, let offer = panel.offer(harness) else { return top }
         hairlines.append(top)
         let edge = Look.hairline, x = edge + Self.padding, inner = width - 2 * x
@@ -733,19 +748,22 @@ package final class NewSessionView: NSView {
             y = help(about, warns: panel.risky, x: after, y: y + 4, width: room) + Self.gap
         }
         y = signInLine(offer, way: way, x: x, after: after, y: y, room: room)
-        return signInWords(offer, way: way, line: line, workspace: workspace, x: after, y: y + 4, width: room) + 14
+        return signInWords(offer, way: way, more: panel.more, line: line, x: after, y: y + 4, width: room) + 14
     }
 
     /// Under Sign in, a slot as tall as the taller of its two ways' words and two lines at least, so
     /// neither choosing a way nor a key stored changes the box's height and a line of ours fits on
-    /// any harness: the words of `way`, or, while `line` says a key was stored or why none can be,
-    /// that line after its square in their place, a server's note past the slot cut at its tail;
-    /// where the slot ends.
-    private func signInWords(_ offer: AgentOffer, way: Way, line: Line?, workspace: String, x: Double, y: Double, width: Double) -> Double {
-        let helps = [Way.signIn, .key].compactMap { NewSessionWords.signInHelp(offer, way: $0, in: workspace) }
-        let slot = max(helps.map { Self.height(of: quiet($0, width: width), width: width) }.max() ?? 0, 2 * Self.about)
+    /// any harness: the words of `way` and, where a person must do something first, Learn more or,
+    /// once it was asked (`more`), what they must do; or, while `line` says a key was stored or why
+    /// none can be, that line after its square in their place, a server's note past the slot cut at
+    /// its tail; where the slot ends.
+    private func signInWords(_ offer: AgentOffer, way: Way, more: Bool, line: Line?, x: Double, y: Double, width: Double) -> Double {
+        let slot = max(Self.height(signInWords(offer, way: .signIn, more: more, x: x, y: y, width: width)), Self.height(signInWords(offer, way: .key, more: more, x: x, y: y, width: width)), 2 * Self.about)
         guard let line else {
-            if let words = NewSessionWords.signInHelp(offer, way: way, in: workspace) { _ = place(quiet(words, width: width), x: x, y: y, width: width) }
+            for view in signInWords(offer, way: way, more: more, x: x, y: y, width: width) {
+                addSubview(view)
+                if let link = view as? LinkButton { learnMore = link }
+            }
             return y + slot
         }
         let (words, failed) = line.said
@@ -756,6 +774,32 @@ package final class NewSessionView: NSView {
         lineFailed = failed
         lineSquare = mirrored(NSRect(x: x, y: y + (Self.about - 6) / 2, width: 6, height: 6))
         return y + slot
+    }
+
+    /// Sign in's words for `way` laid out from `y`, `width` wide: its line, then Learn more, or what
+    /// a person must do first once it was asked; none added yet.
+    private func signInWords(_ offer: AgentOffer, way: Way, more: Bool, x: Double, y: Double, width: Double) -> [NSView] {
+        guard let help = NewSessionWords.signInHelp(offer, way: way) else { return [] }
+        let said = quiet(help, width: width)
+        said.frame = mirrored(NSRect(x: x, y: y, width: width, height: Self.height(of: said, width: width)))
+        guard let further = NewSessionWords.more(offer, way: way) else { return [said] }
+        let below = y + Double(said.frame.height)
+        guard !more else {
+            let words = quiet(further, width: width)
+            words.frame = mirrored(NSRect(x: x, y: below, width: width, height: Self.height(of: words, width: width)))
+            return [said, words]
+        }
+        let link = LinkButton(NewSessionWords.learnMore, look: look, target: self, action: #selector(pressedLearnMore(_:)))
+        link.userInterfaceLayoutDirection = direction
+        let size = link.intrinsicContentSize
+        link.frame = mirrored(NSRect(x: x, y: below + (Self.about - Double(size.height)) / 2, width: min(Double(size.width), width), height: Double(size.height)))
+        return [said, link]
+    }
+
+    /// How far below their top `views`, laid out by ``signInWords(_:way:more:x:y:width:)``, reach.
+    private static func height(_ views: [NSView]) -> Double {
+        guard let top = views.map({ Double($0.frame.minY) }).min() else { return 0 }
+        return (views.map { Double($0.frame.maxY) }.max() ?? top) - top
     }
 
     /// `words` under a pop-up at `x`, `width` wide: quiet, or in the warning tone after its mark
@@ -795,13 +839,19 @@ package final class NewSessionView: NSView {
         return button
     }
 
-    /// "Mode" and the pop-up of the server's labels, shown off for a harness of one mode, named
-    /// `name` to VoiceOver; where the line ends.
+    /// "Mode" and the pop-up of the server's labels, named `name` to VoiceOver, or, for a harness of
+    /// one mode, its label said as a value is, in ink, where a pop-up's title would stand; where the
+    /// line ends.
     private func modeLine(_ offer: AgentOffer, mode: String, name: String, x: Double, after: Double, y: Double, room: Double) -> Double {
         placeLabel(NewSessionWords.mode, x: x, y: y)
         let title = offer.modes.first { $0.mode == mode }?.label ?? mode
         guard offer.modes.count > 1 else {
-            _ = popUp(title, menu: nil, name: name, x: after, y: y, room: room)
+            let value = Self.label(Self.text(title, .systemFont(ofSize: ButtonSize.small.label), look.text, direction: direction).cut(.byTruncatingTail)), size = value.fittingSize
+            value.frame = mirrored(NSRect(x: after, y: y + (ButtonSize.small.height - Double(size.height)) / 2, width: min(Double(size.width), room), height: Double(size.height)))
+            value.setAccessibilityLabel(name)
+            value.setAccessibilityValue(title)
+            addSubview(value)
+            modeValue = value
             return y + ButtonSize.small.height
         }
         let menu = NSMenu()
@@ -922,8 +972,12 @@ package final class NewSessionView: NSView {
         return label
     }
 
+    /// Words wrapped at `width`, which a click leaves as they are: a wrapping label is selectable,
+    /// and a selectable label clicked hands its words to the field editor, drawn in the field's own
+    /// font and colour, without the warning's ink or the line height.
     static func wrapping(_ words: String, _ font: NSFont, _ ink: Tint, width: Double, direction: NSUserInterfaceLayoutDirection, lineHeight: Double? = nil) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: "")
+        label.isSelectable = false
         label.attributedStringValue = text(words, font, ink, direction: direction, lineHeight: lineHeight)
         label.maximumNumberOfLines = 0
         label.lineBreakMode = .byWordWrapping
@@ -951,6 +1005,10 @@ package final class NewSessionView: NSView {
 
     @objc private func choseStoreKey(_: NSMenuItem) {
         on(.storeKey)
+    }
+
+    @objc private func pressedLearnMore(_: Any?) {
+        on(.learnMore)
     }
 
     @objc private func choseWay(_ item: NSMenuItem) {
