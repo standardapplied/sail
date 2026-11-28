@@ -25,7 +25,7 @@ import Testing
         #expect(listed.projects.isEmpty && server.held == 8)
         server.release()
         for read in reads {
-            #expect(try await read.value.items.isEmpty)
+            #expect(try await read.awaited.items.isEmpty)
         }
     }
 

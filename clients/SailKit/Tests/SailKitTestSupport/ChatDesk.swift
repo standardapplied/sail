@@ -304,3 +304,13 @@ public final class ChatDesk: Transport, Sendable {
         }
     }
 }
+
+extension Task where Failure == any Error {
+    /// The task's value, the task cancelled when the test awaiting it is: a read the code under
+    /// test never answers ends with the test's time limit, never later.
+    public var awaited: Success {
+        get async throws {
+            try await withTaskCancellationHandler { try await value } onCancel: { cancel() }
+        }
+    }
+}

@@ -25,7 +25,7 @@ import Testing
         let read = Task { try await client.send(.chat(fifthChat, after: 5)) }
         await desk.holding(1)
         let seq = try desk.append("text", to: fifthChat, ["text": "Reading it.", "new_paragraph": true, "clipped": false])
-        let page = try await read.value
+        let page = try await read.awaited
         #expect(seq == 6 && page.items.map(\.seq) == [6] && !page.ended)
         let said = try Self.text("Reading it.")
         #expect(page.items.first?.body == said.map(ChatItem.Body.text))
@@ -50,7 +50,7 @@ import Testing
         let read = Task { [client = Self.client(desk)] in try await client.send(.chat(fifthChat, after: 5)) }
         await desk.holding(1)
         desk.boundPasses()
-        let page = try await read.value
+        let page = try await read.awaited
         #expect(page.items.isEmpty && !page.ended)
     }
 
@@ -61,7 +61,7 @@ import Testing
         await desk.holding(2)
         desk.restart()
         for read in reads {
-            await #expect(throws: SailError.unreachable("the chat server restarted")) { try await read.value }
+            await #expect(throws: SailError.unreachable("the chat server restarted")) { try await read.awaited }
         }
         #expect(try await client.send(.chat(fifthChat, after: 0)).items.count == 5)
     }
@@ -72,7 +72,7 @@ import Testing
         let read = Task { try await client.send(.chat(fifthChat, after: 5)) }
         await desk.holding(1)
         _ = try await client.send(.endChat(fifthChat))
-        let page = try await read.value
+        let page = try await read.awaited
         #expect(page.ended && page.items.isEmpty)
         let refused = Refusal(code: .known(.conflict), message: "This chat has ended, so it takes no message.", action: "Open a new chat in workspace berth.")
         await #expect(throws: SailError.refused(refused)) { try await client.send(.send("more", chat: fifthChat)) }
@@ -87,7 +87,7 @@ import Testing
         let read = Task { try await client.send(.chat(fifthChat, after: 5)) }
         await desk.holding(1)
         desk.signOut()
-        await #expect(throws: SailError.signIn(.ended)) { try await read.value }
+        await #expect(throws: SailError.signIn(.ended)) { try await read.awaited }
         await #expect(throws: SailError.signIn(.ended)) { try await client.send(.send("hi", chat: fifthChat)) }
         #expect(told.count == 2)
     }
@@ -99,7 +99,7 @@ import Testing
         await desk.holding(1)
         desk.erase(fifthChat)
         let gone = Refusal(code: .known(.notFound), message: "There is no chat \(fifthChat) of yours here.")
-        await #expect(throws: SailError.refused(gone)) { try await read.value }
+        await #expect(throws: SailError.refused(gone)) { try await read.awaited }
         await #expect(throws: SailError.refused(gone)) { try await client.send(.chat(fifthChat, after: 0)) }
     }
 
@@ -109,7 +109,7 @@ import Testing
         let read = Task { try await client.send(.chat(fifthChat, after: 5)) }
         await desk.holding(1)
         read.cancel()
-        await #expect(throws: SailError.unreachable("the read was cancelled")) { try await read.value }
+        await #expect(throws: SailError.unreachable("the read was cancelled")) { try await read.awaited }
         #expect(desk.held == 0)
         await #expect(throws: SailError.self) { try await client.send(.interrupt(chat: fifthChat)) }
         #expect(desk.requests.map(\.route).last == "POST /v1/sessions/\(fifthChat)/chat:interrupt")
