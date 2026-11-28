@@ -13,7 +13,6 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.ChatItem.Detail;
-import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.Recorded;
 import ai.singlr.sail.harness.Harness.Launch;
 import ai.singlr.sail.harness.Harness.LiveLaunch;
@@ -655,7 +654,7 @@ class HarnessGoldenTest {
     assertEquals(
         new Detail.Other("mcp__github__create_issue", "{\"title\": \"t\"}", false),
         CLAUDE_CODE_CHAT.detail("mcp__github__create_issue", Map.of("title", "t")));
-    var longer = "z".repeat(LiveStream.CONTENT_CODE_POINTS + 1);
+    var longer = "z".repeat(ChatItem.CONTENT_CODE_POINTS + 1);
     assertEquals(
         changed(ChatItem.ChangeKind.CHANGE, "/w/a.txt", null, longer.substring(1), false, true),
         CLAUDE_CODE_CHAT.detail("Write", Map.of("file_path", "/w/a.txt", "content", longer)),
@@ -777,7 +776,7 @@ class HarnessGoldenTest {
 
   @Test
   void anAlwaysTooLongToShowWholeInAllIsNotOffered() {
-    var half = "a".repeat(LiveStream.CONTENT_CODE_POINTS / 2);
+    var half = "a".repeat(ChatItem.CONTENT_CODE_POINTS / 2);
     assertEquals(1, always(rule("allow", "localSettings", bash(half))).size(), "one fits");
     assertEquals(
         List.of(),
@@ -1018,7 +1017,7 @@ class HarnessGoldenTest {
                     rule(
                         "allow",
                         "localSettings",
-                        bash("x".repeat(LiveStream.CONTENT_CODE_POINTS) + " *"))));
+                        bash("x".repeat(ChatItem.CONTENT_CODE_POINTS) + " *"))));
     for (var suggestion : unsaid) {
       assertEquals(List.of(), always(suggestion.getValue()), suggestion.getKey());
       assertEquals(

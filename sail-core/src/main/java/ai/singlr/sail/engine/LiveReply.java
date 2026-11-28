@@ -5,12 +5,13 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.ChatWire.Answer;
+import ai.singlr.sail.engine.ChatWire.Decision;
+import ai.singlr.sail.engine.ChatWire.Reply;
 import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.harness.HarnessChat;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -30,69 +31,6 @@ public final class LiveReply {
    * 02:34, read back whole at 02:37).
    */
   static final String JOINED = ", ";
-
-  /** What a person decides on a request their agent made, by the name a client sends. */
-  public enum Decision {
-    ALLOW,
-    ALLOW_ALWAYS,
-    DENY,
-    ANSWER;
-
-    /**
-     * The decision a client names {@code name}.
-     *
-     * @throws IllegalArgumentException for any other name
-     */
-    public static Decision named(String name) {
-      for (var decision : values()) {
-        if (decision.name().toLowerCase(Locale.ROOT).equals(name)) {
-          return decision;
-        }
-      }
-      throw new IllegalArgumentException("decision is allow, allow_always, deny or answer.");
-    }
-  }
-
-  /**
-   * A person's answer to one of a request's questions, named by its exact text: labels from its own
-   * choices ({@code chosen}), or the person's {@code own} words, never both.
-   */
-  public record Answer(String question, List<String> chosen, String own) {
-    public Answer {
-      Objects.requireNonNull(question, "question");
-      chosen = List.copyOf(chosen);
-      if (chosen.isEmpty() == (own == null)) {
-        throw new IllegalArgumentException(
-            "An answer to a question is the labels chosen or the person's own words, not both.");
-      }
-      if (own != null) {
-        words(Strings.requireNonBlank(own, "own"));
-      }
-    }
-  }
-
-  /**
-   * What a person answers a request with: the {@code decision}, the words a denial carries ({@code
-   * message}, null for none) and the answers to a question's questions, the only decision that has
-   * any.
-   */
-  public record Reply(Decision decision, String message, List<Answer> answers) {
-    public Reply {
-      Objects.requireNonNull(decision, "decision");
-      answers = List.copyOf(answers);
-      if (message != null && decision != Decision.DENY) {
-        throw new IllegalArgumentException("Only a denial carries words: message goes with deny.");
-      }
-      if (answers.isEmpty() == (decision == Decision.ANSWER)) {
-        throw new IllegalArgumentException(
-            "answers go with answer alone, which names each question it answers.");
-      }
-      if (message != null && words(message).isBlank()) {
-        throw new IllegalArgumentException(
-            "message is the person's own words; leave it out to say none.");
-      }
-    }
-  }
 
   private LiveReply() {}
 
@@ -188,20 +126,5 @@ public final class LiveReply {
               + " alone.");
     }
     return String.join(JOINED, chosen);
-  }
-
-  /**
-   * {@code words}, a person's own, within the bound of what an answer holds.
-   *
-   * @throws IllegalArgumentException past {@link LiveStream#CONTENT_CODE_POINTS}
-   */
-  private static String words(String words) {
-    if (words.codePointCount(0, words.length()) > LiveStream.CONTENT_CODE_POINTS) {
-      throw new IllegalArgumentException(
-          "Your words are past the "
-              + LiveStream.CONTENT_CODE_POINTS
-              + " characters an answer holds; say it shorter.");
-    }
-    return words;
   }
 }

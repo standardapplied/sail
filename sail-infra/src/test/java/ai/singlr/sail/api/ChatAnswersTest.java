@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Ids;
+import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.LiveChat;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.Recorded;
@@ -531,7 +532,7 @@ class ChatAnswersTest {
         "{\"type\":\"control_request\",\"request_id\":\"big-1\",\"request\":{\"subtype\":"
             + "\"can_use_tool\",\"tool_name\":\"Bash\",\"display_name\":\"Bash\",\"input\":"
             + "{\"command\":\""
-            + "a".repeat(LiveStream.CONTENT_CODE_POINTS + 1)
+            + "a".repeat(ChatItem.CONTENT_CODE_POINTS + 1)
             + "\"},\"tool_use_id\":\"toolu_big\"}}";
     var fake = asked(session, tooLarge);
 

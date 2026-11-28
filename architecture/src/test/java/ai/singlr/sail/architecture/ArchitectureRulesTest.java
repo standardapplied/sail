@@ -22,6 +22,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import ai.singlr.sail.Main;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.engine.GuardrailChecker;
+import ai.singlr.sail.engine.LiveChat;
+import ai.singlr.sail.engine.LiveReply;
+import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.harness.Harnesses;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
@@ -29,12 +33,18 @@ import com.tngtech.archunit.core.domain.JavaCodeUnit;
 import com.tngtech.archunit.core.domain.JavaStaticInitializer;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import java.io.IOException;
 import java.lang.module.ModuleFinder;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -64,6 +74,26 @@ class ArchitectureRulesTest {
   private static final DescribedPredicate<JavaClass> IN_SAIL_HARNESS =
       inModuleOf(GuardrailChecker.class);
   private static final DescribedPredicate<JavaClass> IN_SAIL_INFRA = inModuleOf(Main.class);
+
+  /** The room's live members, the one part of sail-infra that speaks Claude Code's own stream. */
+  private static final DescribedPredicate<JavaClass> THE_ROOMS_LIVE_MEMBERS =
+      describe(
+          "are the room's live members",
+          type ->
+              type.getName().equals(SAIL + ".api.LiveMembers")
+                  || type.getName().startsWith(SAIL + ".api.LiveMembers$"));
+
+  /** Claude Code's own classes: its harness and the stream its chat and live members speak. */
+  private static final DescribedPredicate<JavaClass> CLAUDE_CODES =
+      describe(
+          "are Claude Code's",
+          type ->
+              type.getName().startsWith(SAIL + ".harness.ClaudeCode")
+                  || Stream.of(LiveStream.class, LiveChat.class, LiveReply.class)
+                      .anyMatch(
+                          own ->
+                              type.getName().equals(own.getName())
+                                  || type.getName().startsWith(own.getName() + "$")));
 
   private static final DescribedPredicate<JavaCodeUnit> A_CONSTRUCTOR_OR_STATIC_INITIALISER =
       describe(
@@ -151,6 +181,32 @@ class ArchitectureRulesTest {
   }
 
   @Test
+  void aChatsHostSpeaksAHarnessOnlyThroughItsWire() throws IOException {
+    noClasses()
+        .that(IN_SAIL_INFRA.and(not(THE_ROOMS_LIVE_MEMBERS)).and(not(CLAUDE_CODES)))
+        .should()
+        .dependOnClassesThat(CLAUDE_CODES)
+        .because(
+            "a chat's host, and every other class of sail-infra but the room's live members,"
+                + " speaks a harness only through the per-process wire its HarnessChat makes, so a"
+                + " second harness is its own adapter and wire, never a branch of the host")
+        .check(MAIN);
+    var api = Reactor.path("sail.root").resolve("sail-infra/src/main/java/ai/singlr/sail/api");
+    var named = new ArrayList<String>();
+    try (var sources = Files.list(api)) {
+      for (var source : sources.filter(ArchitectureRulesTest::ofTheChatsHost).sorted().toList()) {
+        var text = Files.readString(source).toLowerCase(Locale.ROOT);
+        Harnesses.all().stream()
+            .flatMap(harness -> Stream.of(harness.yamlName(), harness.displayName().split(" ")[0]))
+            .map(name -> name.toLowerCase(Locale.ROOT))
+            .filter(text::contains)
+            .forEach(name -> named.add(source.getFileName() + ": " + name));
+      }
+    }
+    assertEquals(List.of(), named, "the chat's host names no harness: its words come from one");
+  }
+
+  @Test
   void nothingInMainCodeIsDeprecated() {
     var oneWay =
         "there is one way to do each thing: a superseded type or member is deleted with every"
@@ -171,6 +227,11 @@ class ArchitectureRulesTest {
         List.of(
             List.of(true, false, false), List.of(false, true, false), List.of(false, false, true)),
         seen);
+  }
+
+  private static boolean ofTheChatsHost(Path source) {
+    var name = source.getFileName().toString();
+    return name.endsWith(".java") && name.startsWith("Chat");
   }
 
   private static DescribedPredicate<JavaClass> inModuleOf(Class<?> anchor) {

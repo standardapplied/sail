@@ -51,13 +51,14 @@ final class ChatLaunch {
   static final String WORKSPACE = ContainerExec.DEV_WORKSPACE;
 
   /**
-   * A process started for a chat: its {@code handle}, the chat form it speaks ({@code form}), its
-   * harness's name as a person reads it, the idle while it ends after, and what withdraws its login
-   * file once it is gone.
+   * A process started for a chat: its {@code handle}, the chat form it speaks ({@code form}) over
+   * the {@code wire} made for its launch, its harness's name as a person reads it, the idle while
+   * it ends after, and what withdraws its login file once it is gone.
    */
   record Started(
       AgentProcess.Handle handle,
       HarnessChat form,
+      HarnessChat.Wire wire,
       String agent,
       Duration maxIdle,
       Runnable withdraw) {}
@@ -187,16 +188,19 @@ final class ChatLaunch {
                 project, workspace, file, login.map(LaunchEnv::loginLines).orElse(""), person));
     try {
       launched.accept(true);
+      var launch = new HarnessChat.Launch(chat.mode(), null, chat.conversation());
+      var wire = form.wire(launch);
       return new Started(
           processes.start(
               instance,
               WORKSPACE,
               Map.of(),
-              form.argv(new HarnessChat.Launch(chat.mode(), null, chat.conversation())),
+              form.argv(launch),
               unit.pidPath(),
               unit.logPath(),
               file),
           form,
+          wire,
           harness.displayName(),
           idle,
           () -> doors.withdraw(instance, file));

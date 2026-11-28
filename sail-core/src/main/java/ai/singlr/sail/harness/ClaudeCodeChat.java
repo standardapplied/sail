@@ -74,6 +74,12 @@ final class ClaudeCodeChat implements HarnessChat {
     return List.copyOf(command);
   }
 
+  /** Claude Code's streaming mode, the same for every launch ({@link ClaudeCodeWire}). */
+  @Override
+  public Wire wire(Launch launch) {
+    return new ClaudeCodeWire(this);
+  }
+
   private List<String> modeArgs(String mode) {
     return modes().stream()
         .filter(offered -> offered.name().equals(mode))

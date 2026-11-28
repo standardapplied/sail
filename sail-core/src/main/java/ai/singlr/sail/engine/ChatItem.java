@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import static ai.singlr.sail.engine.LiveStream.CONTENT_CODE_POINTS;
 import static ai.singlr.sail.engine.LiveStream.NAME_CODE_POINTS;
 import static ai.singlr.sail.engine.LiveStream.SUMMARY_CODE_POINTS;
 
@@ -23,13 +22,16 @@ import java.util.List;
  *
  * <p>What the agent wrote is never markup, and is clipped where the item is made, to its bound:
  * {@link LiveStream#NAME_CODE_POINTS} for a name, {@link LiveStream#SUMMARY_CODE_POINTS} for a
- * short line, {@link LiveStream#CONTENT_CODE_POINTS} for anything long. A piece holding text that
- * was cut says so in its one {@code clipped} flag, so a client marks it as shown in part. Only what
- * is shown after the fact is ever cut: every part of a {@link Request}, and of its detail, is held
- * to the content bound, and a request any part of which is longer is never asked ({@link
- * Unreadable}), since a person can never allow what they were not shown whole.
+ * short line, {@link #CONTENT_CODE_POINTS} for anything long. A piece holding text that was cut
+ * says so in its one {@code clipped} flag, so a client marks it as shown in part. Only what is
+ * shown after the fact is ever cut: every part of a {@link Request}, and of its detail, is held to
+ * the content bound, and a request any part of which is longer is never asked ({@link Unreadable}),
+ * since a person can never allow what they were not shown whole.
  */
 public sealed interface ChatItem {
+
+  /** How much of what the agent wrote at length, a text, a call's input or output, is shown. */
+  int CONTENT_CODE_POINTS = 1 << 16;
 
   /** What a tool call does, as a person reads its row. */
   enum ToolKind {

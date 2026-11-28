@@ -190,6 +190,7 @@ final class FakeAgentProcess implements AgentProcess {
     private volatile Runnable onClose = () -> {};
     private volatile Consumer<Signal> onSignal = signal -> {};
     private volatile Consumer<String> onWrite = line -> {};
+    private volatile Consumer<String> onRead = line -> {};
 
     private Fake(String runId, String pidFile) {
       this.runId = runId;
@@ -362,6 +363,12 @@ final class FakeAgentProcess implements AgentProcess {
     /** What the process does with a line written to it: nothing, unless scripted. */
     Fake onWrite(Consumer<String> reaction) {
       this.onWrite = reaction;
+      return this;
+    }
+
+    /** What happens as its reader takes a line the process said: nothing, unless scripted. */
+    Fake onRead(Consumer<String> reaction) {
+      this.onRead = reaction;
       return this;
     }
 
@@ -546,7 +553,9 @@ final class FakeAgentProcess implements AgentProcess {
           moved.awaitUninterruptibly();
         }
         waiting = false;
-        return lines.pop();
+        var line = lines.pop();
+        onRead.accept(line);
+        return line;
       } finally {
         lock.unlock();
       }

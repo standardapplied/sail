@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ChatStore;
@@ -554,6 +555,10 @@ class ChatLifecycleTest {
             "Claude Code",
             new ChatLog(bench.store, session, ChatTiming.real(), () -> {}),
             Harnesses.of("claude-code").chat().orElseThrow(),
+            Harnesses.of("claude-code")
+                .chat()
+                .orElseThrow()
+                .wire(new HarnessChat.Launch("default", null, null)),
             fake,
             ChatTiming.real(),
             Duration.ofMinutes(20),

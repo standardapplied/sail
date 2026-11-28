@@ -157,6 +157,18 @@ final class ChatBench implements AutoCloseable {
 
   /** A host over this box's chats whose ends wait {@code grace} each step. */
   ChatHost restarted(ProcessEnd.Grace grace) {
+    return restarted(launch, grace);
+  }
+
+  /**
+   * A host over this box's chats, as sail starts one, admitting and starting them by {@code
+   * launch}.
+   */
+  ChatHost restarted(ChatLaunch launch) {
+    return restarted(launch, new ProcessEnd.Grace(GRACE, GRACE, GRACE, GRACE));
+  }
+
+  private ChatHost restarted(ChatLaunch launch, ProcessEnd.Grace grace) {
     return new ChatHost(
         store,
         launch,
