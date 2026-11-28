@@ -10,6 +10,8 @@ import static ai.singlr.sail.api.ChatBench.line;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import ai.singlr.sail.engine.ChatWire;
+import ai.singlr.sail.engine.SessionLogin;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyMessage;
@@ -50,22 +52,21 @@ class ChatListingTest {
 
   @TempDir Path dir;
   private ChatBench bench;
+  private ChatTiming timing;
   private ChatListing listing;
 
   @BeforeEach
   void setUp() {
     bench = new ChatBench(dir);
-    listing =
-        new ChatListing(
-            bench.store,
-            bench.fdes,
-            new ChatTiming(
-                bench.clock::instant,
-                window -> {},
-                (arrivals, within) -> {},
-                Duration.ZERO,
-                Duration.ZERO,
-                ProcessEnd.Grace.DEFAULT));
+    timing =
+        new ChatTiming(
+            bench.clock::instant,
+            window -> {},
+            (arrivals, within) -> {},
+            Duration.ZERO,
+            Duration.ZERO,
+            ProcessEnd.Grace.DEFAULT);
+    listing = new ChatListing(bench.store, bench.fdes, timing);
   }
 
   @AfterEach
@@ -149,6 +150,7 @@ class ChatListingTest {
     bench.clock.advance(Duration.ofMinutes(20));
     bench.host.sweep();
     ChatBench.over(fake);
+    withdrawn(1);
     assertFalse(bench.store.find(idle).orElseThrow().launched(), "no process holds it");
     assertEquals("your_turn", stateOf(idle));
 
@@ -156,6 +158,7 @@ class ChatListingTest {
     bench.send(cut, "hi");
     bench.says(INIT, ASKS);
     bench.host.close();
+    withdrawn(2);
     assertEquals(List.of("your_turn", "your_turn"), List.of(stateOf(idle), stateOf(cut)));
   }
 
@@ -297,6 +300,145 @@ class ChatListingTest {
             "created_at",
             "2026-11-27T09:00:00.000Z"),
         only(listed("sam", "try")));
+  }
+
+  /**
+   * T1, T2: a chat is titled by the first line of the person's first message, and by nothing after
+   * it; one with no message yet has no title.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aChatIsTitledByTheFirstLineOfThePersonsFirstMessageAlone() {
+    var session = bench.samsChat();
+    assertFalse(only(listed("sam", "try")).containsKey("title"), "no message yet, no title");
+
+    bench.send(session, "Fix the upload limit wording\nIt says 10 MB; the limit is 25 MB.");
+    assertEquals("Fix the upload limit wording", only(listed("sam", "try")).get("title"));
+
+    bench.says(INIT, ENDS);
+    bench.send(session, "And the error page too");
+    assertEquals(
+        "Fix the upload limit wording",
+        only(listed("sam", "try")).get("title"),
+        "a later message is no title");
+  }
+
+  /** T3: a first message that waited for its turn titles its chat as one handed at once does. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aQueuedFirstMessageTitlesItsChat() {
+    assertEquals("Tidy the welcome page copy", titleOf("Tidy the welcome page copy", true));
+  }
+
+  /** T4: one line is the title as it was said. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void oneLineIsItsTitleWhole() {
+    assertEquals("Why does PierTest time out on CI?", titleOf("Why does PierTest time out on CI?"));
+  }
+
+  /** T5: of many lines, only the first is the title, whichever line break ends it. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void ofManyLinesOnlyTheFirstIsTheTitle() {
+    for (var end : List.of("\n", "\r\n", "\r", "\u2028", "\u2029", "\u0085", "\u000B", "\f")) {
+      assertEquals(
+          "Add the new berths", titleOf("Add the new berths" + end + "at pier 4\nand more"), end);
+    }
+  }
+
+  /**
+   * T6: a first line past {@link ChatListing#TITLE_MOST} code points is cut on the last whole word
+   * that fits, or at the bound in code points when one word is longer, never between the two halves
+   * of a surrogate pair.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aLongFirstLineIsCutOnAWholeWordWithinTheBound() {
+    var eighty = "word ".repeat(15) + "a".repeat(5);
+    assertEquals(80, eighty.codePointCount(0, eighty.length()));
+    assertEquals(eighty, titleOf(eighty), "eighty code points are whole");
+    assertEquals(eighty, titleOf(eighty + " more"), "a word ending at the bound is whole");
+    assertEquals(
+        "word ".repeat(15).strip(), titleOf(eighty + "b more"), "a word past the bound goes");
+    var clef = "\uD834\uDD1E";
+    assertEquals(
+        clef.repeat(ChatListing.TITLE_MOST),
+        titleOf(clef.repeat(ChatListing.TITLE_MOST + 20)),
+        "one long word is cut at eighty code points, each pair whole");
+    assertEquals(
+        "a".repeat(79) + "\uD83D\uDE00",
+        titleOf("a".repeat(79) + "\uD83D\uDE00" + "b".repeat(10)),
+        "a pair at the bound is kept whole");
+  }
+
+  /** T7: a first message of only whitespace or control characters has no title. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void onlyWhitespaceOrControlCharactersIsNoTitle() {
+    for (var said : List.of(" \t\n\r\n\u00A0\u2003 ", "\u0007\u001B\u0000", "\u0085\u009B ")) {
+      assertFalse(
+          only(listed(said)).containsKey("title"),
+          () -> said.codePoints().mapToObj(Integer::toHexString).toList().toString());
+    }
+  }
+
+  /**
+   * T8: no control character or line break reaches a title: each, and each run of spaces, is one
+   * space, and the first line with words in it is the first line; a NUL ends what SQLite reads.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void noControlCharacterOrLineBreakReachesATitle() {
+    assertEquals(
+        "Fix the bug [31m in red",
+        titleOf(" \n\t\n  Fix\tthe\u0007bug \u001B[31m in\u00A0\u00A0red  \nsecond line"));
+    assertEquals("Fix the", titleOf("Fix the\u0000bug"));
+  }
+
+  private String titleOf(String said) {
+    return titleOf(said, false);
+  }
+
+  private String titleOf(String said, boolean queued) {
+    return (String) only(listed(said, queued)).get("title");
+  }
+
+  private List<Map<String, Object>> listed(String said) {
+    return listed(said, false);
+  }
+
+  /** Sam's one chat in try whose first message, logged as the host logs one, is {@code said}. */
+  private List<Map<String, Object>> listed(String said, boolean queued) {
+    var id = "said-" + said.hashCode() + "-" + queued;
+    bench.store.open(chat(id, "acme", bench.samId, "try", Instant.parse("2026-11-27T09:00:00Z")));
+    new ChatLog(bench.store, id, timing, () -> {}).log(new ChatWire.Message(said, queued));
+    var rows = listed("sam", "try");
+    bench.store.eraseWorkspace("acme", "try");
+    return rows;
+  }
+
+  /**
+   * Returns once {@code logins} login files were withdrawn from the workspace, each by the end of
+   * its process on a thread of its own, so no withdrawal is counted as the listing's; past {@link
+   * ChatBench#PATIENCE}, the test fails.
+   */
+  private void withdrawn(long logins) {
+    var deadline = System.nanoTime() + ChatBench.PATIENCE.toNanos();
+    while (withdrawals() < logins) {
+      if (System.nanoTime() > deadline) {
+        throw new AssertionError(logins + " login files were not withdrawn");
+      }
+      Thread.onSpinWait();
+    }
+  }
+
+  private long withdrawals() {
+    synchronized (bench.incus) {
+      return bench.incus.invocations().stream()
+          .filter(command -> command.contains(SessionLogin.REMOVE))
+          .count();
+    }
   }
 
   private String stateOf(String session) {
