@@ -4,13 +4,9 @@ import SailLook
 /// A workspace's or a template's state (`PillPaint`): a hairline frame in inner corners, a square
 /// dot carrying the colour, and the state in mono capitals. Starting, creating and building pulse
 /// their dot every 1.2 s, held still while motion is reduced. A pill may say words of its own in a
-/// state's paint (the control plane's "Connected"); a plain pill says words of its own in the same
-/// frame, with no dot, after an icon when it has one (This Mac's "Local", a role).
+/// state's paint (the control plane's "Reconnecting").
 @MainActor
 public final class Pill: NSView {
-    /// A plain pill's icon, at the size of the type beside it.
-    static let iconSide = Look.Step.micro.points
-
     public var look: Look {
         didSet { repaint() }
     }
@@ -19,36 +15,21 @@ public final class Pill: NSView {
         didSet { repaint() }
     }
 
-    /// The words said in place of the state's label: a plain pill's own, given as it is made.
+    /// The words said in place of the state's label.
     public var words: String? {
         didSet { repaint() }
     }
 
     public let size: PillSize
-    public let plain: Bool
-    public let icon: LineIcon?
     private let mono: LabelFont
     let dot = PillDot()
 
-    public convenience init(_ state: PillState, size: PillSize = .regular, look: Look, mono: LabelFont) {
-        self.init(state, words: nil, plain: false, icon: nil, size: size, look: look, mono: mono)
-    }
-
-    /// A plain pill saying `words`, `icon` before them.
-    public convenience init(plain words: String, icon: LineIcon? = nil, size: PillSize = .regular, look: Look, mono: LabelFont) {
-        self.init(.unknown, words: words, plain: true, icon: icon, size: size, look: look, mono: mono)
-    }
-
-    private init(_ state: PillState, words: String?, plain: Bool, icon: LineIcon?, size: PillSize, look: Look, mono: LabelFont) {
+    public init(_ state: PillState, size: PillSize = .regular, look: Look, mono: LabelFont) {
         self.state = state
-        self.words = words
-        self.plain = plain
-        self.icon = icon
         self.size = size
         self.look = look
         self.mono = mono
         super.init(frame: .zero)
-        dot.isHidden = plain
         addSubview(dot)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
@@ -76,14 +57,9 @@ public final class Pill: NSView {
         words ?? state.label
     }
 
-    /// The room a plain pill's icon takes before its words.
-    private var iconRoom: Double {
-        icon == nil ? 0 : Self.iconSide + size.gap
-    }
-
     override public var intrinsicContentSize: NSSize {
         let words = Double(ceil(label.size().width))
-        return NSSize(width: plain ? size.leading + iconRoom + words + size.trailing : size.width(label: words), height: size.height)
+        return NSSize(width: size.width(label: words), height: size.height)
     }
 
     override public func setFrameSize(_ newSize: NSSize) {
@@ -101,11 +77,8 @@ public final class Pill: NSView {
     override public func draw(_: NSRect) {
         Draw.box(bounds, radius: Look.innerRadius, fill: nil, edge: paint.edge, dash: paint.dashed ? PillSize.dash.map { CGFloat($0) } : [])
         let label = self.label, leftToRight = userInterfaceLayoutDirection != .rightToLeft
-        let x = leftToRight ? size.leading + (plain ? iconRoom : size.dot + size.gap) : size.trailing
+        let x = leftToRight ? size.leading + size.dot + size.gap : size.trailing
         Draw.line(label, x: x, baseline: TextLine.baseline(top: (Double(bounds.height) - size.text) / 2, points: size.text, lineHeight: size.text))
-        guard let icon else { return }
-        let side = Self.iconSide, width = Double(bounds.width)
-        Draw.icon(icon, in: NSRect(x: leftToRight ? size.leading : width - size.leading - side, y: (Double(bounds.height) - side) / 2, width: side, height: side), ink: paint.text)
     }
 
     private func repaint() {

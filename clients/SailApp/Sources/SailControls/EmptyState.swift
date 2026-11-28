@@ -2,7 +2,7 @@ import AppKit
 import SailLook
 
 /// What an empty place says, centred in its frame (`EmptyTilePaint`): a 56 pt tile with an 8 pt grid
-/// and a line icon, a Newsreader title, a body at most 400 pt wide, its actions, and an optional mono
+/// and a line icon, a Newsreader title, a body at most 400 pt wide (none when empty), its actions, and an optional mono
 /// line, after the actions (when it was last tried) or before them (who is asking). Its words are
 /// labels, so VoiceOver reads the title, the body, then the action.
 @MainActor
@@ -91,7 +91,8 @@ public final class EmptyState: NSView {
         let tileRect = NSRect(x: (width - EmptyTilePaint.size) / 2, y: 0, width: EmptyTilePaint.size, height: EmptyTilePaint.size)
         let titleTop = EmptyTilePaint.size + Self.tileGap + Self.gap
         let titleRect = NSRect(x: left, y: titleTop, width: column, height: measured(title))
-        let bodyRect = NSRect(x: left, y: Double(titleRect.maxY) + Self.gap, width: column, height: measured(body))
+        let bodied = !body.stringValue.isEmpty
+        let bodyRect = NSRect(x: left, y: Double(titleRect.maxY) + (bodied ? Self.gap : 0), width: column, height: bodied ? measured(body) : 0)
         let sizes = actions.map { $0.intrinsicContentSize }
         let row = sizes.reduce(0) { $0 + Double($1.width) } + Self.actionsGap * Double(max(sizes.count - 1, 0))
         let tallest = sizes.map { Double($0.height) }.max() ?? 0

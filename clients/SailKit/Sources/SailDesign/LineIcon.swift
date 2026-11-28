@@ -9,9 +9,8 @@ public enum LineIcon: String, CaseIterable, Sendable {
     case out
     /// A folder's disclosure: shut (pointing along the line, mirrored right to left) and open.
     case right, down
-    /// This Mac's: its group's head, its project's tile and a shell (New session's Shell tile too),
-    /// and its page's "not synced".
-    case laptop, terminal, lock
+    /// This Mac's: its group's head, its project's tile and a shell (New session's Shell tile too).
+    case laptop, terminal
 
     public static let side = 24.0, width = 1.75
 
@@ -80,7 +79,6 @@ public enum LineIcon: String, CaseIterable, Sendable {
         case .more: return [.dot(Point(5.5, 12), radius: 1.2), .dot(Point(12, 12), radius: 1.2), .dot(Point(18.5, 12), radius: 1.2)]
         case .laptop: return Self.box(4.5, 5, 15, 10.5, corner: 1.5) + [line((2.5, 18.5), (21.5, 18.5))]
         case .terminal: return Self.box(3, 4.5, 18, 15, corner: 2.5) + [line((7.5, 9.5), (10.5, 12), (7.5, 14.5)), line((12.5, 15), (16.5, 15))]
-        case .lock: return Self.box(5, 10.5, 14, 9.5, corner: 2) + [line((8.5, 10.5), (8.5, 8)), .arc(Point(12, 8), radius: 3.5, from: 180, to: 360), line((15.5, 8), (15.5, 10.5))]
         }
     }
 

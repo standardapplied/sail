@@ -29,9 +29,6 @@ extension Driver {
             let said = await waitUntil(step.seconds ?? 10) { self.shell.account.text.contains(words) }
             return (said, "the account says: " + shell.account.text.replacingOccurrences(of: "\n", with: " | "))
         }
-        if step.accountAtKeys == true {
-            return await accountAtKeys(step)
-        }
         if let days = step.sessionEndsIn {
             do {
                 try await GoldenDesk.shared.signInEnds(in: days)
@@ -255,28 +252,21 @@ extension Driver {
         return (true, "clicked \(action) on \(item.name)")
     }
 
-    /// The Account view shown, scrolled to Keys, as the user menu's Keys leaves it.
-    private func accountAtKeys(_ step: Step) async -> (Bool, String) {
-        let pane = shell.account
-        let there = await waitUntil(step.seconds ?? 5) {
-            pane.layoutSubtreeIfNeeded()
-            let most = max(Double(pane.scroll.documentView?.frame.height ?? 0) - Double(pane.scroll.contentSize.height), 0)
-            let keys = min(max(Double(pane.eyebrows[2].frame.minY) - AccountPane.inset.top, 0), most)
-            return self.shell.rail.selected == .account && abs(pane.scrolledTo - keys) < 1
-        }
-        return (there, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"), the account scrolled to \(pane.scrolledTo) pt, its keys at \(pane.eyebrows[2].frame.minY) pt")
-    }
-
-    /// The window in both looks at 1024 × 800, then at its least frame, then as it was.
+    /// The window in both looks at 1024 × 800, 1276 × 800, 1600 × 900, then at its least frame, then
+    /// as it was; at each, the header and the groups stand in the skeleton's column.
     private func accountShot(_ name: String) async -> (Bool, String) {
-        let was = shell.window.frame
+        let was = shell.window.frame, pane = shell.account
         var said: [String] = [], ok = true
-        for (suffix, size) in [("", NSSize(width: 1024, height: 800)), ("-least", ShellApp.leastFrame)] {
+        let sizes = [("", NSSize(width: 1024, height: 800)), ("-1276", NSSize(width: 1276, height: 800)), ("-1600", NSSize(width: 1600, height: 900)), ("-least", ShellApp.leastFrame)]
+        for (suffix, size) in sizes {
             shell.window.setFrame(NSRect(x: was.minX, y: was.maxY - size.height, width: size.width, height: size.height), display: true)
-            shell.account.layoutSubtreeIfNeeded()
+            pane.layoutSubtreeIfNeeded()
+            let column = PageColumn.frame(width: Double(pane.scroll.contentSize.width))
+            let groups = pane.eyebrows[0].frame
+            let placed = abs(Double(pane.disc.frame.minX) - column.x) < 0.5 && abs(Double(groups.minX) - column.x) < 0.5 && abs(Double(groups.width) - column.width) < 0.5
             let (taken, detail) = await inBothLooks(name + suffix) { file in await self.capture(.window(self.shell.window.windowNumber), to: file) }
-            ok = ok && taken
-            said.append(detail)
+            ok = ok && taken && placed
+            said.append("\(Int(shell.window.frame.width)) pt: the header at \(pane.disc.frame.minX), the groups \(groups), the column at \(column.x) wide \(column.width); " + detail)
         }
         shell.window.setFrame(was, display: true)
         return (ok, said.joined(separator: "; "))
@@ -351,7 +341,7 @@ extension Driver {
         guard await click(row, at: at) else { return (false, "the click was not made") }
         let done: Bool
         switch row.item {
-        case .account, .keys: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .account }
+        case .account: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .account }
         case .signIn: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .workspaces }
         case .signOut:
             done = await waitUntil(step.seconds ?? 20) { self.shell.flow.actions > began && !self.shell.flow.isActing && self.shell.flow.standing == nil }

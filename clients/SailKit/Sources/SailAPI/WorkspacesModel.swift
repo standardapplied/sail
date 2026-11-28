@@ -9,13 +9,6 @@ public struct WorkspacesModel: Sendable {
     /// The one local project: this Mac's own shells, which exists on this Mac alone and is never
     /// named to the control plane. No server project is called so (a name there is lowercase).
     public static let thisMac = "This Mac"
-    /// What This Mac's page says it is not.
-    public static let thisMacNote = "This Mac has no repositories, agents, size or template, and cannot be renamed or deleted. Agents run in workspaces on the runner."
-
-    /// The line under This Mac's name: the Mac it is, and the control plane it is kept from.
-    public static func thisMacLede(host: String, controlPlane: String) -> String {
-        "Shells on \(host). Only this Mac sees them; nothing here is sent to \(controlPlane)."
-    }
 
     public struct Person: Equatable, Sendable {
         public let handle: String

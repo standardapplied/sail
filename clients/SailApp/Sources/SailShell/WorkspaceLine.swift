@@ -155,7 +155,7 @@ final class WorkspaceLine: NSStackView {
     /// words and them, as the narrow frame's row sets its columns apart.
     static func actionsColumn(_ buttons: [SailButton]) -> Double {
         let boxes = buttons.map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
-        return (boxes.reduce(0, +) + Double(max(buttons.count - 1, 0)) * ProjectView.buttonGap + Look.Space.s).rounded(.up)
+        return (boxes.reduce(0, +) + Double(max(buttons.count - 1, 0)) * PageColumn.buttonGap + Look.Space.s).rounded(.up)
     }
 
     /// Words in the owner's column, as a person's handle is set there.

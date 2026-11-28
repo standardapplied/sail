@@ -300,6 +300,9 @@ extension Driver {
                 return (false, "\(pair[1]): \(error)")
             }
         }
+        if let page = step.headInColumn {
+            return headInColumn(page)
+        }
         if let text = step.workspaces {
             let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.contains(text) }
             let focused = pane.window?.firstResponder === pane.project.list
@@ -675,6 +678,22 @@ extension Driver {
             return await inBothLooks(name) { file in await self.capture(.screen, to: file) }
         }
         return await performPanel(step)
+    }
+
+    /// The Workspaces page shown, called `page` ("this-mac", "project"): its head stands where the
+    /// skeleton's column puts it, and where the other page's stood at this window's width, if it
+    /// was measured there.
+    private func headInColumn(_ page: String) -> (Bool, String) {
+        let pane = shell.workspaces, skeleton = pane.local.isHidden ? pane.project.skeleton : pane.local.skeleton
+        pane.layoutSubtreeIfNeeded()
+        let column = PageColumn.frame(width: Double(skeleton.bounds.width)), title = skeleton.title
+        let head = skeleton.convert(title.alignmentRect(forFrame: title.frame), from: title.superview), origin = skeleton.convert(head.origin, to: nil)
+        let width = Int(shell.window.frame.width), other = heads.first { $0.key.width == width && $0.key.page != page }
+        heads[Head(page: page, width: width)] = origin
+        let inColumn = abs(Double(head.minX) - column.x) < 0.5 && abs(Double(head.minY) - PageColumn.padding.top) < 0.5
+        let same = other.map { abs($0.value.x - origin.x) < 0.5 && abs($0.value.y - origin.y) < 0.5 } ?? true
+        return (inColumn && same, "\(page) at \(width) pt: its head at \(head.origin) in a \(skeleton.bounds.width) pt page, the column at \(column.x) wide \(column.width); in the window at \(origin)"
+            + (other.map { ", \($0.key.page)'s at \($0.value)" } ?? ""))
     }
 
     /// The left panel's tree: a project opened or shut, its rows, a row chosen or under the pointer,

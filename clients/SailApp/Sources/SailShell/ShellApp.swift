@@ -294,9 +294,6 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .account: select(.account)
         case .signIn: select(.workspaces)
         case .signOut: account.signOutHere(nil)
-        case .keys:
-            select(.account)
-            account.scrollToKeys()
         }
     }
 

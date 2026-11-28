@@ -6,19 +6,19 @@ import SailTerminalView
 import SailWorkbench
 
 /// The Account view (`first-impressions-mockup.html`, section 2): a header (the initial's 52 pt
-/// disc, the name in Newsreader, `@handle`, the role as a plain pill, the email: the user menu's own
-/// name, handle and role), then four groups in the list frame, each under its eyebrow. The control
-/// plane: its address, when the session ends, and its state as a pill; out of reach, a banner in the
+/// disc, the name in Newsreader, the email under it), then four groups in the list frame, each
+/// under its eyebrow. The control plane: its address, when the session ends, and its state as a
+/// pill only while it is not connected; out of reach, a banner in the
 /// group with Try Again; under three days left, the end in the warning ink and Sign In Again. Your
 /// passkeys and your keys, each a list of the server's rows asked at once and drawn as its own
 /// answer lands, the drawing mark in the frame until its first answer, the last answer dimmed while
-/// the call that drew it fails, each refusal said where it happened. Then Sign Out, beside what it
-/// ends and what it does not. No button here is primary. Signed out it shows nothing: the welcome
-/// is on Workspaces. Laid out whole by arithmetic in a scrolling column, mirrored right to left.
+/// the call that drew it fails, each refusal said where it happened. Then Sign Out. No button here
+/// is primary. Signed out it shows nothing: the welcome is on Workspaces. Laid out whole by
+/// arithmetic in the page skeleton's column (``PageColumn/frame(width:)``), scrolling, mirrored
+/// right to left.
 @MainActor
 public final class AccountPane: NSView, NSMenuItemValidation {
-    package static let inset = (top: 36.0, sides: 48.0)
-    static let column = 640.0, groupGap = 28.0, headGap = 8.0, disc = 52.0, row = 56.0
+    static let groupGap = 28.0, headGap = 8.0, disc = 52.0, row = 56.0
     static let refusalPadding = 9.0, bannerFoot = 12.0, dimmed = 0.45
 
     /// The harnesses the server lists and the person's logins: what the Keys group is drawn from.
@@ -71,8 +71,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private var era = 0
     /// How many loads were started: only the latest one's answers are taken.
     private var loads = 0
-    /// Keys was chosen as this load was started: the view goes to its keys once it has drawn them.
-    private var keysAfter: Int?
     /// What the control plane's banner says now: it is made again only when that changes.
     private var bannerLines: [String]?
     /// The lists' width their rows were made for.
@@ -83,10 +81,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private let labels: LabelFont
     package let scroll: QuietScrollView
     private let page = AccountColumn()
-    let disc: Initial
+    package let disc: Initial
     let heading = NSTextField(labelWithString: "")
-    let handle = NSTextField(labelWithString: "")
-    let role: Pill
     let email = NSTextField(labelWithString: "")
     /// The groups' mono eyebrows: the control plane, passkeys, keys.
     package private(set) var eyebrows: [NSTextField] = []
@@ -105,8 +101,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     let keyMark: BrandMark
     let keySaid = NSTextField(wrappingLabelWithString: "")
     let keyNote = NSTextField(wrappingLabelWithString: AccountPage.keysNote)
-    let outWords = NSTextField(wrappingLabelWithString: "")
-    let outNote = NSTextField(wrappingLabelWithString: AccountPage.signOutNote)
     let outSaid = NSTextField(wrappingLabelWithString: "")
 
     init(flow: AccountFlow, look: Look, title: TitleFont, mono: TerminalFonts, labels: LabelFont) {
@@ -117,7 +111,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         self.labels = labels
         scroll = QuietScrollView(look: look)
         disc = Initial("", side: Self.disc, font: CTFontCreateCopyWithAttributes(title.font(.title1), 24, nil, nil) as NSFont, mark: \.headerAvatar, look: look)
-        role = Pill(plain: "", size: .small, look: look, mono: labels)
         state = Pill(.running, look: look, mono: labels)
         signInAgain = SailButton("Sign In Again", kind: .secondary, size: .small, look: look, target: nil, action: nil)
         signOut = SailButton("Sign Out", kind: .secondary, icon: .out, look: look, target: nil, action: nil)
@@ -193,14 +186,14 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     public var text: String {
         guard let standing = flow.standing else { return "" }
         let content = flow.menuContent
-        var lines = [content.name, [content.handle, content.role, (try? standing.whoami.get())?.email].compactMap { $0 }.joined(separator: " · ")]
-        lines.append("\(content.address ?? "") · \(state.said)")
+        var lines = [content.name, (try? standing.whoami.get())?.email ?? ""]
+        lines.append(([content.address ?? ""] + (state.isHidden ? [] : [state.said])).joined(separator: " · "))
         lines += [ending?.said ?? ""] + planeLines
-        lines += passkeyRows.flatMap { row in [[row.label, row.thisMac ? AccountPage.thisMac : nil, rowDetail(row.id, row.detail)].compactMap { $0 }.joined(separator: " · ")] + (refusals[row.id] ?? []) }
+        lines += passkeyRows.flatMap { row in [[row.label, passkeyDetail(row)].joined(separator: " · ")] + (refusals[row.id] ?? []) }
         lines += passkeys.failure ?? []
         lines += keyRows.flatMap { row in ["\(row.display) · \(rowDetail(row.id, row.detail))"] + (refusals[row.id] ?? []) }
         lines += (keys.failure ?? []) + [storedLine].compactMap { $0 }
-        return (lines + [outWords.stringValue] + signOutLines).filter { !$0.isEmpty }.joined(separator: "\n")
+        return (lines + signOutLines).filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     /// A row's detail: what it says, or that its removal is under way.
@@ -235,9 +228,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
                 group.addTask { [weak self] in await self?.takePasskeys(from: client, in: load) }
                 group.addTask { [weak self] in await self?.takeKeys(from: client, in: load) }
             }
-            guard let self, isLatest(load), keysAfter == load.number else { return }
-            keysAfter = nil
-            scrollNowToKeys()
         }
     }
 
@@ -382,26 +372,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         }
     }
 
-    /// Keys, from the user menu: the view at its keys, as far as the page scrolls, and again once
-    /// the groups asked as it was shown have answered.
-    func scrollToKeys() {
-        keysAfter = loads
-        scrollNowToKeys()
-    }
-
-    private func scrollNowToKeys() {
-        layoutSubtreeIfNeeded()
-        let top = Double(eyebrows[2].frame.minY) - Self.inset.top
-        let most = max(Double(page.frame.height) - Double(scroll.contentSize.height), 0)
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: min(max(top, 0), most)))
-        scroll.reflectScrolledClipView(scroll.contentView)
-    }
-
-    /// Where the view is scrolled to, for the tests and the drive.
-    package var scrolledTo: Double {
-        Double(scroll.contentView.bounds.minY)
-    }
-
     // MARK: Drawing
 
     private static func whose(_ standing: SignedIn) -> String {
@@ -427,16 +397,11 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         eyebrows.forEach { $0.alignment = userInterfaceLayoutDirection == .rightToLeft ? .right : .left }
         heading.attributedStringValue = words(content.name, titleFont.font(.title1) as NSFont, look.text, cut: true)
         disc.name = content.name
-        handle.attributedStringValue = words(content.handle ?? "", labels.font(Look.Step.footnote.points) as NSFont, look.textSecondary, cut: true)
-        role.words = content.role
-        role.isHidden = content.role == nil
         email.attributedStringValue = words((try? standing?.whoami.get())?.email ?? "", .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, cut: true)
         showPlane(content.plane)
         relist()
         showGroup(passkeys, frame: passkeyFrame, list: passkeyList, mark: passkeyMark, said: passkeySaid, note: passkeyNote, extra: nil)
         showGroup(keys, frame: keyFrame, list: keyList, mark: keyMark, said: keySaid, note: keyNote, extra: storedLine)
-        outWords.attributedStringValue = words(standing.map { AccountPage.signedInHere((try? $0.whoami.get())?.fde ?? $0.fde) } ?? "", .systemFont(ofSize: Look.Step.footnote.points), look.textSecondary)
-        outNote.attributedStringValue = words(AccountPage.signOutNote, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary)
         outSaid.attributedStringValue = refusalWords(signOutLines, look: look, scale: scale)
         outSaid.isHidden = signOutLines.isEmpty
         signOut.isEnabled = !flow.isActing
@@ -474,14 +439,16 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         }
         state.state = paint
         state.words = words
+        state.isHidden = paint == .running
         signInAgain.isHidden = ending?.soon != true
         signInAgain.isEnabled = !flow.isActing
         planeRow.controls = planeControls.map(\.intrinsicContentSize)
     }
 
-    /// The control plane row's controls, in order from its words: Sign In Again when shown, the pill.
+    /// The control plane row's controls, in order from its words: Sign In Again and the pill, each
+    /// while shown.
     private var planeControls: [NSView] {
-        (signInAgain.isHidden ? [] : [signInAgain]) + [state]
+        [signInAgain, state].filter { !$0.isHidden }
     }
 
     /// Remove in a row's ⋯ and on ⌘⌫: off while that row's removal is under way.
@@ -501,9 +468,9 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             let remove = removal(of: row.id) { [weak self] in
                 self?.ask(row.removing, row: row.id) { (client) async throws(SailError) in _ = try await client.send(.removePasskey(row.id)) }
             }
-            let detail = rowDetail(row.id, row.detail), width = rowWidth(in: listWidth, actions: passkeyList.actionsColumn ?? 0)
-            let voice = [row.label, row.thisMac ? AccountPage.thisMac : nil, detail].compactMap { $0 }.joined(separator: ", ")
-            let made = { self.rowView(.icon(.fingerprint), title: row.label, tag: row.thisMac ? AccountPage.thisMac : nil, detail: detail, width: width) }
+            let detail = passkeyDetail(row), width = rowWidth(in: listWidth, actions: passkeyList.actionsColumn ?? 0)
+            let voice = "\(row.label), \(detail)"
+            let made = { self.rowView(.icon(.fingerprint), title: row.label, detail: detail, width: width) }
             let item = SailList.Item(id: row.id, name: row.label, voice: voice, content: made(), actions: [remove], height: made().height)
             return [.item(item)] + refused(row.id)
         }
@@ -530,8 +497,13 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     /// A row of a list, made each time its list asks, `width` wide and as tall as that makes it: an
     /// always-shown button of its own runs `offer`.
-    private func rowView(_ mark: AccountRowView.Mark, title: String, tag: String? = nil, detail: String, offer: SailList.Action? = nil, width: Double) -> AccountRowView {
-        let row = AccountRowView(mark, title: title, tag: tag, detail: detail, direction: userInterfaceLayoutDirection, look: look, labels: labels)
+    /// A passkey's detail: "This Mac" first on this Mac's own, then when it was added and last used.
+    private func passkeyDetail(_ row: AccountPage.PasskeyRow) -> String {
+        ([row.thisMac ? AccountPage.thisMac : nil] + [rowDetail(row.id, row.detail)]).compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func rowView(_ mark: AccountRowView.Mark, title: String, detail: String, offer: SailList.Action? = nil, width: Double) -> AccountRowView {
+        let row = AccountRowView(mark, title: title, detail: detail, direction: userInterfaceLayoutDirection, look: look, labels: labels)
         if let offer {
             let run = Run(offer)
             let button = SailButton(offer.title, kind: .secondary, size: .small, icon: .plus, look: look, target: run, action: #selector(Run.go(_:)))
@@ -608,7 +580,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         layer?.backgroundColor = NSColor(look.canvas).cgColor
         scroll.look = look
         disc.look = look
-        for view in [role, state] { view.look = look }
+        state.look = look
         for button in [signInAgain, signOut] { button.look = look }
         for frame in [planeFrame, passkeyFrame, keyFrame] { frame.look = look }
         for list in [passkeyList, keyList] { list.look = look }
@@ -637,12 +609,11 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         }
         passkeyList.actionsColumn = actionsColumn([])
         keyList.actionsColumn = actionsColumn(["Replace"])
-        for label in [heading, handle, email] {
+        for label in [heading, email] {
             label.maximumNumberOfLines = 1
             label.lineBreakMode = .byTruncatingTail
         }
-        for label in [passkeySaid, keySaid, outSaid] { label.isSelectable = true }
-        let views: [NSView] = [disc, heading, handle, role, email] + eyebrows + [planeFrame, passkeyFrame, passkeySaid, passkeyNote, keyFrame, keySaid, keyNote, outWords, outNote, outSaid, signOut]
+        let views: [NSView] = [disc, heading, email] + eyebrows + [planeFrame, passkeyFrame, passkeySaid, passkeyNote, keyFrame, keySaid, keyNote, outSaid, signOut]
         views.forEach(page.addSubview)
         signInAgain.target = self
         signInAgain.action = #selector(signInAgainNow(_:))
@@ -666,14 +637,14 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     private var columnWidth: Double {
-        min(Self.column, max(Double(scroll.contentSize.width) - 2 * Self.inset.sides, 1))
+        PageColumn.frame(width: Double(scroll.contentSize.width)).width
     }
 
     /// Every frame of the column, top to bottom, left to right then turned about the page's middle
     /// right to left; the column's height.
     private func lay() -> Double {
-        let width = columnWidth, x = Self.inset.sides
-        var y = Self.inset.top
+        let (x, width) = PageColumn.frame(width: Double(scroll.contentSize.width))
+        var y = PageColumn.padding.top
         let pageWidth = Double(page.bounds.width)
         func put(_ view: NSView, _ rect: NSRect) {
             let frame = mirrored(rect, inWidth: pageWidth)
@@ -685,18 +656,10 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         put(disc, NSRect(x: x, y: y, width: Self.disc, height: Self.disc))
         let text = x + Self.disc + Look.Space.l, textWidth = max(width - Self.disc - Look.Space.l, 1)
         let headingHeight = line(heading, width: textWidth), sub = 5.0
-        let subHeight = max(Double(role.intrinsicContentSize.height), line(handle, width: textWidth))
+        let subHeight = line(email, width: textWidth)
         let top = y + (Self.disc - headingHeight - sub - subHeight) / 2
         put(heading, NSRect(x: text, y: top, width: textWidth, height: headingHeight))
-        var subX = text
-        let subY = top + headingHeight + sub
-        for view in [handle, role, email] as [NSView] where !view.isHidden {
-            let wanted = (view as? NSTextField).map { Double(ceil($0.attributedStringValue.size().width)) + 4 } ?? Double(view.intrinsicContentSize.width)
-            let room = max(text + textWidth - subX, 0), shown = min(wanted, room)
-            let height = (view as? NSTextField).map { line($0, width: shown) } ?? Double(view.intrinsicContentSize.height)
-            put(view, NSRect(x: subX, y: subY + (subHeight - height) / 2, width: shown, height: height))
-            subX += shown + Look.Space.s
-        }
+        put(email, NSRect(x: text, y: top + headingHeight + sub, width: textWidth, height: subHeight))
         y += Self.disc + Self.groupGap
         y = group(eyebrows[0], frame: planeFrame, y: y, x: x, width: width, put: put) { inner in self.layPlane(width: inner) } + Self.groupGap
         y = group(eyebrows[1], frame: passkeyFrame, y: y, x: x, width: width, put: put) { inner in self.layList(passkeyList, in: passkeyFrame, mark: passkeyMark, width: inner) }
@@ -708,15 +671,15 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         let button = signOut.intrinsicContentSize
         let wordsWidth = max(width - Double(button.width) - Look.Space.l, 1)
         let start = y
-        for label in [outWords, outNote, outSaid] where !label.isHidden {
-            let height = line(label, width: wordsWidth)
-            put(label, NSRect(x: x, y: y, width: wordsWidth, height: height))
+        if !outSaid.isHidden {
+            let height = line(outSaid, width: wordsWidth)
+            put(outSaid, NSRect(x: x, y: y, width: wordsWidth, height: height))
             y += height + 2
         }
         let buttonTop = start + max((y - start - Double(button.height)) / 2, 0)
         put(signOut, signOut.frame(forAlignmentRect: NSRect(x: x + width - Double(button.width), y: buttonTop, width: Double(button.width), height: Double(button.height))))
         page.rule = mirrored(NSRect(x: x, y: rule, width: width, height: 1), inWidth: pageWidth)
-        return max(y, buttonTop + Double(button.height)) + Self.inset.top
+        return max(y, buttonTop + Double(button.height)) + PageColumn.padding.bottom
     }
 
     /// A group's eyebrow, then its frame holding what `inner` lays out at its width; where it ends.
@@ -808,7 +771,7 @@ final class AccountColumn: NSView {
 }
 
 /// A row of the Account view, as the page's `.li` draws it: a 28 pt tile in 6 pt corners holding an
-/// icon or a harness's monogram, the title (mono for an address) with a tag after it, the detail
+/// icon or a harness's monogram, the title (mono for an address), the detail
 /// under it in the tertiary ink (the warning's when it warns), and controls at its trailing edge
 /// whatever the pointer does: a button of its own (Add Key), or those its view lays out by
 /// ``fit(width:)`` (the control plane's pill and Sign In Again). Its words are read whole: the
@@ -834,7 +797,6 @@ final class AccountRowView: NSView {
     let mark: Mark
     let title = NSTextField(labelWithString: "")
     let detail = NSTextField(wrappingLabelWithString: "")
-    let tagged: String?
     /// Its controls by size, at its trailing edge or under its words: its own button's, or those its
     /// view lays out.
     var controls: [NSSize] = [] {
@@ -850,11 +812,10 @@ final class AccountRowView: NSView {
     private let mono: Bool
 
     init(
-        _ mark: Mark, title words: String, mono: Bool = false, tag: String? = nil, detail said: String = "", warns: Bool = false, direction: NSUserInterfaceLayoutDirection,
+        _ mark: Mark, title words: String, mono: Bool = false, detail said: String = "", warns: Bool = false, direction: NSUserInterfaceLayoutDirection,
         look: Look, labels: LabelFont
     ) {
         self.mark = mark
-        self.tagged = tag
         self.look = look
         self.labels = labels
         self.mono = mono
@@ -899,9 +860,8 @@ final class AccountRowView: NSView {
         Double(ceil(title.attributedStringValue.size().height))
     }
 
-    /// The title's width with its tag after it.
     private var titleWidth: Double {
-        Double(ceil(title.attributedStringValue.size().width)) + (tagWords.map { Double(ceil($0.size().width)) + 18 } ?? 0)
+        Double(ceil(title.attributedStringValue.size().width))
     }
 
     private func detailHeight(_ width: Double) -> Double {
@@ -927,18 +887,6 @@ final class AccountRowView: NSView {
         return Fit(words: words, top: beside ? (height - block) / 2 : top, controls: boxes, height: height)
     }
 
-    private var tagWords: NSAttributedString? {
-        tagged.map { NSAttributedString(string: $0.uppercased(), attributes: [.font: labels.font(9.5) as NSFont, .foregroundColor: NSColor(look.textTertiary), .kern: 0.95]) }
-    }
-
-    /// The tag's box after the title's words.
-    var tagBox: NSRect? {
-        guard let tagWords else { return nil }
-        let size = tagWords.size(), words = Double(ceil(title.attributedStringValue.size().width))
-        let x = Self.tile + Self.gap + min(words, Double(title.frame.width)) + 8
-        return mirrored(NSRect(x: x, y: Double(title.frame.midY) - 8, width: Double(ceil(size.width)) + 10, height: 16))
-    }
-
     private func mirrored(_ rect: NSRect) -> NSRect {
         mirrored(rect, inWidth: Double(bounds.width))
     }
@@ -951,8 +899,7 @@ final class AccountRowView: NSView {
         if let offered, let box = fit.controls.first {
             offered.frame = offered.frame(forAlignmentRect: mirrored(box.offsetBy(dx: 0, dy: below)))
         }
-        let room = max(fit.words - (tagWords.map { Double(ceil($0.size().width)) + 18 } ?? 0), 1)
-        title.frame = mirrored(NSRect(x: start - 2, y: top, width: min(room, Double(ceil(title.attributedStringValue.size().width))) + 4, height: titleLine))
+        title.frame = mirrored(NSRect(x: start - 2, y: top, width: min(fit.words, titleWidth) + 4, height: titleLine))
         detail.frame = mirrored(NSRect(x: start - 2, y: top + titleLine + Self.lineGap, width: fit.words + 4, height: detailHeight(fit.words)))
         needsDisplay = true
     }
@@ -976,13 +923,6 @@ final class AccountRowView: NSView {
             let size = words.size()
             words.draw(at: NSPoint(x: Double(box.midX) - Double(size.width) / 2, y: Double(box.midY) - Double(size.height) / 2))
         }
-        guard let box = tagBox, let tagWords else { return }
-        let edge = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: 2.5, yRadius: 2.5)
-        NSColor(look.separator).setStroke()
-        edge.lineWidth = 1
-        edge.stroke()
-        let size = tagWords.size()
-        tagWords.draw(at: NSPoint(x: Double(box.midX) - Double(size.width) / 2, y: Double(box.midY) - Double(size.height) / 2))
     }
 }
 

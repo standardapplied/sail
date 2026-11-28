@@ -59,8 +59,7 @@ public final class Tile: NSView {
 /// name: a project's in medium ink (the secondary ink while what the panel shows is stale, as the
 /// design's stale frame draws it), a workspace's in regular ink, cut in its middle with its tooltip
 /// whole, each semibold while chosen or under the pointer; quiet words in 12 pt tertiary ink; and at
-/// the trailing edge, 7 pt apart, the template's small pill when not ready, a `tag`'s plain small pill
-/// (This Mac's "Local"), or its +: one at a time, the row's under the pointer, else the chosen row's,
+/// the trailing edge, 7 pt apart, the template's small pill when not ready, or its +: one at a time, the row's under the pointer, else the chosen row's,
 /// and drawn pressed, shown whatever the pointer does, while what it opened is open (``held``).
 @MainActor
 public final class SidebarRowCell: NSView {
@@ -107,7 +106,7 @@ public final class SidebarRowCell: NSView {
     /// `onDisclose` presses (nil: a press there chooses the row); `plus` the label of its + (nil for
     /// none), which runs `onPlus`.
     public init(
-        _ name: String, lead: Lead = .tile(nil), indent: Double = 0, disclosure open: Bool? = nil, template: PillState? = nil, tag: String? = nil, plus: String? = nil,
+        _ name: String, lead: Lead = .tile(nil), indent: Double = 0, disclosure open: Bool? = nil, template: PillState? = nil, plus: String? = nil,
         look: Look, mono: LabelFont, onDisclose: (@MainActor () -> Void)? = nil, onPlus: @escaping @MainActor () -> Void = {}
     ) {
         self.name = name
@@ -123,7 +122,7 @@ public final class SidebarRowCell: NSView {
             square = nil
         }
         disclosure = open.map { Disclosure(open: $0, look: look, onPress: onDisclose) }
-        pill = template.map { Pill($0, size: .small, look: look, mono: mono) } ?? tag.map { Pill(plain: $0, size: .small, look: look, mono: mono) }
+        pill = template.map { Pill($0, size: .small, look: look, mono: mono) }
         self.plus = plus.map { SailButton(icon: .plus, label: $0, size: .row, look: look, target: nil, action: nil) }
         nameTip = lead.cutInTheMiddle ? Tooltip(name, look: look, mono: nil) : nil
         super.init(frame: .zero)

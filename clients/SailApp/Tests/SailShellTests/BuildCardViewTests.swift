@@ -22,7 +22,7 @@ import Testing
     static let read = "GET /v1/projects/lighthouse/template"
     static let build = "POST /v1/projects/lighthouse/template%3Abuild"
     /// The least window's card: the narrowest card less the page's sides and the frame's edge.
-    static let least = WorkspacesViewTests.narrowestCard - 2 * ProjectView.padding.sides - 2
+    static let least = WorkspacesViewTests.narrowestCard - 2 * PageColumn.padding.sides - 2
 
     /// The golden `name`'s template answer for project `project`, its build at `step`.
     static func template(_ name: String, project: String = "lighthouse", step: Int? = nil) throws -> Exchange {

@@ -128,7 +128,7 @@ import Testing
         let view = shell.userMenu.view
         let labels = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
         #expect(labels == ["Uday Chandra", "@uday · Admin", "main.acme.dev", "Connected", "Appearance"], "the menu says \(labels)")
-        #expect(view.items.map(\.item) == [.account, .keys, .signOut] && view.items.allSatisfy { near($0.frame.height, UserMenuView.row) && near($0.frame.minX, 6) })
+        #expect(view.items.map(\.item) == [.account, .signOut] && view.items.allSatisfy { near($0.frame.height, UserMenuView.row) && near($0.frame.minX, 6) })
         #expect(near(view.avatarDisc.width, 32) && near(view.avatarDisc.minX, 16) && view.planeInk == Tint(look.success))
         for words in ["Connected", "Reconnecting", "Can’t reach"] {
             let label = try #require(WorkspacesViewTests.found(NSTextField.self, in: view).first { $0.stringValue == "Connected" || $0.stringValue == "Reconnecting" || $0.stringValue == "Can’t reach" })
@@ -140,8 +140,8 @@ import Testing
         }
         shell.userMenu.update(Self.uday, appearance: .auto)
         view.layoutSubtreeIfNeeded()
-        let signOut = try #require(view.items.last), logins = try #require(view.items.first { $0.item == .keys })
-        #expect(signOut.frame.minY - logins.frame.maxY > UserMenuView.appearanceRow, "Sign Out is not in a section apart: \(signOut.frame) after \(logins.frame)")
+        let signOut = try #require(view.items.last), account = try #require(view.items.first { $0.item == .account })
+        #expect(signOut.frame.minY - account.frame.maxY > UserMenuView.appearanceRow, "Sign Out is not in a section apart: \(signOut.frame) after \(account.frame)")
         shell.userMenu.update(.signedOut(lastUsed: nil), appearance: .auto)
         view.layoutSubtreeIfNeeded()
         let out = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
@@ -162,15 +162,14 @@ import Testing
         let had = KeyHolder.of(shell.window.firstResponder)
         try Self.open(shell, withKeys: true)
         var walked = [Self.highlighted(view)]
-        for code in [Self.down, Self.down, Self.down, Self.up] {
+        for code in [Self.down, Self.down, Self.up] {
             try Self.press(code, in: shell)
             walked.append(Self.highlighted(view))
         }
-        #expect(walked == ["Account", "Keys", "Appearance", "Sign Out", "Appearance"], "the keys walk \(walked), not top to bottom")
+        #expect(walked == ["Account", "Appearance", "Sign Out", "Appearance"], "the keys walk \(walked), not top to bottom")
         try Self.press(Self.down, in: shell)
         shell.window.sendEvent(try Self.key(48, "\t"))
         #expect(Self.highlighted(view) == "Account" && shell.userMenu.isOpen && shell.window.firstResponder is MenuKeys, "Tab left the menu, or moved to \(Self.highlighted(view))")
-        try Self.press(Self.down, in: shell)
         try Self.press(Self.down, in: shell)
         try Self.press(Self.left, in: shell)
         #expect(view.chosenLook == .dark && Appearance.stored(in: shell.defaults) == .dark && Self.appearance(of: shell) == .darkAqua && shell.userMenu.isOpen)
@@ -197,7 +196,7 @@ import Testing
     }
 
     /// The button opens the menu and, again, closes it; a click outside it closes it, as does the
-    /// window giving up the keys; Keys shows the Account view at its keys; Account shows the Account
+    /// window giving up the keys; Account shows the Account
     /// view; an Appearance leaves it open.
     @Test func thePointerWorksTheMenu() throws {
         let shell = try Self.shell()
@@ -217,11 +216,6 @@ import Testing
         try Self.open(shell)
         NotificationCenter.default.post(name: shell.userMenu.popover.keysLeft, object: shell.window)
         #expect(!shell.userMenu.isOpen, "the window giving up the keys left it open")
-        try Self.open(shell)
-        let keys = try #require(view.items.first { $0.item == .keys })
-        #expect(keys.drawn.ink == shell.look.text, "Keys is drawn dimmed, as one that cannot be chosen")
-        keys.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: keys.bounds.midX, y: keys.bounds.midY), in: keys))
-        #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "Keys showed \(shell.rail.selected?.rawValue ?? "nothing")")
         try Self.open(shell)
         let account = try #require(view.items.first { $0.item == .account })
         account.mouseEntered(with: try Self.mouse(.mouseMoved, at: .zero, in: account))
@@ -253,7 +247,7 @@ import Testing
         signIn.mouseDown(with: try Self.mouse(.leftMouseDown, at: NSPoint(x: signIn.bounds.midX, y: signIn.bounds.midY), in: signIn))
         shell.userMenu.update(Self.uday, appearance: .auto)
         signIn.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: -10, y: -10), in: signIn))
-        #expect(shell.userMenu.isOpen && view.items.map(\.item) == [.account, .keys, .signOut], "let go outside, the menu says \(view.items.map(\.item))")
+        #expect(shell.userMenu.isOpen && view.items.map(\.item) == [.account, .signOut], "let go outside, the menu says \(view.items.map(\.item))")
         #expect(near(shell.userMenu.box.height, view.fittingSize.height) && view.items.allSatisfy { near($0.frame.height, UserMenuView.row) }, "the box was not sized again")
         shell.userMenu.close()
     }

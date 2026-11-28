@@ -176,9 +176,8 @@ import Testing
     /// The words the view says beside its groups.
     @Test func theViewsOwnWords() {
         #expect(AccountPage.unreachable(at: "sail.example.com") == ["Sail cannot reach sail.example.com.", "Check that this Mac is on its network."])
-        #expect(AccountPage.signedInHere("mara") == "Signed in on this Mac as @mara.")
-        #expect(AccountPage.signOutNote == "Signing out ends nothing on the runner: your sessions keep running for your next sign-in.")
-        #expect(AccountPage.passkeysNote.hasPrefix("Passkeys sign you in.") && AccountPage.keysNote.hasSuffix("Sail never shows a key again once stored."))
+        #expect(AccountPage.passkeysNote == "A new passkey needs a ticket from your admin.")
+        #expect(AccountPage.keysNote == "Agents sign in with their own account or a key stored here.")
     }
 
     /// A removal that answers 204 with no bytes is a removal: nothing is read from it.

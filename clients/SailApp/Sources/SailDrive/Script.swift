@@ -128,8 +128,6 @@ struct Step: Decodable {
     var accountRow: [String]?
     /// The Account view shows these words, whatever is under way (a check held in mid-air).
     var accountSays: String?
-    /// The Account view is shown, scrolled to its keys as far as it scrolls.
-    var accountAtKeys: Bool?
     /// From now on a sign-in ends this many days from now: the recorded sign-in's answer with its
     /// `expires_at` moved.
     var sessionEndsIn: Double?
@@ -430,6 +428,9 @@ struct Step: Decodable {
     var window: [Double]?
     /// The window's frame made the least it takes (`ShellApp.leastFrame`), its top left kept.
     var leastWindow: Bool?
+    /// The Workspaces page shown, named so ("this-mac", "project"), has its head in the skeleton's
+    /// column, where the other page's head stood at the same window width.
+    var headInColumn: String?
     /// The Workspaces section no longer says this, within `seconds` (10 by default).
     var notSaid: String?
     /// The button of this title shown in the window clicked with a real mouse-down and mouse-up

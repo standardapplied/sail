@@ -29,15 +29,8 @@ public enum AccountPage {
     public static let thisMac = "This Mac"
     /// A row's detail while its removal is under way.
     public static let removing = "Removing"
-    public static let passkeysNote =
-        "Passkeys sign you in. They live in your iCloud Keychain or on a security key; Sail holds none of them. A new one needs a ticket from your admin."
-    public static let keysNote =
-        "Each agent signs in with its own account inside the session, or with one API key you store here. A stored key also runs specs. Sail never shows a key again once stored."
-    public static let signOutNote = "Signing out ends nothing on the runner: your sessions keep running for your next sign-in."
-
-    public static func signedInHere(_ handle: String) -> String {
-        "Signed in on this Mac as @\(handle)."
-    }
+    public static let passkeysNote = "A new passkey needs a ticket from your admin."
+    public static let keysNote = "Agents sign in with their own account or a key stored here."
 
     /// The control plane not answering, said in its group: what is so, then what to do.
     public static func unreachable(at host: String) -> [String] {

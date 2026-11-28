@@ -4,9 +4,10 @@ import SailControls
 import SailLook
 import SailWorkbench
 
-/// A project's Workspaces view, as the approved design draws it: its name and the line under it,
-/// List Again and New Workspace at the top right, a banner when something went wrong, then the list
-/// (yours, then other people's, the create row first among yours), an empty state, a new project's
+/// A project's Workspaces view, drawn in the page skeleton (``PageColumn``) as the approved design
+/// draws it: its name and the line under it, List Again and New Workspace at the top right, a banner
+/// when something went wrong, then the list (yours, then other people's, the create row first among
+/// yours), an empty state, a new project's
 /// build card (with neither button), or skeleton rows; a foot with the count and the keys. It draws
 /// what ``WorkspacesModel`` says and sends the person's actions back; it keeps nothing of its own.
 /// Narrower than its wide rows' columns leave a name room for, as at the minimum window, it is drawn
@@ -19,15 +20,12 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         case newWorkspace, listAgain, checkAgain, typed(String), create, cancelCreate, chose(String?), show(String), createProject, buildAgain
     }
 
-    static let padding = (top: 26.0, sides: 32.0, bottom: 20.0), listGap = 18.0, footGap = 12.0, actionsColumn = 214.0
+    static let actionsColumn = 214.0
     /// The create row's and the creating row's ids: never a workspace's name, so neither shares an
     /// id with a listed row of the same name.
     static let createID = "\u{0}create", creatingID = "\u{0}creating"
-    /// The room between the name's column and the buttons (the design's `.ph` gap), and between two
-    /// buttons (`.ph-acts`, `.acts`): the stacks place the buttons' boxes, not their halos.
-    static let headGap = 20.0, buttonGap = 6.0
     /// The least width drawn wide: the wide row's columns, insets and frame, and 150 pt for a name.
-    static let wide = 2 * padding.sides + 2 + RowStyle.list.leading + RowStyle.list.trailing + WorkspaceLine.pillColumn + WorkspaceLine.ownerColumn
+    static let wide = 2 * PageColumn.padding.sides + 2 + RowStyle.list.leading + RowStyle.list.trailing + WorkspaceLine.pillColumn + WorkspaceLine.ownerColumn
         + actionsColumn + 150
 
     var on: @MainActor (Act) -> Void = { _ in }
@@ -36,24 +34,17 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         didSet { relook() }
     }
     package let list: SailList
-    let title = NSTextField(labelWithString: "")
-    let lede = NSTextField(labelWithString: "")
+    package let skeleton: PageColumn
     let listAgain: SailButton
     package let newWorkspace: SailButton
     let newWorkspaceIcon: SailButton
     package let field: SailTextField
-    let words = NSStackView()
-    let buttons = NSStackView()
-    let count = NSTextField(labelWithString: "")
     private(set) var narrow = false {
         didSet { if narrow != oldValue, let page { render(page) } }
     }
 
     private let mono: LabelFont
     private let titleFont: TitleFont
-    private let column = NSStackView()
-    private let head = NSView()
-    let foot = NSView()
     private let frameView: ListFrame
 
     /// The narrow rows' actions column: the widest actions a narrow row shows (Start and Open with
@@ -83,9 +74,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     package var listScroll: NSScrollView? {
         frameView.scroll
     }
-    /// The head, the list, the foot, the loading bars and the build card span the column, whatever
-    /// their content's width.
-    private lazy var spans = [head, foot, frameView, loadingWords, loadingList, buildFrame].map { $0.widthAnchor.constraint(equalTo: column.widthAnchor) }
     /// The build card, made once: the mark drawing in it keeps drawing across the reads that redraw it.
     private(set) lazy var buildCard: BuildCard = {
         let card = BuildCard(look: look, titleFont: titleFont, mono: mono)
@@ -110,6 +98,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         newWorkspace = SailButton("New Workspace", kind: .secondary, icon: .plus, look: look, target: nil, action: nil)
         newWorkspaceIcon = SailButton(icon: .plus, label: "New Workspace", kind: .secondary, look: look, target: nil, action: nil)
         field = SailTextField(label: nil, placeholder: "name of a new workspace", look: look, mono: mono)
+        skeleton = PageColumn(buttons: [listAgain, newWorkspace, newWorkspaceIcon])
         super.init(frame: .zero)
         listAgain.shortcut("r", modifiers: .command, mono: mono)
         newWorkspace.keyEquivalent = "n"
@@ -129,27 +118,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         list.onKeys = { [weak self] in self?.showKeys() }
         field.field.delegate = self
         field.boxWidth = CreateRow.box
-        for label in [title, lede] {
-            label.lineBreakMode = .byTruncatingTail
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        }
-        title.lineBreakMode = .byTruncatingMiddle
-        buildHead()
+        skeleton.fill(self)
         buildFoot()
-        foot.heightAnchor.constraint(equalToConstant: Keycap.height).isActive = true
-        column.orientation = .vertical
-        column.alignment = .width
-        column.setClippingResistancePriority(.defaultLow, for: .horizontal)
-        column.spacing = 0
-        column.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(column)
-        let above = column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -Self.padding.bottom)
-        above.priority = WorkspacesView.yields
-        NSLayoutConstraint.activate([
-            column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.padding.sides),
-            column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.padding.sides),
-            column.topAnchor.constraint(equalTo: topAnchor, constant: Self.padding.top), above,
-        ])
     }
 
     @available(*, unavailable)
@@ -172,15 +142,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         self.page = page
         drawn = .page(page)
         ages = nil
-        title.attributedStringValue = NSAttributedString(string: page.name, attributes: [
-            .font: titleFont.font(.title1) as NSFont, .foregroundColor: NSColor(look.text), .kern: -0.012 * Look.Step.title1.points,
-        ])
-        title.toolTip = page.name
+        skeleton.name(page.name, lede: page.lede, narrow: narrow, look: look, titleFont: titleFont)
         let building = if case .build = page.body { true } else { false }
-        lede.attributedStringValue = NSAttributedString(string: page.lede, attributes: [
-            .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(look.textSecondary),
-        ])
-        lede.isHidden = narrow
         listAgain.isHidden = building
         newWorkspace.isHidden = narrow || building
         newWorkspaceIcon.isHidden = !narrow || building
@@ -189,12 +152,12 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             button.why = page.createWhy
         }
         centred?.removeFromSuperview()
-        var views: [NSView] = [head, Self.spacer(Self.listGap)]
-        if let notice = page.banner { views += [banner(notice), Self.spacer(12)] }
+        var views: [NSView] = [skeleton.head, PageColumn.spacer(PageColumn.listGap)]
+        if let notice = page.banner { views += [banner(notice), PageColumn.spacer(12)] }
         switch page.body {
         case .loading: views.append(loadingList)
         case .unlisted: break
-        case let .empty(empty): views.append(Self.framed(emptyState(empty), look: look))
+        case let .empty(empty): views.append(PageColumn.framed(emptyState(empty), look: look))
         case let .build(build):
             if buildCard.build != build {
                 buildCard.show(build)
@@ -212,14 +175,14 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             filled = page.name
             frameView.alphaValue = page.stale ? 0.55 : 1
             let listed = table.count + (table.creating == nil ? 0 : 1)
-            count.attributedStringValue = micro(page.stale ? Self.listed(page.listedAt) : "\(listed) workspace\(listed == 1 ? "" : "s")")
+            skeleton.count.attributedStringValue = micro(page.stale ? Self.listed(page.listedAt) : "\(listed) workspace\(listed == 1 ? "" : "s")")
             ages = page.stale ? Timer.scheduledTimer(withTimeInterval: Self.ageTick, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.retellAge() }
             } : nil
-            views += [frameView, Self.spacer(Self.footGap), foot]
+            views += [frameView, PageColumn.spacer(PageColumn.footGap), skeleton.foot]
             showKeys()
         }
-        show(views)
+        skeleton.show(views)
     }
 
     private func relook() {
@@ -262,14 +225,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         return view.subviews.flatMap { found(kind, in: $0) }
     }
 
-    /// `views` down the column, each spanning it but the spacers.
-    private func show(_ views: [NSView]) {
-        column.setViews(views, in: .top)
-        NSLayoutConstraint.activate(spans.filter { span in views.contains { $0 === span.firstItem } })
-        let transient = views.filter { view in view is ListFrame && !spans.contains { $0.firstItem === view } }
-        NSLayoutConstraint.activate(transient.map { $0.widthAnchor.constraint(equalTo: column.widthAnchor) })
-    }
-
     /// The design's loading frame, before any project is listed: bars where the name and the line
     /// under it will be, and the list's skeleton.
     func renderLoading() {
@@ -277,7 +232,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         drawn = .loading
         ages = nil
         centred?.removeFromSuperview()
-        show([loadingWords, Self.spacer(Self.listGap + 11), loadingList])
+        skeleton.show([loadingWords, PageColumn.spacer(PageColumn.listGap + 11), loadingList])
     }
 
     /// Bars for the name and the line under it, made once: a skeleton shows 150 ms after it enters
@@ -297,7 +252,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
 
     /// The list's skeleton, made once for the same reason.
     private lazy var loadingRows = SkeletonRows(look: look)
-    private lazy var loadingList = Self.framed(loadingRows, height: SkeletonRows.height, look: look)
+    private lazy var loadingList = PageColumn.framed(loadingRows, height: SkeletonRows.height, look: look)
 
     /// The name field given the keys with the caret after its name: every create row drawn holds the
     /// one field, so a redraw while typing takes it out of the window and the keys with it.
@@ -326,7 +281,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         page = nil
         drawn = .empty(empty)
         ages = nil
-        show([])
+        skeleton.show([])
         centred?.removeFromSuperview()
         let state = emptyState(empty)
         state.translatesAutoresizingMaskIntoConstraints = false
@@ -335,24 +290,9 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         wide.priority = WorkspacesView.yields
         NSLayoutConstraint.activate([
             state.centerXAnchor.constraint(equalTo: centerXAnchor), state.centerYAnchor.constraint(equalTo: centerYAnchor), wide,
-            state.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -2 * Self.padding.sides),
+            state.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -2 * PageColumn.padding.sides),
         ])
         centred = state
-    }
-
-    /// `content` in the list's frame: at `height`, or, with none, at its own height 52 pt in from the
-    /// frame's top and bottom (an empty state in place of the list).
-    private static func framed(_ content: NSView, height: Double? = nil, look: Look) -> ListFrame {
-        let frame = ListFrame(look: look)
-        frame.height = height
-        frame.addSubview(content)
-        guard height == nil else { return frame }
-        content.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: frame.leadingAnchor), content.trailingAnchor.constraint(equalTo: frame.trailingAnchor),
-            content.topAnchor.constraint(equalTo: frame.topAnchor, constant: 52), content.bottomAnchor.constraint(equalTo: frame.bottomAnchor, constant: -52),
-        ])
-        return frame
     }
 
     /// How often "listed … ago" is said again while the list is stale.
@@ -365,7 +305,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
 
     private func retellAge() {
         guard let page, page.stale else { return }
-        count.attributedStringValue = micro(Self.listed(page.listedAt))
+        skeleton.count.attributedStringValue = micro(Self.listed(page.listedAt))
     }
 
     private static func listed(_ at: Date?) -> String {
@@ -459,35 +399,10 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         field.help = WorkspacesModel.nameRule
         if field.field.stringValue != create.name { field.field.stringValue = create.name }
         let row = CreateRow(field: field, existing: create.existing, look: look, mono: mono) { [weak self] act in self?.on(act) }
-        let room = Double(bounds.width) - 2 * Self.padding.sides - 2 - RowStyle.list.leading - RowStyle.list.trailing
+        let room = PageColumn.frame(width: Double(bounds.width)).width - 2 - RowStyle.list.leading - RowStyle.list.trailing
         let height = row.height(room: bounds.width > 0 ? room : CreateRow.column + CreateRow.gap + Double(row.buttons.fittingSize.width))
         let paint: RowPaint = refused ? .refused : .naming
         return SailList.Item(id: Self.createID, name: "", voice: "A new workspace's name", content: row, height: height, paint: paint, full: true)
-    }
-
-    /// The name and the line under it, taking the room the buttons leave (less the design's 20 pt):
-    /// the line is one line where it fits and wraps below that, as a flex row's first child does.
-    private func buildHead() {
-        words.orientation = .vertical
-        words.setViews([title, lede], in: .top)
-        words.alignment = .leading
-        words.spacing = 6
-        words.setClippingResistancePriority(.defaultLow, for: .horizontal)
-        buttons.setViews([listAgain, newWorkspace, newWorkspaceIcon], in: .leading)
-        buttons.spacing = Self.buttonGap
-        buttons.setHuggingPriority(.required, for: .horizontal)
-        for view in [words, buttons] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            head.addSubview(view)
-        }
-        let hug = head.heightAnchor.constraint(equalToConstant: 0)
-        hug.priority = .fittingSizeCompression
-        NSLayoutConstraint.activate([
-            words.leadingAnchor.constraint(equalTo: head.leadingAnchor), words.topAnchor.constraint(equalTo: head.topAnchor),
-            buttons.trailingAnchor.constraint(equalTo: head.trailingAnchor), buttons.topAnchor.constraint(equalTo: head.topAnchor),
-            buttons.leadingAnchor.constraint(equalTo: words.trailingAnchor, constant: Self.headGap),
-            head.bottomAnchor.constraint(greaterThanOrEqualTo: words.bottomAnchor), head.bottomAnchor.constraint(greaterThanOrEqualTo: buttons.bottomAnchor), hug,
-        ])
     }
 
     /// The keys the foot shows now.
@@ -522,27 +437,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// is a keycap tall with or without keys (held once, from `init`), so keys coming and going never
     /// move the list: a row that moved closes its New Session panel.
     private func buildFoot() {
-        foot.subviews.forEach { $0.removeFromSuperview() }
         footShows = footKeys
-        var shown: [NSView] = []
-        for (key, words) in footShows.map(Self.said) {
-            shown.append(Keycap(key, look: look, mono: mono))
-            shown.append(NSTextField(labelWithAttributedString: micro(words)))
-        }
-        let keys = NSStackView(views: shown)
-        keys.spacing = 6
-        keys.setClippingResistancePriority(.defaultLow, for: .horizontal)
-        count.lineBreakMode = .byTruncatingTail
-        count.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        for view in [count, keys] as [NSView] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            foot.addSubview(view)
-        }
-        NSLayoutConstraint.activate([
-            count.leadingAnchor.constraint(equalTo: foot.leadingAnchor), count.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
-            count.trailingAnchor.constraint(lessThanOrEqualTo: keys.leadingAnchor, constant: -12),
-            keys.trailingAnchor.constraint(equalTo: foot.trailingAnchor), keys.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
-        ])
+        skeleton.foot(footShows.map(Self.said), look: look, mono: mono)
     }
 
     private func banner(_ notice: WorkspacesModel.Notice) -> Banner {
@@ -570,16 +466,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         on(.createProject)
     }
 
-    /// Words in mono 11, tertiary: the foot's.
     private func micro(_ words: String) -> NSAttributedString {
-        NSAttributedString(string: words, attributes: [.font: mono.font(Look.Step.micro.points, .regular) as NSFont, .foregroundColor: NSColor(look.textTertiary)])
-    }
-
-    /// A gap `height` tall down a column: this page's and This Mac's.
-    static func spacer(_ height: Double) -> NSView {
-        let view = NSView()
-        view.heightAnchor.constraint(equalToConstant: height).isActive = true
-        return view
+        PageColumn.micro(words, look: look, mono: mono)
     }
 
     /// New Workspace, in the head or the empty state.
