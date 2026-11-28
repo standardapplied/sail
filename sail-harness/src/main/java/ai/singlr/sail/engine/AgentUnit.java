@@ -33,7 +33,8 @@ public record AgentUnit(
 
   /**
    * A terminal resuming a spec's conversation in its workspace, which is no run: one per workspace,
-   * its process named in {@code ~/.sail/terminal.pid}, which a claim of the workspace kills it by.
+   * its process named in {@code ~/.sail/terminal.pid} and its start recorded beside it, by which a
+   * claim of the workspace ends it.
    */
   public static final AgentUnit TERMINAL =
       new AgentUnit(
@@ -146,8 +147,10 @@ public record AgentUnit(
   }
 
   /**
-   * Where the wrapper of a process over pipes records the start of the process its pid names,
-   * beside the pid file: what tells that process from a later one the box gives the same pid.
+   * Where the wrapper of a process no unit holds (a process over pipes, a foreground session, a
+   * workspace's terminal) records the start of the process its pid names, beside the pid file: what
+   * tells that process from a later one the box gives the same pid, and what every signal to it is
+   * checked against.
    */
   public String startPath() {
     return startPath(pidPath);
