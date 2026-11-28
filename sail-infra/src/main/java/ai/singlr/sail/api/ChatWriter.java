@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -48,12 +49,13 @@ final class ChatWriter {
       Instant handed,
       String why,
       Runnable taken,
-      Runnable refused) {}
+      Consumer<String> refused) {}
 
   private final Object guard;
   private final AgentProcess.LineWriter stdin;
   private final Supplier<Instant> clock;
   private final Duration patience;
+  private final String unrecorded;
   private final Deque<Line> waiting = new ArrayDeque<>();
   private long handed;
   private long told;
@@ -67,19 +69,24 @@ final class ChatWriter {
    * a caller waits for its line at most {@code patience}.
    */
   ChatWriter(
-      Object guard, AgentProcess.LineWriter stdin, Supplier<Instant> clock, Duration patience) {
+      Object guard,
+      AgentProcess.LineWriter stdin,
+      Supplier<Instant> clock,
+      Duration patience,
+      String unrecorded) {
     this.guard = Objects.requireNonNull(guard, "guard");
     this.stdin = Objects.requireNonNull(stdin, "stdin");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.patience = Objects.requireNonNull(patience, "patience");
+    this.unrecorded = Objects.requireNonNull(unrecorded, "unrecorded");
   }
 
   /**
    * Starts writing, on a thread of its own named {@code name}, which it returns: one interrupted
    * takes no line from then on, and ends once those waiting are told.
    */
-  Thread start(String name) {
-    return Thread.ofVirtual().name(name).start(this::writeAll);
+  void start(String name) {
+    Thread.ofVirtual().name(name).start(this::writeAll);
   }
 
   /**
@@ -87,7 +94,7 @@ final class ChatWriter {
    * is written, {@code refused} once it is not, said {@code why}. One the writer holds no room for,
    * or that follows a refused one, is refused now. Returns its place. Called under the guard.
    */
-  long offer(String text, String why, Runnable taken, Runnable refused) {
+  long offer(String text, String why, Runnable taken, Consumer<String> refused) {
     var size = text.getBytes(StandardCharsets.UTF_8).length;
     Line line;
     boolean now;
@@ -108,7 +115,7 @@ final class ChatWriter {
       }
     }
     if (now) {
-      refused.run();
+      refused.accept(why);
     }
     return line.place();
   }
@@ -199,7 +206,11 @@ final class ChatWriter {
           failed = line.place();
         }
       }
-      (taken ? line.taken() : line.refused()).run();
+      if (taken) {
+        line.taken().run();
+      } else {
+        line.refused().accept(line.why());
+      }
     }
     synchronized (this) {
       waiting.pollFirst();

@@ -14,12 +14,15 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentProcess;
+import ai.singlr.sail.engine.ChatItem;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.Recorded;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -44,6 +47,12 @@ class ChatStdinTest {
   private static final String REQUEST = "a871f652-0656-42bf-8cc8-860ad0a34b79";
   private static final String ALWAYS = line("02b-relay-stdio", 99);
   private static final String ALWAYS_REQUEST = "d3b09c29-b79d-4151-b490-d70fdf7adb18";
+  private static final String TOO_LARGE =
+      "{\"type\":\"control_request\",\"request_id\":\"big-1\",\"request\":{\"subtype\":"
+          + "\"can_use_tool\",\"tool_name\":\"Bash\",\"display_name\":\"Bash\",\"input\":"
+          + "{\"command\":\""
+          + "a".repeat(ChatItem.CONTENT_CODE_POINTS + 1)
+          + "\"},\"tool_use_id\":\"toolu_big\"}}";
   private static final Map<String, Object> ALLOW = Map.of("decision", "allow");
   private static final Duration RETURNS = Duration.ofSeconds(30);
   private static final Duration BRIEF = Duration.ofMillis(20);
@@ -216,9 +225,130 @@ class ChatStdinTest {
     assertEquals(List.of("message", "session", "turn_ended"), bench.kinds(session));
   }
 
+  /**
+   * A message whose taking Sail cannot record ends its process at once: an answer handed after it
+   * is never written, its turn is cut in words that say what happened, and the message, never
+   * marked handed, goes to the next process.
+   */
+  @Test
+  void aMessageWhoseTakingCannotBeRecordedEndsItsProcessAndItsTurnIsCutSayingSo() throws Exception {
+    bench.db.execute(
+        "CREATE TRIGGER no_handed BEFORE UPDATE OF handed ON chat_sessions"
+            + " BEGIN SELECT RAISE(ABORT, 'database is locked'); END");
+    var asked = new CountDownLatch(1);
+    var answered = new CountDownLatch(1);
+    var handedAgain = new CountDownLatch(1);
+    bench.processes.onStart(
+        fake -> {
+          fake.onClose(fake::exitsIfRunning);
+          if (bench.processes.processes.size() > 1) {
+            bench.db.execute("DROP TRIGGER no_handed");
+            fake.onWrite(line -> handedAgain.countDown());
+            return;
+          }
+          var first = new AtomicBoolean(true);
+          fake.onWrite(
+              line -> {
+                if (first.getAndSet(false)) {
+                  fake.says(INIT, ASKS);
+                  fake.settle();
+                  asked.countDown();
+                  awaitQuietly(answered);
+                }
+              });
+        });
+    var session = chat();
+
+    as("sam", () -> host.send(session, "hi"));
+    assertTrue(asked.await(20, TimeUnit.SECONDS), "the harness never asked");
+    var allowed = answer(session, REQUEST, ALLOW);
+    answered.countDown();
+    var fake = bench.processes.processes.getFirst();
+    over(fake);
+    assertTrue(handedAgain.await(20, TimeUnit.SECONDS), "the message never went to the next");
+
+    assertEquals(Map.of("seq", 4L), allowed);
+    assertEquals(List.of(LiveStream.userMessage("hi")), fake.written, "the answer never written");
+    assertEquals(
+        List.of("message", "session", "permission", "answered", "told", "interrupted"),
+        bench.kinds(session));
+    assertEquals(
+        "Sail could not record what it wrote to Claude Code's process, so Sail ended it; your"
+            + " next message starts it again.",
+        bench.items(session).get(4).get("words"));
+    assertEquals(List.of(LiveStream.userMessage("hi")), bench.processes.latest().written);
+  }
+
+  /** However many of its lines are refused, a process is ended once. */
+  @Test
+  void linesRefusedOneAfterAnotherEndTheProcessOnce() {
+    host.close();
+    host = bench.restarted();
+    var session = chat();
+    var fake = asked(session, INIT);
+    fake.onClose(() -> {});
+    fake.onSignal(
+        signal -> {
+          if (signal == AgentProcess.Signal.TERM) {
+            fake.exits(143);
+          }
+        });
+    fake.onWrite(
+        line -> {
+          throw new IllegalStateException("Broken pipe");
+        });
+
+    fake.says(TOO_LARGE, TOO_LARGE, TOO_LARGE);
+    over(fake);
+
+    assertEquals(List.of(AgentProcess.Signal.INT, AgentProcess.Signal.TERM), fake.signals);
+  }
+
+  /**
+   * The reader takes no line while a line its own line handed is being written, so a harness that
+   * stops reading cannot make it queue a reply a line faster than the writer's patience.
+   */
+  @Test
+  void theReaderTakesTheNextLineOnlyOnceTheLineItsLineHandedIsWritten() {
+    host.close();
+    host = bench.restarted(new ProcessEnd.Grace(BRIEF, BRIEF, RETURNS, BRIEF));
+    var session = chat();
+    as("sam", () -> host.send(session, "hi"));
+    var fake = bench.processes.latest();
+    var events = new CopyOnWriteArrayList<String>();
+    var next = new CountDownLatch(1);
+    fake.onRead(
+        line -> {
+          events.add(line.equals(ASKS) ? "read asks" : "read too large");
+          if (line.equals(ASKS)) {
+            next.countDown();
+          }
+        });
+    fake.onWrite(
+        line -> {
+          awaitAtMostASecond(next);
+          events.add("write");
+        });
+
+    fake.says(TOO_LARGE, ASKS);
+    fake.settle();
+
+    assertEquals(List.of("read too large", "write", "read asks"), events);
+  }
+
   /** Line {@code number} of {@code recording}, which Claude Code took, as Sail writes it. */
   private static String taken(String recording, int number) {
     return YamlUtil.dumpJson(Recorded.parsed(recording, number));
+  }
+
+  /** Waits for {@code latch} at most a second: what the test holds a write for, at most. */
+  private static void awaitAtMostASecond(CountDownLatch latch) {
+    try {
+      latch.await(1, TimeUnit.SECONDS);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError("interrupted while a write was held", interrupted);
+    }
   }
 
   private static void awaitQuietly(CountDownLatch latch) {

@@ -97,7 +97,15 @@ final class ChatProcess {
     this.timing = Objects.requireNonNull(timing, "timing");
     this.maxIdle = Objects.requireNonNull(maxIdle, "maxIdle");
     this.host = Objects.requireNonNull(host, "host");
-    this.writer = new ChatWriter(this, handle.stdin(), timing.clock(), timing.grace().afterInt());
+    this.writer =
+        new ChatWriter(
+            this,
+            handle.stdin(),
+            timing.clock(),
+            timing.grace().afterInt(),
+            "Sail could not record what it wrote to "
+                + agent
+                + "'s process, so Sail ended it; your next message starts it again.");
     this.end = new ChatEnd(this, writer::close, agent, handle, timing);
     this.broken =
         agent
@@ -392,14 +400,14 @@ final class ChatProcess {
           lastActivity = timing.clock().get();
           taken.run();
         },
-        () -> {
+        said -> {
           if (!end.ending()) {
-            end.begin(why);
+            end.begin(said);
           }
           refused.run();
           Thread.ofVirtual()
               .name("sail-chat-broken-" + session)
-              .start(() -> end.end(timing.grace().afterInt(), why));
+              .start(() -> end.end(timing.grace().afterInt(), said));
         });
   }
 
