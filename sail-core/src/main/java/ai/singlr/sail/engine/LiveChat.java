@@ -98,7 +98,7 @@ public final class LiveChat {
         Strings.isNotBlank(asked.description()) ? asked.description() : asked.displayName(),
         asked.reason(),
         chat.detail(asked.tool(), asked.input()),
-        chat.always(asked.suggestions()),
+        chat.always(asked.tool(), asked.input(), asked.suggestions()),
         false);
   }
 

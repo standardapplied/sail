@@ -85,10 +85,19 @@ public interface HarnessChat {
   ChatItem.Detail detail(String tool, Map<String, Object> input);
 
   /**
-   * The ways to allow a call always that the harness's own {@code suggestions} offer, each said
-   * whole in plain words: what is allowed or changed, and where. None when any suggestion is a
-   * shape that cannot be said so, since every suggestion is kept together: a person is never
-   * offered more than they read.
+   * The ways to allow the call of {@code tool} with {@code input} always that the harness's own
+   * {@code suggestions} offer, each said whole in plain words: what is allowed or changed, and
+   * where. None when any suggestion is a shape that cannot be said so, since every suggestion is
+   * kept together, or when the call is one the harness was recorded asking for again whatever is
+   * kept: a person is never offered more than holds. The one decision for a request's card and for
+   * the answer that takes it.
    */
-  List<ChatItem.Always> always(List<Object> suggestions);
+  List<ChatItem.Always> always(String tool, Map<String, Object> input, List<Object> suggestions);
+
+  /**
+   * Why a person asking to allow always the call of {@code tool} with {@code input}, for which
+   * {@link #always} offers none, is refused, in words a person reads: what the harness offered, and
+   * why Sail withholds it when it did.
+   */
+  String noAlways(String tool, Map<String, Object> input, List<Object> suggestions);
 }

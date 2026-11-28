@@ -237,7 +237,7 @@ final class ClaudeCode implements Harness {
 
   @Override
   public Optional<HarnessChat> chat() {
-    return Optional.of(new ClaudeCodeChat());
+    return Optional.of(new ClaudeCodeChat(displayName()));
   }
 
   @Override

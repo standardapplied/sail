@@ -72,13 +72,32 @@ class LiveReplyTest {
         "02b-relay-stdio", 100, LiveReply.reply(step("02b-relay-stdio", 99), ALWAYS, CLAUDE_CODE));
   }
 
+  /**
+   * The refusal says what is true: Sail withholds what it cannot say whole (01:108's xargs rule),
+   * it withholds always for a command that redirects whatever rule Claude Code suggests (02b:72's
+   * prefix {@code echo original *} for {@code echo original > upd.txt}; probes 6 and 7), and only
+   * when Claude Code suggested nothing did it offer no way.
+   */
   @Test
-  void anAlwaysItsCardDidNotOfferIsRefused() {
+  void anAlwaysItsCardDidNotOfferIsRefusedSayingWhy() {
     var unsaid = step("01-always-rule-wrappers", 108);
+    var redirects = step("02b-relay-stdio", 72);
+    var nothing =
+        new Step.Permission(
+            "r1", "t1", null, "Bash", "Bash", Map.of("command", "ls"), null, null, List.of());
 
     assertEquals(
-        "Claude Code offered no way to allow this always; allow it once instead.",
-        refused(() -> LiveReply.reply(unsaid, ALWAYS, CLAUDE_CODE)));
+        List.of(
+            "Sail does not offer always for this call: it cannot say whole, in plain words, what"
+                + " Claude Code would keep; allow it once instead.",
+            "Sail does not offer always for a command that redirects with > or <: Claude Code asks"
+                + " again for one that writes to a file with >, even with its rule kept; allow it"
+                + " once instead.",
+            "Claude Code offered no way to allow this always; allow it once instead."),
+        List.of(
+            refused(() -> LiveReply.reply(unsaid, ALWAYS, CLAUDE_CODE)),
+            refused(() -> LiveReply.reply(redirects, ALWAYS, CLAUDE_CODE)),
+            refused(() -> LiveReply.reply(nothing, ALWAYS, CLAUDE_CODE))));
   }
 
   @Test

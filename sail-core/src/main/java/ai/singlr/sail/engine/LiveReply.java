@@ -122,9 +122,9 @@ public final class LiveReply {
       case Step.Permission asked when reply.decision() == Decision.ALLOW ->
           LiveChat.allow(id, asked.input());
       case Step.Permission asked when reply.decision() == Decision.ALLOW_ALWAYS -> {
-        if (chat.always(asked.suggestions()).isEmpty()) {
+        if (chat.always(asked.tool(), asked.input(), asked.suggestions()).isEmpty()) {
           throw new IllegalArgumentException(
-              "Claude Code offered no way to allow this always; allow it once instead.");
+              chat.noAlways(asked.tool(), asked.input(), asked.suggestions()));
         }
         yield LiveChat.allowAlways(id, asked.input(), asked.suggestions());
       }

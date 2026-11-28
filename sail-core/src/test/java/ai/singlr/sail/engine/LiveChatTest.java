@@ -19,7 +19,7 @@ import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.LoginOutcome;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +44,7 @@ class LiveChatTest {
           + KEPT;
 
   private static final String PREFIX =
-      ", also when another command such as xargs, timeout, nice or nohup starts it, xargs adding"
+      ", except one that writes to a file with `>`, also when another command such as xargs, timeout, nice or nohup starts it, xargs adding"
           + " whatever it is fed, and as part of a longer line whose other commands need no asking"
           + KEPT;
 
@@ -246,10 +246,11 @@ class LiveChatTest {
    * rule with what probe 2 recorded it also covers (01, 01b): none for a compound command, a rule
    * Claude Code matches one command at a time, so it may never match again (03b:91's {@code &&},
    * 04d:20's {@code ;}, which is inside quotes but read as written, and 01:198); none for a rule
-   * run by xargs (01:108, 01:260), whose reach is not recorded; none for a rule whose command
-   * redirects (02b:16, 02d:17 and 04a:16's {@code date > …}), which Claude Code asked for again
-   * with the rule kept (probe 6); and none for a rule of another tool kept for the session
-   * (03a:13).
+   * run by xargs (01:108, 01:260), whose reach is not recorded; none for a command that redirects,
+   * whatever rule Claude Code suggests for it: exact (02b:16, 02d:17 and 04a:16's {@code date > …})
+   * or a prefix with no {@code >} (02b:72's {@code echo original *}, probe 5's 04:17 and 05:16),
+   * since Claude Code asked again for such a command with either kept (probes 6 and 7); and none
+   * for a rule of another tool kept for the session (03a:13).
    */
   @Test
   void everyRecordedAlwaysIsSaidInPlainWords() {
@@ -273,7 +274,9 @@ class LiveChatTest {
             "04a-subagent-permission-request:45",
             "04b-accept-edits-shell:160",
             "01c-mode-manual-over-workspace-acceptEdits:40",
-            "01c-mode-manual-over-workspace-acceptEdits:68")) {
+            "01c-mode-manual-over-workspace-acceptEdits:68",
+            "04-answer-after-withdrawn:17",
+            "05-answer-twice:16")) {
       var at = line.split(":");
       recorded.put(line, always(at[0], Integer.parseInt(at[1])));
     }
@@ -282,7 +285,7 @@ class LiveChatTest {
         List.of(
             List.of(),
             List.of(List.of(EDITS_FREELY)),
-            List.of(List.of("Allow any command that starts with `echo original`" + PREFIX, FOLDER)),
+            List.of(),
             List.of(
                 List.of(
                     "Allow this exact command: `touch always.txt`" + EXACT, FOLDER, EDITS_FREELY)),
@@ -310,68 +313,90 @@ class LiveChatTest {
             List.of(List.of(EDITS_FREELY)),
             List.of(
                 List.of(
-                    "Allow this exact command: `touch probe-m.txt`" + EXACT,
-                    FOLDER,
-                    EDITS_FREELY))),
+                    "Allow this exact command: `touch probe-m.txt`" + EXACT, FOLDER, EDITS_FREELY)),
+            List.of(),
+            List.of()),
         List.copyOf(recorded.values()),
         recorded.keySet().toString());
   }
 
   /**
-   * Probe 6 (Claude Code 2.1.332, the fleet's storage box): the command allowed always wrote
-   * through {@code >}, its exact rule was kept in settings.local.json, and Claude Code asked for
-   * the same command again, in that process and in a fresh one that read the rule at start. Its
-   * card said the rule and the folder below, so these were its suggestions, the rule as the file
-   * kept it. Such a rule is offered no always, inside quotes too, as a compound is not; nor is one
-   * that redirects otherwise ({@code >>}, {@code 2>}, {@code <}), whose reach no probe recorded.
+   * Probes 6 and 7 (Claude Code 2.1.332, fleet boxes): a command that writes through {@code >} was
+   * asked for again with a kept rule that allowed it, exact (probe 6) or a prefix with no {@code >}
+   * that Claude Code itself suggested for it ({@code printf pfx *}, probe 7 01:46, 01:105, 01:144),
+   * in that process and in a fresh one that read the rule at start. So a Bash request whose command
+   * holds {@code >} or {@code <} anywhere, inside quotes too, is offered no always whatever rule is
+   * suggested; and a rule whose own text redirects is offered none either, whatever the command.
    */
   @Test
-  void aRuleWhoseCommandRedirectsIsOfferedNoAlways() {
-    var asked = new ArrayList<List<List<String>>>();
-    for (var command :
+  void aCommandThatRedirectsIsOfferedNoAlwaysWhateverRuleIsSuggested() {
+    var asked = new LinkedHashMap<String, List<List<String>>>();
+    for (var pair :
         List.of(
-            "printf fleet-%s 7341 > always.txt",
-            "printf fleet-%s 7341 >> always.txt",
-            "make 2> errors.txt",
-            "sort < names.txt",
-            "echo '>'")) {
-      var suggestions =
-          List.<Object>of(
-              Map.of(
-                  "type",
-                  "addRules",
-                  "rules",
-                  List.of(Map.of("toolName", "Bash", "ruleContent", command)),
-                  "behavior",
-                  "allow",
-                  "destination",
-                  "localSettings"),
-              Map.of(
-                  "type",
-                  "addDirectories",
-                  "directories",
-                  List.of("/home/dev/workspace"),
-                  "destination",
-                  "session"));
-      var shown =
-          LiveChat.items(
-              new Step.Permission(
-                  "607188f7-c248-4fd4-9873-1e3b542545d5",
-                  "toolu_018juR1jrmMSQWorGP9ZfQBU",
-                  null,
-                  "Bash",
-                  "Bash",
-                  Map.of("command", command),
-                  null,
-                  null,
-                  suggestions),
-              CLAUDE_CODE);
-      asked.add(
-          ((ChatItem.Permission) shown.getFirst())
-              .always().stream().map(ChatItem.Always::words).toList());
+            List.of("printf fleet-%s 7341 > always.txt", "printf fleet-%s 7341 > always.txt"),
+            List.of("printf pfx 0 > pfx0.txt", "printf pfx *"),
+            List.of("printf twice > twice.txt", "printf twice *"),
+            List.of("printf fleet-%s 7341 >> always.txt", "printf fleet-%s *"),
+            List.of("make 2> errors.txt", "make *"),
+            List.of("sort < names.txt", "sort *"),
+            List.of("echo '>'", "echo *"),
+            List.of("make", "make 2> errors.txt"),
+            List.of("sort", "sort < names.txt"))) {
+      asked.put(pair.toString(), offered(pair.getFirst(), pair.getLast()));
     }
 
-    assertEquals(List.of(List.of(), List.of(), List.of(), List.of(), List.of()), asked);
+    assertEquals(Collections.nCopies(9, List.of()), List.copyOf(asked.values()), asked.toString());
+  }
+
+  /**
+   * What a prefix rule holds for, so nothing that holds is withheld: probe 7 kept {@code touch *}
+   * from a redirecting request's always, and Claude Code then asked nothing for {@code touch
+   * pfx-1.txt} (03:88), which it had asked for with no rule (03:17), in that process and in a fresh
+   * one (04:20), but asked again for {@code touch pfx-2.txt > pfx-r2.txt} (03:115, 04:49): the card
+   * says so.
+   */
+  @Test
+  void
+      aCommandThatDoesNotRedirectIsOfferedAPrefixRuleSayingItStillAsksBeforeAWriteThroughARedirect() {
+    assertEquals(
+        List.of(List.of("Allow any command that starts with `touch`" + PREFIX, FOLDER)),
+        offered("touch pfx-1.txt", "touch *"));
+  }
+
+  private static List<List<String>> offered(String command, String rule) {
+    var suggestions =
+        List.<Object>of(
+            Map.of(
+                "type",
+                "addRules",
+                "rules",
+                List.of(Map.of("toolName", "Bash", "ruleContent", rule)),
+                "behavior",
+                "allow",
+                "destination",
+                "localSettings"),
+            Map.of(
+                "type",
+                "addDirectories",
+                "directories",
+                List.of("/home/dev/workspace"),
+                "destination",
+                "session"));
+    var shown =
+        LiveChat.items(
+            new Step.Permission(
+                "607188f7-c248-4fd4-9873-1e3b542545d5",
+                "toolu_018juR1jrmMSQWorGP9ZfQBU",
+                null,
+                "Bash",
+                "Bash",
+                Map.of("command", command),
+                null,
+                null,
+                suggestions),
+            CLAUDE_CODE);
+    return ((ChatItem.Permission) shown.getFirst())
+        .always().stream().map(ChatItem.Always::words).toList();
   }
 
   private static List<List<String>> always(String recording, int line) {

@@ -703,7 +703,7 @@ class HarnessGoldenTest {
   }
 
   private static List<ChatItem.Always> always(Object... suggestions) {
-    return CLAUDE_CODE_CHAT.always(List.of(suggestions));
+    return CLAUDE_CODE_CHAT.always("Bash", Map.of("command", "ls"), List.of(suggestions));
   }
 
   private static Map<String, Object> rule(String behavior, String destination, Object... rules) {
@@ -738,9 +738,9 @@ class HarnessGoldenTest {
             + " longer line whose other commands need no asking"
             + kept;
     var prefix =
-        ", also when another command such as xargs, timeout, nice or nohup starts it, xargs adding"
-            + " whatever it is fed, and as part of a longer line whose other commands need no"
-            + " asking"
+        ", except one that writes to a file with `>`, also when another command such as xargs,"
+            + " timeout, nice or nohup starts it, xargs adding whatever it is fed, and as part of a"
+            + " longer line whose other commands need no asking"
             + kept;
     assertEquals(
         List.of(
@@ -760,7 +760,7 @@ class HarnessGoldenTest {
                 bash("ls*"))),
         "one sentence a rule: exact, or every command a trailing * lets start the same way, each"
             + " with what probe 2 recorded it covering besides: timeout, nice and nohup, a longer"
-            + " line, and for a prefix xargs (01, 01b)");
+            + " line, and for a prefix xargs (01, 01b), but not a write through > (probe 7)");
     assertEquals(
         List.of(
             new ChatItem.Always(List.of("Let it work in the folder `/w`, for this session only."))),
@@ -1027,6 +1027,14 @@ class HarnessGoldenTest {
           suggestion.getKey() + ": every suggestion is kept together, so none is offered");
     }
     assertEquals(List.of(), always(), "nothing suggested");
+    assertEquals(
+        List.of(),
+        CLAUDE_CODE_CHAT.always("Bash", Map.of(), List.of(FOLDER)),
+        "a Bash call whose command is not text may redirect");
+    assertEquals(
+        1,
+        CLAUDE_CODE_CHAT.always("Edit", Map.of(), List.of(FOLDER)).size(),
+        "a call of another tool has no command to redirect");
   }
 
   /**

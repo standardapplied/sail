@@ -50,6 +50,13 @@ final class ClaudeCodeChat implements HarnessChat {
   /** The prefix Claude Code gives the name of every tool an MCP server serves. */
   private static final String MCP_TOOL = "mcp__";
 
+  private final String name;
+
+  /** The chat of the harness a person reads as {@code name}. */
+  ClaudeCodeChat(String name) {
+    this.name = name;
+  }
+
   /**
    * A chat's argv: a chat mode's own flags, or {@code --permission-mode} with the mode as Claude
    * Code named it when it is none of them, since a resumed chat starts in the mode it was last in.
@@ -186,8 +193,15 @@ final class ClaudeCodeChat implements HarnessChat {
 
   /** The ways to allow a call always that Claude Code's {@code suggestions} offer. */
   @Override
-  public List<ChatItem.Always> always(List<Object> suggestions) {
-    return ClaudeCodeAlways.of(suggestions, modes());
+  public List<ChatItem.Always> always(
+      String tool, Map<String, Object> input, List<Object> suggestions) {
+    return ClaudeCodeAlways.of(tool, input, suggestions, modes());
+  }
+
+  /** Why a call Claude Code's card offers no always for is not allowed always, in its name. */
+  @Override
+  public String noAlways(String tool, Map<String, Object> input, List<Object> suggestions) {
+    return ClaudeCodeAlways.refusal(tool, input, suggestions, name);
   }
 
   private static String field(Map<String, Object> input, String key) {

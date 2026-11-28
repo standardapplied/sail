@@ -174,15 +174,17 @@ class ChatAnswersTest {
     answer(session, request, ALLOW);
 
     assertEquals(
-        "Claude Code offered no way to allow this always; allow it once instead.", refusal);
+        "Sail does not offer always for this call: it cannot say whole, in plain words, what"
+            + " Claude Code would keep; allow it once instead.",
+        refusal);
     assertEquals(1, responses(fake).size());
     assertEquals("allow", last(session).get("decision"));
   }
 
   /**
    * I7: a command that writes through a redirect ({@code date > stamp.txt}, 02b:16) is offered no
-   * always, since Claude Code asked again for one with its rule kept (probe 6): allow always is
-   * refused, and it is allowed once.
+   * always, since Claude Code asked again for one with its rule kept (probes 6 and 7): allow always
+   * is refused, saying so, and it is allowed once.
    */
   @Test
   void aCommandThatRedirectsIsOfferedNoAlwaysAndIsAllowedOnce() {
@@ -194,7 +196,10 @@ class ChatAnswersTest {
 
     assertEquals(List.of(), bench.items(session).get(2).get("always"));
     assertEquals(
-        "Claude Code offered no way to allow this always; allow it once instead.", refusal);
+        "Sail does not offer always for a command that redirects with > or <: Claude Code asks"
+            + " again for one that writes to a file with >, even with its rule kept; allow it once"
+            + " instead.",
+        refusal);
     assertEquals(List.of(Recorded.parsed("02b-relay-stdio", 17)), responses(fake));
   }
 
