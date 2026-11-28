@@ -40,10 +40,7 @@ public struct UserMenuContent: Equatable, Sendable {
 
     public let name: String
     public let disc: Disc?
-    /// `@handle` and the role, when someone is signed in: the menu says them as `detail`, the
-    /// Account view's header apart.
-    public let handle: String?
-    public let role: String?
+    /// `@handle` and the role when someone is signed in, else the address or the last used.
     public let detail: String?
     public let address: String?
     public let plane: Plane?
@@ -51,12 +48,12 @@ public struct UserMenuContent: Equatable, Sendable {
 
     /// No one signed in: the control plane `lastUsed` here, or "no control plane yet".
     public static func signedOut(lastUsed: String?) -> Self {
-        Self(name: "Not signed in", disc: .person, handle: nil, role: nil, detail: lastUsed ?? "no control plane yet", address: nil, plane: nil, items: [.signIn])
+        Self(name: "Not signed in", disc: .person, detail: lastUsed ?? "no control plane yet", address: nil, plane: nil, items: [.signIn])
     }
 
     /// Who is signed in at `address` not yet known: the app is asking.
     public static func checking(at address: String) -> Self {
-        Self(name: "Checking", disc: nil, handle: nil, role: nil, detail: address, address: nil, plane: nil, items: [.account])
+        Self(name: "Checking", disc: nil, detail: address, address: nil, plane: nil, items: [.account])
     }
 
     /// Signed in as `handle` at `address`; `whoami` as it last answered, `unreachable` when the
@@ -69,7 +66,7 @@ public struct UserMenuContent: Equatable, Sendable {
         }
         let plane = Plane(unreachable: unreachable, refreshing: refreshing)
         return Self(
-            name: name, disc: name.first.map { .initial(String($0).uppercased()) }, handle: "@\(handle)", role: role,
+            name: name, disc: name.first.map { .initial(String($0).uppercased()) },
             detail: "@\(handle)" + (role.map { " · \($0)" } ?? ""), address: address, plane: plane, items: [.account, .signOut]
         )
     }
