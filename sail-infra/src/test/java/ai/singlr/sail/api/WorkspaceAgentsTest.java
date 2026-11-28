@@ -588,6 +588,56 @@ class WorkspaceAgentsTest {
   }
 
   /**
+   * The answer says whether this runner opens a terminal at all, refused or not: true with its
+   * door, false without it; and a chat's open of a harness with no chat sends the person to a
+   * terminal only where there is one.
+   */
+  @Test
+  void theAnswerSaysWhetherThisRunnerHasATerminalDoorAndAChatOpenAdvisesNoTerminalWithout()
+      throws Exception {
+    var doorless = serve(Optional.empty());
+    try {
+      assertEquals(
+          List.of(true, false, true, false),
+          List.of(
+              ask(tom, "beta-tom").body().get("terminal"),
+              ask(doorless, tom, "beta-tom").body().get("terminal"),
+              ask(ada, "acme-try").body().get("terminal"),
+              ask(doorless, ada, "acme-try").body().get("terminal")),
+          "an answer that refuses says it too");
+      assertEquals(
+          List.of(
+              "422 Codex CLI has no chat form; start it in a terminal.",
+              "422 Codex CLI has no chat form."),
+          List.of(openCodexChat(server, tom), openCodexChat(doorless, tom)));
+    } finally {
+      doorless.stop(0);
+    }
+  }
+
+  /**
+   * {@code token}'s chat with Codex in beta's workspace tom, on {@code on}: its status and words.
+   */
+  private static String openCodexChat(HttpServer on, String token) throws Exception {
+    var response =
+        CLIENT.send(
+            HttpRequest.newBuilder(
+                    URI.create(
+                        "http://127.0.0.1:"
+                            + on.getAddress().getPort()
+                            + "/v1/projects/beta/workspaces/tom/chats"))
+                .header("Authorization", "Bearer " + token)
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        "{\"harness\":\"codex\",\"mode\":\"full-access\"}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    return response.statusCode()
+        + " "
+        + ((Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")).get("message");
+  }
+
+  /**
    * N1 at this route: on sam's node, sam is offered agents with sam's own login in a workspace no
    * one is labelled for, and is refused, as every workspace door refuses, one labelled for another
    * person of the handle sam or for a person gone from the node, offered nothing.

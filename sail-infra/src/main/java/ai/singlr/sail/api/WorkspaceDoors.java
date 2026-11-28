@@ -307,7 +307,7 @@ public final class WorkspaceDoors {
    * AgentStarts}). Whether a running workspace holds each installed harness's own sign-in is read
    * in it ({@link WorkspaceSignIns}); a stopped one is not started to read it. Each offer holds the
    * forms this runner opens, a terminal only with its door ({@code terminal}), as {@link
-   * AgentOffersResponse#opening} keeps them.
+   * AgentOffersResponse#opening} keeps them, and the answer says whether it has that door.
    */
   public AgentOffersResponse agents(
       ProjectDefinition config, String name, FdeStore fdes, boolean terminal) throws Exception {
@@ -321,7 +321,7 @@ public final class WorkspaceDoors {
             .or(() -> AgentStarts.notTheirs(name, person, Actor.current().handle()));
     if (refused.isPresent()) {
       return new AgentOffersResponse(
-          project, name, person, running, refused.get().error(), List.of());
+          project, name, person, running, terminal, refused.get().error(), List.of());
     }
     var fdeId = owners.apply(person).id();
     var notInstalled = new HashMap<Harness, AgentStarts.OfferRefusal>();
@@ -346,7 +346,7 @@ public final class WorkspaceDoors {
       var key = fdes.logins().defaultFor(fdeId, harness).map(LoginStore.Login::row).orElse(null);
       offered.add(new AgentOffer(harness, key, true, signedIn, null, terminal));
     }
-    return AgentOffersResponse.opening(project, name, person, running, offered);
+    return AgentOffersResponse.opening(project, name, person, running, terminal, offered);
   }
 
   /** What a door does, as its refusal says it is not done. */

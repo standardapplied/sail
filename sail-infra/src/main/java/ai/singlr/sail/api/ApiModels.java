@@ -2197,15 +2197,16 @@ record TemplateResponse(TemplateBuildService.Status status) implements Mappable 
 
 /**
  * What can start in a workspace for the person asking ({@code GET
- * .../workspaces/{workspace}/agents}): whose it is and whether it runs, and either why no agent
- * starts in it ({@code refusal}, with nothing offered) or each harness Sail knows, offered as
- * {@link AgentOffer} says.
+ * .../workspaces/{workspace}/agents}): whose it is and whether it runs, whether this runner opens a
+ * terminal at all ({@code terminal}, its door), and either why no agent starts in it ({@code
+ * refusal}, with nothing offered) or each harness Sail knows, offered as {@link AgentOffer} says.
  */
 record AgentOffersResponse(
     String project,
     String workspace,
     String owner,
     boolean running,
+    boolean terminal,
     ApiError refusal,
     List<AgentOffer> offered)
     implements Mappable {
@@ -2218,6 +2219,7 @@ record AgentOffersResponse(
       m.put("owner", owner);
     }
     m.put("running", running);
+    m.put("terminal", terminal);
     if (refusal != null) {
       m.put("refusal", refusal.toMap());
     }
@@ -2226,19 +2228,26 @@ record AgentOffersResponse(
   }
 
   /**
-   * What starts in workspace {@code workspace} of {@code project}, {@code owner}'s: each of {@code
-   * offers} that keeps a form this runner opens; and, with none left, nothing, said once why. An
-   * offer keeps no form only where this runner has no terminal door, so the words are the terminal
-   * open's own ({@link TerminalTickets#notOffered}).
+   * What starts in workspace {@code workspace} of {@code project}, {@code owner}'s, on a runner
+   * with a terminal door or not ({@code terminal}): each of {@code offers} that keeps a form this
+   * runner opens; and, with none left, nothing, said once why. An offer keeps no form only where
+   * this runner has no terminal door, so the words are the terminal open's own ({@link
+   * TerminalTickets#notOffered}).
    */
   static AgentOffersResponse opening(
-      String project, String workspace, String owner, boolean running, List<AgentOffer> offers) {
+      String project,
+      String workspace,
+      String owner,
+      boolean running,
+      boolean terminal,
+      List<AgentOffer> offers) {
     var open = offers.stream().filter(offer -> !offer.forms().isEmpty()).toList();
     return new AgentOffersResponse(
         project,
         workspace,
         owner,
         running,
+        terminal,
         open.isEmpty() ? TerminalTickets.notOffered().error() : null,
         open);
   }
@@ -2266,8 +2275,17 @@ record AgentOffer(
     boolean terminal)
     implements Mappable {
 
-  /** The forms of {@link Harness#forms} this runner opens now: a terminal only with its door. */
+  /** The forms of its harness's this runner opens now ({@link #opens}). */
   List<SessionForm> forms() {
+    return opens(harness, terminal);
+  }
+
+  /**
+   * The forms of {@code harness}'s ({@link Harness#forms}) a runner opens now, with a terminal door
+   * or not ({@code terminal}): a terminal only with its door. The one rule the offers and a chat
+   * open's refusal read.
+   */
+  static List<SessionForm> opens(Harness harness, boolean terminal) {
     return harness.forms().stream()
         .filter(form -> terminal || form != SessionForm.TERMINAL)
         .toList();

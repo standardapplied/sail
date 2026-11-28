@@ -274,6 +274,15 @@ func answer<Response>(
         #expect(doorless.refusal == nil && doorless.offered.map(\.harness) == ["claude-code"])
         #expect(withDoor.offered.map(\.harness) == ["claude-code", "codex"])
         #expect(doorless.offered.first == withDoor.offered.first)
+        #expect(!doorless.terminal && withDoor.terminal)
+        let refused = try agents.decode(response(try Exchange("workspace-agents-not-yours")))
+        #expect(refused.terminal, "a refused answer says it too")
+        let older = try SailJSON.decode(
+            WorkspaceAgents.self,
+            from: Data(#"{"project":"harbor","workspace":"dock","running":true,"offered":[]}"#.utf8),
+            route: "agents"
+        )
+        #expect(older.terminal && older.owner == nil && older.refusal == nil, "an older server that does not say opened a terminal")
     }
 
     /// A running workspace, a stopped one and another person's, as the server lists them and as

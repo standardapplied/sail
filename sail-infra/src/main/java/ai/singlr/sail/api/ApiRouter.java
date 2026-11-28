@@ -824,7 +824,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
 
   /**
    * {@code POST …/workspaces/{w}/chats} with {@code {"harness", "mode", "inside"}}: a chat of the
-   * caller's in their workspace, started as a pty agent is.
+   * caller's in their workspace, started as a pty agent is; a harness with no chat is sent to a
+   * terminal only where this runner has its door.
    */
   private ApiResponse openChat(Call call) throws IOException {
     var body = call.body();
@@ -839,7 +840,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
                 call.param("workspace"),
                 text(body, "harness"),
                 text(body, "mode"),
-                inside));
+                inside,
+                terminal.isPresent()));
   }
 
   /** {@code GET /v1/sessions/{id}/chat?after=<seq>}: the items after {@code seq}, long-polled. */

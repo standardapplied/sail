@@ -211,7 +211,8 @@ final class ChatBench implements AutoCloseable {
 
   /** Sam's chat with Claude Code in his workspace, asking first. */
   String samsChat() {
-    return as("sam", () -> host.open("acme", "try", "claude-code", "default", false)).session();
+    return as("sam", () -> host.open("acme", "try", "claude-code", "default", false, true))
+        .session();
   }
 
   ChatHost.Sent send(String session, String text) {

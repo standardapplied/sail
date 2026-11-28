@@ -112,14 +112,25 @@ class ChatFormsTest {
     var codex = Harnesses.of("codex");
     var some =
         AgentOffersResponse.opening(
-                "acme", "try", "sam", true, List.of(offered(CLAUDE, false), offered(codex, false)))
+                "acme",
+                "try",
+                "sam",
+                true,
+                false,
+                List.of(offered(CLAUDE, false), offered(codex, false)))
             .toMap();
     var none =
-        AgentOffersResponse.opening("acme", "try", "sam", true, List.of(offered(codex, false)))
+        AgentOffersResponse.opening(
+                "acme", "try", "sam", true, false, List.of(offered(codex, false)))
             .toMap();
     var both =
         AgentOffersResponse.opening(
-                "acme", "try", "sam", true, List.of(offered(CLAUDE, true), offered(codex, true)))
+                "acme",
+                "try",
+                "sam",
+                true,
+                true,
+                List.of(offered(CLAUDE, true), offered(codex, true)))
             .toMap();
 
     assertEquals(List.of("claude-code"), harnesses(some));
@@ -134,9 +145,52 @@ class ChatFormsTest {
             "This runner offers no terminal over the network; ask an admin."),
         List.of(refusal.get("code"), refusal.get("message")));
     assertEquals(
-        List.of("project", "workspace", "owner", "running", "refusal", "offered"),
+        List.of("project", "workspace", "owner", "running", "terminal", "refusal", "offered"),
         List.copyOf(none.keySet()),
         "said once, on the answer");
+  }
+
+  /**
+   * The answer says whether this runner opens a terminal at all, for what is not an offer (a Shell,
+   * a shell beside a chat), as the runner has its door or not, whatever is left to offer.
+   */
+  @Test
+  void theAnswerSaysWhetherThisRunnerOpensATerminal() {
+    var codex = Harnesses.of("codex");
+
+    assertEquals(
+        List.of(true, false, false),
+        List.of(
+            AgentOffersResponse.opening(
+                    "acme", "try", "sam", true, true, List.of(offered(codex, true)))
+                .toMap()
+                .get("terminal"),
+            AgentOffersResponse.opening(
+                    "acme", "try", "sam", true, false, List.of(offered(CLAUDE, false)))
+                .toMap()
+                .get("terminal"),
+            AgentOffersResponse.opening(
+                    "acme", "try", "sam", true, false, List.of(offered(codex, false)))
+                .toMap()
+                .get("terminal")));
+  }
+
+  /**
+   * A chat's open refuses a harness with no chat by the rule its offer keeps its forms by: sent to
+   * a terminal where this runner opens one, and to nothing on a runner with no terminal door.
+   */
+  @Test
+  void aHarnessWithNoChatIsSentToATerminalOnlyWhereThisRunnerOpensOne() {
+    var codex = Harnesses.of("codex");
+
+    assertEquals(
+        List.of(
+            "Codex CLI has no chat form; start it in a terminal.", "Codex CLI has no chat form."),
+        List.of(
+            assertThrows(IllegalArgumentException.class, () -> ChatLaunch.form(codex, false, true))
+                .getMessage(),
+            assertThrows(IllegalArgumentException.class, () -> ChatLaunch.form(codex, false, false))
+                .getMessage()));
   }
 
   private static AgentOffer offered(Harness harness, boolean terminal) {
@@ -163,14 +217,14 @@ class ChatFormsTest {
     assertEquals(true, offered.get("inside"), "a terminal still starts signed in inside");
     assertEquals(claude.get("kinds"), offered.get("kinds"), "an API key is always offered");
     var refused =
-        assertThrows(IllegalArgumentException.class, () -> ChatLaunch.form(outside, true));
+        assertThrows(IllegalArgumentException.class, () -> ChatLaunch.form(outside, true, true));
     assertEquals(
         "Claude Code's chat takes your stored API key here, not the sign-in made in the workspace.",
         refused.getMessage());
-    assertSame(outside.chat().orElseThrow(), ChatLaunch.form(outside, false));
+    assertSame(outside.chat().orElseThrow(), ChatLaunch.form(outside, false, true));
     assertEquals(
         CLAUDE.chat().orElseThrow().modes(),
-        ChatLaunch.form(CLAUDE, true).modes(),
+        ChatLaunch.form(CLAUDE, true, true).modes(),
         "Claude Code's own chat signs in inside");
   }
 
@@ -183,7 +237,8 @@ class ChatFormsTest {
   void aChatOpenedInsideIsNotStartedInsideOnceTheSwitchIsOff(@TempDir Path dir) {
     try (var bench = new ChatBench(dir)) {
       var session =
-          ChatBench.as("tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true))
+          ChatBench.as(
+                  "tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true, true))
               .session();
       var chat = bench.store.find(session).orElseThrow();
       var switchedOff =
