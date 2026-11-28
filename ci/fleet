@@ -25,6 +25,10 @@ readonly INCUS_LIMIT=3600
 readonly APT_TIMERS="apt-daily.timer apt-daily-upgrade.timer"
 
 [[ $CHECK_LIMIT =~ ^[1-9][0-9]*$ ]] || { echo "ci/fleet: FLEET_CHECK_LIMIT is a number of seconds, not '$CHECK_LIMIT'." >&2; exit 2; }
+# A check stops its timer, and a stopped run its checks, by TERM; a shell started with TERM
+# ignored cannot trap it and passes the ignoring on to every child, so a passing check would sit
+# out its limit.
+[[ -z $(trap -p TERM) ]] || { echo "ci/fleet: SIGTERM is ignored where it was started, so no check could be stopped; start it where TERM is delivered." >&2; exit 2; }
 
 usage() {
   cat >&2 <<'EOF'
@@ -297,10 +301,10 @@ check() { check_within "$CHECK_LIMIT" "$@"; }
 # A check runs in a process group of its own beside a timer, so that one still running at its limit,
 # or when the script is stopped, has every local process it started ended: TERM, then KILL after a
 # minute's grace for a cleanup trap; its remote command loses its ssh. It waits for its body's own
-# pid, whose status bash keeps however early the body ended (wait -n loses a job that ended before
-# it once bash -c has dropped the job from its table), then asks the timer which came first: the
-# timer sets its TERM trap only at the limit, so it ends 0 only once the limit has come. Its body
-# ignores errexit, as it would in an if. It is given its caller's input by name: in a subshell, as
+# pid, whose status bash keeps however early the body ended (wait -n can lose a job that ended
+# before it), then asks the timer which came first: the timer sets its TERM trap only at the limit,
+# so it ends 0 only once the limit has come. A stop names the timer by $!, which is the timer from
+# its fork on, before timer=$! is set. Its body ignores errexit, as it would in an if. It is given its caller's input by name: in a subshell, as
 # in a parallel group, bash hands a background job /dev/null instead, and a body fed at the check's
 # call would read nothing.
 check_within() {
@@ -313,9 +317,9 @@ check_within() {
     echo "FAIL $name (its log $log could not be opened, so it did not run)" | tee -a "$dir/report.txt"
     return 1
   fi
-  trap 'kill -TERM -- "-$job" "-$timer" 2> /dev/null; exit 129' HUP
-  trap 'kill -TERM -- "-$job" "-$timer" 2> /dev/null; exit 130' INT
-  trap 'kill -TERM -- "-$job" "-$timer" 2> /dev/null; exit 143' TERM
+  trap 'kill -TERM -- "-$job" "-$!" 2> /dev/null; exit 129' HUP
+  trap 'kill -TERM -- "-$job" "-$!" 2> /dev/null; exit 130' INT
+  trap 'kill -TERM -- "-$job" "-$!" 2> /dev/null; exit 143' TERM
   set -m
   { "$@" || exit; } <&0 > "$log" 2>&1 &
   job=$!

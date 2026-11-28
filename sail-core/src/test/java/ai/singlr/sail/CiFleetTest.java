@@ -817,14 +817,15 @@ class CiFleetTest {
 
   @ParameterizedTest
   @CsvSource({"HUP, 129", "INT, 130", "TERM, 143"})
-  void aRunStoppedWhileACheckRunsEndsTheChecksRemoteCommandAndExitsByTheSignal(
+  void aRunStoppedWhileACheckRunsEndsTheChecksRemoteCommandAndTimerAndExitsByTheSignal(
       String signal, int exit) throws Exception {
     var never = dir.resolve("never");
     var ready = dir.resolve("ready");
-    run("mkfifo", never.toString(), ready.toString());
+    run("mkfifo", never.toString(), ready.toString(), dir.resolve("go").toString());
     remote(
         """
         if [[ $1 == client ]]; then
+          until [[ -s $FLEET_TEST/timers ]]; do :; done
           echo $$ > "$FLEET_TEST/ready"
           exec cat "$FLEET_TEST/never"
         fi
@@ -833,7 +834,7 @@ class CiFleetTest {
 
     try (var held = new RandomAccessFile(never.toFile(), "rw")) {
       var script =
-          fleet(Map.of(), "containers", "stopped")
+          fleet(Map.of("FLEET_CHECK_LIMIT", LIMIT), "containers", "stopped")
               .redirectInput(Child.NO_INPUT)
               .redirectErrorStream(true)
               .redirectOutput(dir.resolve("said").toFile())
@@ -851,10 +852,28 @@ class CiFleetTest {
         assertTrue(script.waitFor(Child.PATIENCE.toMillis(), TimeUnit.MILLISECONDS));
         assertEquals(exit, script.exitValue(), Files.readString(dir.resolve("said")));
         hung.onExit().get(Child.PATIENCE.toMillis(), TimeUnit.MILLISECONDS);
+        assertEveryTimerEnds();
       } finally {
         Child.end(script);
       }
     }
+  }
+
+  @Test
+  void aRunStartedWithTermIgnoredRefusesToRunAnyCheckAndSaysWhy() throws Exception {
+    var command = new ArrayList<>(List.of("env", "--ignore-signal=TERM", SCRIPT.toString()));
+    command.addAll(List.of("containers", "ignored"));
+    var ended =
+        Child.run(
+            builder(Map.of("FLEET_CHECK_LIMIT", LIMIT), command).redirectInput(Child.NO_INPUT));
+
+    assertEquals(2, ended.exit(), ended.stdout() + ended.stderr());
+    assertEquals(
+        "ci/fleet: SIGTERM is ignored where it was started, so no check could be stopped; start it"
+            + " where TERM is delivered.\n",
+        ended.stderr());
+    assertFalse(Files.exists(runs.resolve("ignored")), "a check ran");
+    assertEquals(List.of(), calls());
   }
 
   @Test
