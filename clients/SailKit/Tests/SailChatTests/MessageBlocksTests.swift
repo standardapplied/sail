@@ -375,6 +375,9 @@ enum Examples {
         rows.append("x")
         #expect(rows.open == [table([.none], ["a"], [["1"], ["---x"]])])
         rows.append("\n\nend")
+        #expect(rows.settled.isEmpty)
+        #expect(rows.open == [table([.none], ["a"], [["1"], ["---x"]]), p("end")])
+        rows.append("\n")
         #expect(rows.settled == [table([.none], ["a"], [["1"], ["---x"]])])
         #expect(rows.open == [p("end")])
     }
