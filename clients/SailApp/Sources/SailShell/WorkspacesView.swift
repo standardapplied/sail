@@ -266,9 +266,8 @@ public final class WorkspacesView: NSView {
         case .loading: return "Workspaces"
         case .unreachable: return (["Workspaces"] + cardSaid).joined(separator: "\n")
         case let .shown(panel, .noProjects(empty)): return (["Workspaces", panel.emptyLine, empty.title, empty.body, empty.line].compactMap { $0 }).joined(separator: "\n")
-        case let .shown(panel, .thisMac):
-            let lede = WorkspacesModel.thisMacLede(host: local.macName, controlPlane: panel.controlPlane)
-            return (["Workspaces", WorkspacesModel.thisMac, lede] + (LocalProjectView.instead(sessions).map { [$0] } ?? sessions.rows.map(LocalProjectView.said))).joined(separator: "\n")
+        case .shown(_, .thisMac):
+            return (["Workspaces", WorkspacesModel.thisMac, local.macName] + (LocalProjectView.instead(sessions).map { [$0] } ?? sessions.rows.map(LocalProjectView.said))).joined(separator: "\n")
         case let .shown(_, .project(page)):
             var lines = ["Workspaces", page.name, page.lede] + (page.banner.map { [$0.title, $0.line] } ?? [])
             switch page.body {
@@ -920,9 +919,9 @@ public final class WorkspacesView: NSView {
     /// This Mac's page drawn with its terminals now, while it is the one shown; its terminals asked
     /// for first, restored once.
     private func showThisMac() {
-        guard door == .signedIn, case let .shown(panel, .thisMac) = model.screen else { return }
+        guard door == .signedIn, case .shown(_, .thisMac) = model.screen else { return }
         onThisMacShown()
-        local.render(sessions, controlPlane: panel.controlPlane)
+        local.render(sessions)
     }
 
     /// The card while a session held at launch is checked: that wait, Sail's mark drawing itself

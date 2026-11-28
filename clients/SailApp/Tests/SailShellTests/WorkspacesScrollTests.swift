@@ -32,8 +32,8 @@ import Testing
         #expect(scroll.verticalScroller is QuietScroller, "the list's scroller is \(String(describing: scroll.verticalScroller))")
         let document = Double(scroll.documentView?.frame.height ?? 0), shown = Double(scroll.contentSize.height)
         #expect(document > shown + 1, "thirty rows (\(document) pt) all fit in \(shown) pt: nothing scrolls")
-        let foot = view.convert(view.project.foot.bounds, from: view.project.foot)
-        #expect(foot.maxY <= view.bounds.maxY - ProjectView.padding.bottom + 0.5 && foot.height > 0, "the foot runs to \(foot.maxY) of \(view.bounds.height)")
+        let foot = view.convert(view.project.skeleton.foot.bounds, from: view.project.skeleton.foot)
+        #expect(foot.maxY <= view.bounds.maxY - PageColumn.padding.bottom + 0.5 && foot.height > 0, "the foot runs to \(foot.maxY) of \(view.bounds.height)")
         let list = view.project.list
         list.scrollRowToVisible(list.numberOfRows - 1)
         let last = list.rect(ofRow: list.numberOfRows - 1)

@@ -563,8 +563,7 @@ import Testing
     }
 
     /// A pill says words of its own in its state's paint, changed as they change; a plain pill says
-    /// its words with no dot, in the secondary ink, as the page's `.pill.plain` does, after its icon
-    /// when it has one.
+    /// its words with no dot, in the secondary ink, as the page's `.pill.plain` does.
     @Test(arguments: [Look.light, .dark])
     func aPillSaysItsOwnWordsAndAPlainOneInTheSecondaryInk(_ look: Look) throws {
         let state = Pill(.running, look: look, mono: try Self.mono())
@@ -574,12 +573,20 @@ import Testing
         let narrow = Double(role.intrinsicContentSize.width)
         role.words = "Admin"
         #expect(role.plain && role.said == "Admin" && role.paint.text == look.textSecondary && role.dot.isHidden && Double(role.intrinsicContentSize.width) > narrow)
-        let iconed = Pill(plain: "Admin", icon: .cloud, size: .small, look: look, mono: try Self.mono())
-        #expect(Double(iconed.intrinsicContentSize.width) == Double(role.intrinsicContentSize.width) + Pill.iconSide + PillSize.small.gap, "a plain pill's icon takes no room")
-        iconed.frame = NSRect(origin: .zero, size: iconed.intrinsicContentSize)
-        let canvas = NSColor(Tint(look.canvas)), bare = Self.swatch(canvas, [], scale: 2), ink = Self.swatch(canvas, [NSColor(look.textSecondary)], scale: 2)
-        let across = Backdrop(canvas, holding: iconed).colours(along: Double(iconed.frame.height) / 2, from: PillSize.small.leading, to: PillSize.small.leading + Pill.iconSide, scale: 2)
-        #expect(across.contains { !Self.tells($0, bare, from: ink) }, "the icon is not drawn: \(across)")
+    }
+
+    /// An empty state with no body keeps no room for one: its action stands under its title as it
+    /// would stand under a body, and it is that much shorter.
+    @Test func anEmptyStateWithNoBodyKeepsNoRoomForOne() throws {
+        let made = { (body: String) in
+            EmptyState(
+                icon: .terminal, title: "No shells open", body: body, actions: [SailButton("New Shell", kind: .primary, look: .light, target: nil, action: nil)], look: .light,
+                titleFont: try TitleFont(directory: Self.fonts), mono: try Self.mono()
+            ).frames(width: 600)
+        }
+        let bare = try made(""), bodied = try made("A line.")
+        #expect(bare.body.height == 0 && near(bare.actions.minY - bare.title.maxY, EmptyState.gap + EmptyState.actionsGap), "the action is \(bare.actions.minY - bare.title.maxY) pt under the title")
+        #expect(near(bodied.height - bare.height, bodied.body.height + EmptyState.gap), "\(bare.height) pt bare, \(bodied.height) pt with a body")
     }
 
     /// The keycap: a 1 pt edge on top, a 2 pt foot.

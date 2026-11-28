@@ -57,6 +57,12 @@ final class Driver {
     /// Where the Workspaces section stood just before the last window step resized the window, and
     /// when the New session panel last opened (`workspacesLayout`).
     var layoutBeforeResize = "", layoutAtOpen = ""
+    /// Where each Workspaces page's head stood in the window, at each window width it was measured.
+    var heads: [Head: NSPoint] = [:]
+
+    struct Head: Hashable {
+        let page: String, width: Int
+    }
     lazy var standIn: TerminalView = {
         guard let fonts = Bundle.main.resourceURL.flatMap({ try? TerminalFonts(directory: $0.appending(path: "Fonts")) }),
               let view = try? TerminalView(fonts: fonts)

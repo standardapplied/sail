@@ -980,7 +980,7 @@ actor Desk: Transport {
         shell.account.layoutSubtreeIfNeeded()
         let pane = shell.account
         let most = max(Double(pane.scroll.documentView?.frame.height ?? 0) - Double(pane.scroll.contentSize.height), 0)
-        let target = min(max(Double(pane.eyebrows[2].frame.minY) - AccountPane.inset.top, 0), most)
+        let target = min(max(Double(pane.eyebrows[2].frame.minY) - PageColumn.padding.top, 0), most)
         #expect(shell.rail.selected == .account && !shell.userMenu.isOpen && target > 0, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"), the keys at \(target)")
         #expect(abs(pane.scrolledTo - target) < 1, "scrolled to \(pane.scrolledTo), the keys at \(target)")
     }

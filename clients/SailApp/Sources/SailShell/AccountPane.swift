@@ -12,13 +12,13 @@ import SailWorkbench
 /// group with Try Again; under three days left, the end in the warning ink and Sign In Again. Your
 /// passkeys and your keys, each a list of the server's rows asked at once and drawn as its own
 /// answer lands, the drawing mark in the frame until its first answer, the last answer dimmed while
-/// the call that drew it fails, each refusal said where it happened. Then Sign Out, beside what it
-/// ends and what it does not. No button here is primary. Signed out it shows nothing: the welcome
-/// is on Workspaces. Laid out whole by arithmetic in a scrolling column, mirrored right to left.
+/// the call that drew it fails, each refusal said where it happened. Then Sign Out. No button here
+/// is primary. Signed out it shows nothing: the welcome is on Workspaces. Laid out whole by
+/// arithmetic in the page skeleton's column (``PageColumn/frame(width:)``), scrolling, mirrored
+/// right to left.
 @MainActor
 public final class AccountPane: NSView, NSMenuItemValidation {
-    package static let inset = (top: 36.0, sides: 48.0)
-    static let column = 640.0, groupGap = 28.0, headGap = 8.0, disc = 52.0, row = 56.0
+    static let groupGap = 28.0, headGap = 8.0, disc = 52.0, row = 56.0
     static let refusalPadding = 9.0, bannerFoot = 12.0, dimmed = 0.45
 
     /// The harnesses the server lists and the person's logins: what the Keys group is drawn from.
@@ -83,7 +83,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private let labels: LabelFont
     package let scroll: QuietScrollView
     private let page = AccountColumn()
-    let disc: Initial
+    package let disc: Initial
     let heading = NSTextField(labelWithString: "")
     let handle = NSTextField(labelWithString: "")
     let role: Pill
@@ -105,8 +105,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     let keyMark: BrandMark
     let keySaid = NSTextField(wrappingLabelWithString: "")
     let keyNote = NSTextField(wrappingLabelWithString: AccountPage.keysNote)
-    let outWords = NSTextField(wrappingLabelWithString: "")
-    let outNote = NSTextField(wrappingLabelWithString: AccountPage.signOutNote)
     let outSaid = NSTextField(wrappingLabelWithString: "")
 
     init(flow: AccountFlow, look: Look, title: TitleFont, mono: TerminalFonts, labels: LabelFont) {
@@ -200,7 +198,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         lines += passkeys.failure ?? []
         lines += keyRows.flatMap { row in ["\(row.display) · \(rowDetail(row.id, row.detail))"] + (refusals[row.id] ?? []) }
         lines += (keys.failure ?? []) + [storedLine].compactMap { $0 }
-        return (lines + [outWords.stringValue] + signOutLines).filter { !$0.isEmpty }.joined(separator: "\n")
+        return (lines + signOutLines).filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     /// A row's detail: what it says, or that its removal is under way.
@@ -391,7 +389,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     private func scrollNowToKeys() {
         layoutSubtreeIfNeeded()
-        let top = Double(eyebrows[2].frame.minY) - Self.inset.top
+        let top = Double(eyebrows[2].frame.minY) - PageColumn.padding.top
         let most = max(Double(page.frame.height) - Double(scroll.contentSize.height), 0)
         scroll.contentView.scroll(to: NSPoint(x: 0, y: min(max(top, 0), most)))
         scroll.reflectScrolledClipView(scroll.contentView)
@@ -435,8 +433,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         relist()
         showGroup(passkeys, frame: passkeyFrame, list: passkeyList, mark: passkeyMark, said: passkeySaid, note: passkeyNote, extra: nil)
         showGroup(keys, frame: keyFrame, list: keyList, mark: keyMark, said: keySaid, note: keyNote, extra: storedLine)
-        outWords.attributedStringValue = words(standing.map { AccountPage.signedInHere((try? $0.whoami.get())?.fde ?? $0.fde) } ?? "", .systemFont(ofSize: Look.Step.footnote.points), look.textSecondary)
-        outNote.attributedStringValue = words(AccountPage.signOutNote, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary)
         outSaid.attributedStringValue = refusalWords(signOutLines, look: look, scale: scale)
         outSaid.isHidden = signOutLines.isEmpty
         signOut.isEnabled = !flow.isActing
@@ -642,7 +638,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             label.lineBreakMode = .byTruncatingTail
         }
         for label in [passkeySaid, keySaid, outSaid] { label.isSelectable = true }
-        let views: [NSView] = [disc, heading, handle, role, email] + eyebrows + [planeFrame, passkeyFrame, passkeySaid, passkeyNote, keyFrame, keySaid, keyNote, outWords, outNote, outSaid, signOut]
+        let views: [NSView] = [disc, heading, handle, role, email] + eyebrows + [planeFrame, passkeyFrame, passkeySaid, passkeyNote, keyFrame, keySaid, keyNote, outSaid, signOut]
         views.forEach(page.addSubview)
         signInAgain.target = self
         signInAgain.action = #selector(signInAgainNow(_:))
@@ -666,14 +662,14 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     private var columnWidth: Double {
-        min(Self.column, max(Double(scroll.contentSize.width) - 2 * Self.inset.sides, 1))
+        PageColumn.frame(width: Double(scroll.contentSize.width)).width
     }
 
     /// Every frame of the column, top to bottom, left to right then turned about the page's middle
     /// right to left; the column's height.
     private func lay() -> Double {
-        let width = columnWidth, x = Self.inset.sides
-        var y = Self.inset.top
+        let (x, width) = PageColumn.frame(width: Double(scroll.contentSize.width))
+        var y = PageColumn.padding.top
         let pageWidth = Double(page.bounds.width)
         func put(_ view: NSView, _ rect: NSRect) {
             let frame = mirrored(rect, inWidth: pageWidth)
@@ -708,15 +704,15 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         let button = signOut.intrinsicContentSize
         let wordsWidth = max(width - Double(button.width) - Look.Space.l, 1)
         let start = y
-        for label in [outWords, outNote, outSaid] where !label.isHidden {
-            let height = line(label, width: wordsWidth)
-            put(label, NSRect(x: x, y: y, width: wordsWidth, height: height))
+        if !outSaid.isHidden {
+            let height = line(outSaid, width: wordsWidth)
+            put(outSaid, NSRect(x: x, y: y, width: wordsWidth, height: height))
             y += height + 2
         }
         let buttonTop = start + max((y - start - Double(button.height)) / 2, 0)
         put(signOut, signOut.frame(forAlignmentRect: NSRect(x: x + width - Double(button.width), y: buttonTop, width: Double(button.width), height: Double(button.height))))
         page.rule = mirrored(NSRect(x: x, y: rule, width: width, height: 1), inWidth: pageWidth)
-        return max(y, buttonTop + Double(button.height)) + Self.inset.top
+        return max(y, buttonTop + Double(button.height)) + PageColumn.padding.bottom
     }
 
     /// A group's eyebrow, then its frame holding what `inner` lays out at its width; where it ends.

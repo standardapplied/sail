@@ -246,14 +246,12 @@ package final class LeftPanel: NSView {
         needsLayout = true
     }
 
-    /// The THIS MAC head and its one project: the terminal in its well and a plain Local pill, no
-    /// action of any kind.
+    /// The THIS MAC head and its one project, drawn as a project's row is: the terminal in its
+    /// well and its name, no badge and no action of any kind.
     private var thisMac: [SailList.Entry] {
-        let name = WorkspacesModel.thisMac, cell = SidebarRowCell(name, lead: .tile(.terminal), tag: Self.local, look: look, mono: mono)
-        return [.head(name, count: nil, icon: .laptop), .item(SailList.Item(id: name, name: name, voice: "\(name), \(Self.local.lowercased())", content: cell))]
+        let name = WorkspacesModel.thisMac, cell = SidebarRowCell(name, lead: .tile(.terminal), look: look, mono: mono)
+        return [.head(name, count: nil, icon: .laptop), .item(SailList.Item(id: name, name: name, voice: name, content: cell))]
     }
-
-    static let local = "Local"
 
     /// A project's rows: its own, then, while it is open, what it holds.
     private func entries(_ project: WorkspacesModel.Project) -> [SailList.Entry] {

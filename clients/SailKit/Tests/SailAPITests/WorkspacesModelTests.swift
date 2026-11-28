@@ -111,12 +111,6 @@ import Testing
         #expect(!away.panel.listed && away.panel.emptyLine == "Can’t reach the control plane.")
     }
 
-    /// This Mac's page names the Mac and the control plane it is kept from, and says what it is not.
-    @Test func thisMacsPageSaysItIsKeptHere() {
-        #expect(WorkspacesModel.thisMacLede(host: "mara-mbp", controlPlane: "sail.example.com") == "Shells on mara-mbp. Only this Mac sees them; nothing here is sent to sail.example.com.")
-        #expect(WorkspacesModel.thisMacNote == "This Mac has no repositories, agents, size or template, and cannot be renamed or deleted. Agents run in workspaces on the runner.")
-    }
-
     static func answer<Response>(_ endpoint: Endpoint<Response>, _ golden: String) -> Result<Response, SailError> {
         do {
             return .success(try endpoint.decode(response(try Exchange(golden))))

@@ -261,22 +261,27 @@ extension Driver {
         let there = await waitUntil(step.seconds ?? 5) {
             pane.layoutSubtreeIfNeeded()
             let most = max(Double(pane.scroll.documentView?.frame.height ?? 0) - Double(pane.scroll.contentSize.height), 0)
-            let keys = min(max(Double(pane.eyebrows[2].frame.minY) - AccountPane.inset.top, 0), most)
+            let keys = min(max(Double(pane.eyebrows[2].frame.minY) - PageColumn.padding.top, 0), most)
             return self.shell.rail.selected == .account && abs(pane.scrolledTo - keys) < 1
         }
         return (there, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"), the account scrolled to \(pane.scrolledTo) pt, its keys at \(pane.eyebrows[2].frame.minY) pt")
     }
 
-    /// The window in both looks at 1024 × 800, then at its least frame, then as it was.
+    /// The window in both looks at 1024 × 800, 1276 × 800, 1600 × 900, then at its least frame, then
+    /// as it was; at each, the header and the groups stand in the skeleton's column.
     private func accountShot(_ name: String) async -> (Bool, String) {
-        let was = shell.window.frame
+        let was = shell.window.frame, pane = shell.account
         var said: [String] = [], ok = true
-        for (suffix, size) in [("", NSSize(width: 1024, height: 800)), ("-least", ShellApp.leastFrame)] {
+        let sizes = [("", NSSize(width: 1024, height: 800)), ("-1276", NSSize(width: 1276, height: 800)), ("-1600", NSSize(width: 1600, height: 900)), ("-least", ShellApp.leastFrame)]
+        for (suffix, size) in sizes {
             shell.window.setFrame(NSRect(x: was.minX, y: was.maxY - size.height, width: size.width, height: size.height), display: true)
-            shell.account.layoutSubtreeIfNeeded()
+            pane.layoutSubtreeIfNeeded()
+            let column = PageColumn.frame(width: Double(pane.scroll.contentSize.width))
+            let groups = pane.eyebrows[0].frame
+            let placed = abs(Double(pane.disc.frame.minX) - column.x) < 0.5 && abs(Double(groups.minX) - column.x) < 0.5 && abs(Double(groups.width) - column.width) < 0.5
             let (taken, detail) = await inBothLooks(name + suffix) { file in await self.capture(.window(self.shell.window.windowNumber), to: file) }
-            ok = ok && taken
-            said.append(detail)
+            ok = ok && taken && placed
+            said.append("\(Int(shell.window.frame.width)) pt: the header at \(pane.disc.frame.minX), the groups \(groups), the column at \(column.x) wide \(column.width); " + detail)
         }
         shell.window.setFrame(was, display: true)
         return (ok, said.joined(separator: "; "))

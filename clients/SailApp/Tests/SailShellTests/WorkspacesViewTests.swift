@@ -244,7 +244,7 @@ import Testing
 
     /// What the foot's keys say, the count aside.
     static func footSays(_ project: ProjectView) -> [String] {
-        Self.found(NSTextField.self, in: project.foot).filter { $0 !== project.count }.map(\.stringValue)
+        Self.found(NSTextField.self, in: project.skeleton.foot).filter { $0 !== project.skeleton.count }.map(\.stringValue)
     }
 
     /// Row `name`'s first action, its Open.
@@ -285,11 +285,11 @@ import Testing
         project.render(try #require(Self.page(rows)))
         try #require(window.makeFirstResponder(project.list) && project.list.holdsKeys)
         #expect(project.list.chosen == nil && Self.footSays(project).isEmpty, "with no row chosen the foot says \(Self.footSays(project))")
-        let tall = project.foot.fittingSize.height
+        let tall = project.skeleton.foot.fittingSize.height
         project.list.choose("dock")
         #expect(Self.footSays(project) == ["Open", "New Session", "New"])
         #expect(Self.openNamesReturn(project, "dock") && project.listAgain.namesKey && project.listAgain.tooltip?.chip.showsHint == true)
-        #expect(project.foot.fittingSize.height == tall, "the keys coming moved the list")
+        #expect(project.skeleton.foot.fittingSize.height == tall, "the keys coming moved the list")
         let dockOpen = try #require(Self.firstAction(project, "dock")), pierOpen = try #require(Self.firstAction(project, "pier"))
         let (_, pierLabel, pierHint) = pierOpen.arrangement()
         #expect(pierOpen.keyEquivalent.isEmpty && pierHint == nil, "\(pierOpen.title) on pier, not chosen, has a key or keeps its room")
@@ -301,7 +301,7 @@ import Testing
         #expect(Self.firstAction(project, "dock") === dockOpen && dockOpen.keyEquivalent == "\r" && dockOpen.arrangement().hint != nil && dockOpen.frame.width == openWidth,
                 "dock's Open gave up its key or its key's room in a window that is not key")
         #expect(!Self.openNamesReturn(project, "dock") && !project.listAgain.namesKey && project.listAgain.tooltip?.chip.showsHint == false, "with another window key a row or a button names its key")
-        #expect(window.firstResponder === project.list && project.foot.fittingSize.height == tall)
+        #expect(window.firstResponder === project.list && project.skeleton.foot.fittingSize.height == tall)
         window.key = true
         #expect(Self.footSays(project) == ["Open", "New Session", "New"] && Self.openNamesReturn(project, "dock") && project.listAgain.tooltip?.chip.showsHint == true, "the window key again, the keys are not named: \(Self.footSays(project))")
         project.list.choose("pier")
@@ -310,7 +310,7 @@ import Testing
         #expect(left.keyEquivalent.isEmpty && Self.laidOut(left) && chosen.keyEquivalent == "\r" && Self.laidOut(chosen), "an Open was not laid out again as its key went or came: dock \(left.frame), pier \(chosen.frame)")
         project.list.deselectAll(nil)
         #expect(Self.footSays(project).isEmpty, "with the row let go the foot says \(Self.footSays(project))")
-        #expect(project.foot.fittingSize.height == tall, "the keys going moved the list")
+        #expect(project.skeleton.foot.fittingSize.height == tall, "the keys going moved the list")
 
         let building = try #require(Self.page(rows, template: .building))
         project.render(building)
@@ -319,7 +319,7 @@ import Testing
         project.render(try #require(Self.page(rows, for: Self.ana)))
         project.list.choose("dock")
         #expect(Self.footSays(project) == ["New Session", "New"], "Return is named on a row it presses nothing on")
-        let heights = project.foot.constraints.filter { $0.firstItem === project.foot && $0.firstAttribute == .height }
+        let heights = project.skeleton.foot.constraints.filter { $0.firstItem === project.skeleton.foot && $0.firstAttribute == .height }
         #expect(heights.count == 1, "the foot drawn again holds \(heights.count) heights")
     }
 
@@ -442,11 +442,11 @@ import Testing
             project.render(page)
             project.layoutSubtreeIfNeeded()
             project.layoutSubtreeIfNeeded()
-            let words = project.words.frame, buttons = project.buttons.frame, lede = project.convert(project.lede.frame, from: project.lede.superview)
-            let head = try #require(project.words.superview)
-            #expect(abs(Double(buttons.minX - words.maxX) - ProjectView.headGap) < 0.5, "\(width) pt: the words end \(buttons.minX - words.maxX) pt before the buttons")
+            let words = project.skeleton.words.frame, buttons = project.skeleton.buttons.frame, lede = project.convert(project.skeleton.lede.frame, from: project.skeleton.lede.superview)
+            let head = try #require(project.skeleton.words.superview)
+            #expect(abs(Double(buttons.minX - words.maxX) - PageColumn.headGap) < 0.5, "\(width) pt: the words end \(buttons.minX - words.maxX) pt before the buttons")
             #expect(abs(Double(words.minX)) < 0.5 && abs(Double(buttons.maxX - head.bounds.width)) < 0.5, "the head runs \(words.minX) to \(buttons.maxX) of \(head.bounds.width)")
-            let natural = Double(project.lede.attributedStringValue.size().width), lines = natural > Double(words.width) ? 2.0 : 1.0
+            let natural = Double(project.skeleton.lede.attributedStringValue.size().width), lines = natural > Double(words.width) ? 2.0 : 1.0
             #expect(width != designed || lines == 1, "at the designed width the line (\(natural) pt) is wider than its \(words.width) pt")
             #expect(abs(Double(lede.height) - lines * line) < line / 2, "\(width) pt: the line (\(natural) pt in \(words.width) pt) is \(lede.height) pt high, not \(lines) line(s)")
         }
@@ -454,7 +454,7 @@ import Testing
         defer { window.orderOut(nil) }
         project.render(page)
         project.layoutSubtreeIfNeeded()
-        #expect(project.lede.isHidden && project.newWorkspace.isHidden && !project.newWorkspaceIcon.isHidden)
+        #expect(project.skeleton.lede.isHidden && project.newWorkspace.isHidden && !project.newWorkspaceIcon.isHidden)
     }
 
     /// A refused name keeps its box at 250 pt with the refusal under it across the column, and
@@ -849,15 +849,15 @@ import Testing
         return item
     }
 
-    /// The panel's two groups: THIS MAC with its laptop, holding the one local project (the terminal
-    /// in its well, a plain Local pill, no action of any kind, so no Delete, Build Template or New
-    /// Workspace), then the control plane's projects under its host with their count.
+    /// The panel's two groups: THIS MAC with its laptop, holding the one local project drawn as a
+    /// project's row (the terminal in its well, no badge, no action of any kind, so no Delete, Build
+    /// Template or New Workspace), then the control plane's projects under its host with their count.
     @Test func thisMacIsListedFirstUnderItsOwnHead() async throws {
         let (view, window, _) = try await Self.listed()
         defer { window.orderOut(nil) }
         #expect(Self.said(view.panel.list.entries) == ["head This Mac - laptop", "item This Mac []", "head 127.0.0.1 1 cloud", "item harbor []"])
         let local = try #require(Self.item(view.panel.list.entries, 1), "no This Mac row")
-        #expect(local.voice == "This Mac, local" && Self.found(Pill.self, in: local.content).map { $0.accessibilityLabel() } == ["Local"])
+        #expect(local.voice == "This Mac" && Self.found(Pill.self, in: local.content).isEmpty)
     }
 
     /// Choosing This Mac shows its page with this Mac's terminals and asks the control plane
@@ -876,7 +876,7 @@ import Testing
         let before = transport.routes.count
         view.panel.onChoose(WorkspacesModel.thisMac)
         let lines = [
-            "Workspaces", "This Mac", "Shells on \(view.local.macName). Only this Mac sees them; nothing here is sent to 127.0.0.1.",
+            "Workspaces", "This Mac", view.local.macName,
             "This Mac · running · ~/workspace/sail · \(LocalProjectView.program)", "This Mac 2 · ended · ~/Downloads · exited 3 · 11:02",
         ]
         #expect(view.text == lines.joined(separator: "\n") && view.project.isHidden && !view.local.isHidden && shown > 0, "\(view.text)")
@@ -895,16 +895,13 @@ import Testing
     }
 
     /// This Mac's rows are its terminals as the workbench tells them, a row each: Open, and in its ⋯
-    /// only End Session (⌘W), nothing else; a terminal gone leaves the list at once. The note under
-    /// them runs at most the design's 520 pt.
+    /// only End Session (⌘W), nothing else; a terminal gone leaves the list at once; with none open,
+    /// the project page's empty state says "No shells open" with New Shell, its one action.
     @Test func thisMacsRowsAreItsTerminalsNow() async throws {
         let (view, window, _) = try await Self.listed()
         defer { window.orderOut(nil) }
         view.panel.onChoose(WorkspacesModel.thisMac)
         view.sessions = .listed(Self.shells)
-        view.layoutSubtreeIfNeeded()
-        let note = Double(view.local.note.alignmentRect(forFrame: view.local.note.frame).width), room = Double(view.local.frame.width) - 2 * ProjectView.padding.sides
-        #expect(room > LocalProjectView.noteWidth && note > 0 && note <= LocalProjectView.noteWidth + 0.5, "the note runs \(note) pt of \(room)")
         let row = { (id: String) in "item \(id) [\"Open\", \"End Session in ⋯ ⌘w\"]" }
         #expect(Self.said(view.local.list.entries) == ["head Sessions 2 -", row("1"), row("2")])
         var acts: [LocalProjectView.Act] = []
@@ -913,29 +910,30 @@ import Testing
         second.actions.forEach { $0.run() }
         #expect(acts == [.open(PaneID(2)), .end(PaneID(2))])
         view.sessions = .listed([Self.shells[0]])
-        #expect(Self.said(view.local.list.entries) == ["head Sessions 1 -", row("1")] && view.local.empty.isHidden)
+        #expect(Self.said(view.local.list.entries) == ["head Sessions 1 -", row("1")] && Self.found(EmptyState.self, in: view.local).isEmpty)
         view.sessions = .listed([])
         view.layoutSubtreeIfNeeded()
-        let empty = view.local.empty, frame = try #require(empty.superview)
-        #expect(Self.said(view.local.list.entries) == ["head Sessions 0 -"] && !empty.isHidden && empty.stringValue == "No shell is open on this Mac.")
-        #expect(empty.frame.minY >= RowStyle.list.head && empty.frame.maxY <= frame.bounds.maxY && view.text.hasSuffix("\nNo shell is open on this Mac."), "\(empty.frame) in \(frame.bounds)")
+        let empty = try #require(Self.found(EmptyState.self, in: view.local).first, "no empty state")
+        #expect(empty.title.stringValue == "No shells open" && empty.body.frame.height == 0 && empty.actions.map(\.title) == ["New Shell"], "\(empty.title.stringValue)")
+        #expect(view.local.list.window == nil && view.text.hasSuffix("\nNo shells open"), "\(view.text)")
+        let action = try #require(empty.actions.first?.action)
+        #expect(NSApp.sendAction(action, to: empty.actions.first?.target, from: empty.actions.first) && acts.last == .newShell)
     }
 
-    /// Under SESSIONS, in a row's place, the page says only what it knows: nothing while the
-    /// terminals are being listed, that they could not be listed when they could not, and that no
-    /// shell is open only once they are listed and none is. The head counts them once listed.
-    @Test func theLineUnderSessionsWaitsForTheListing() async throws {
+    /// In its rows' place the page says only what it knows: nothing while the terminals are being
+    /// listed, that they could not be listed in a banner as a project's page says it, and "No shells
+    /// open" only once they are listed and none is.
+    @Test func thisMacSaysOnlyWhatItKnowsOfItsTerminals() async throws {
         let (view, window, _) = try await Self.listed()
         defer { window.orderOut(nil) }
         view.panel.onChoose(WorkspacesModel.thisMac)
-        let empty = view.local.empty
-        #expect(view.sessions == .listing && empty.isHidden && Self.said(view.local.list.entries) == ["head Sessions - -"], "\(view.text)")
+        let banners = { Self.found(Banner.self, in: view.local) }, empties = { Self.found(EmptyState.self, in: view.local) }
+        #expect(view.sessions == .listing && banners().isEmpty && empties().isEmpty && view.local.list.window == nil, "\(view.text)")
         #expect(!view.text.contains(LocalProjectView.noShell) && !view.text.contains(LocalProjectView.unlisted), "\(view.text)")
         view.sessions = .unlisted
-        #expect(!empty.isHidden && empty.stringValue == "Couldn’t list this Mac’s terminals." && view.text.hasSuffix("\n" + LocalProjectView.unlisted), "\(view.text)")
-        #expect(Self.said(view.local.list.entries) == ["head Sessions - -"])
+        #expect(banners().count == 1 && empties().isEmpty && view.text.hasSuffix("\nCouldn’t list this Mac’s shells"), "\(view.text)")
         view.sessions = .listed([])
-        #expect(!empty.isHidden && empty.stringValue == LocalProjectView.noShell && Self.said(view.local.list.entries) == ["head Sessions 0 -"], "\(view.text)")
+        #expect(banners().isEmpty && empties().count == 1 && view.text.hasSuffix("\n" + LocalProjectView.noShell), "\(view.text)")
     }
 
     /// This Mac's page follows the window from its least width back to a wide one: the window
@@ -955,28 +953,47 @@ import Testing
         #expect(!view.local.narrow && view.local.frame.minX >= -0.5 && view.local.frame.maxX <= view.bounds.maxX + 0.5, "the page \(view.local.frame) in \(view.bounds)")
     }
 
-    /// This Mac's header stands where a project's does at the drive's width, the owner's 1276 pt
-    /// window and a wider one: its title at the same origin, its New Shell ending where New
-    /// Workspace ends, its list starting at the same x, with the Mac's short name under the title.
-    @Test func thisMacsHeaderStandsWhereAProjectsDoesAtEveryWidth() async throws {
+    /// Every page of the app's sections is built from the one skeleton, so none can be drawn its own
+    /// way: each page of Workspaces (every view of the section but its panel, the panel's shadow and
+    /// its card) is drawn in a ``PageColumn``, and at the drive's width, the owner's 1276 pt window
+    /// and a wider one, a project's page, This Mac's and Account each put their head and their
+    /// content in the column ``PageColumn/frame(width:)`` gives them: at most 720 pt, centred. This
+    /// Mac's head stands exactly where a project's does, its New Shell ending where New Workspace ends.
+    @Test func everyPageIsBuiltFromOneSkeleton() async throws {
         for window in [1024.0, 1276, 1600] {
+            let width = window - Rail.width - 4
             let server = RecordedServer([try Exchange("projects"), try Exchange("workspaces-three")])
-            let (view, shown) = try Self.view(server, width: window - Rail.width - 4)
+            let (view, shown) = try Self.view(server, width: width)
             defer { shown.orderOut(nil) }
             view.shown()
             try #require(await RunnerTabTests.until { view.text.contains("dock") }, "nothing listed: \(view.text)")
+            let pages = view.subviews.filter { ![view.panel, view.panelShadow, view.card].contains($0) }
+            #expect(pages.count == 2 && pages.allSatisfy { page in page.subviews.contains { $0 is PageColumn } }, "\(window) pt: pages \(pages.map { type(of: $0) })")
             view.layoutSubtreeIfNeeded()
-            let at = { (part: NSView) in view.convert(part.alignmentRect(forFrame: part.frame), from: part.superview) }
-            let project = (title: at(view.project.title), button: at(view.project.newWorkspace), list: at(view.project.list))
+            let project = try Self.inColumn(view.project.skeleton, head: view.project.skeleton.title, content: view.project.list, window: window)
             view.local.macName = "Uday’s MacBook Pro"
             view.sessions = .listed(Self.shells)
             view.panel.onChoose(WorkspacesModel.thisMac)
             view.layoutSubtreeIfNeeded()
-            let local = (title: at(view.local.title), button: at(view.local.newShell), list: at(view.local.list))
-            #expect(near(local.title.minX, project.title.minX) && near(local.title.minY, project.title.minY), "\(window) pt: This Mac's title at \(local.title.origin), a project's at \(project.title.origin)")
-            #expect(near(local.button.maxX, project.button.maxX), "\(window) pt: New Shell ends at \(local.button.maxX), New Workspace at \(project.button.maxX)")
-            #expect(near(local.list.minX, project.list.minX) && near(local.list.width, project.list.width), "\(window) pt: This Mac's list \(local.list), a project's \(project.list)")
+            let local = try Self.inColumn(view.local.skeleton, head: view.local.skeleton.title, content: view.local.list, window: window)
+            #expect(near(local.head, project.head) && near(local.content, project.content), "\(window) pt: This Mac's head \(local.head), a project's \(project.head)")
+            let at = { (part: NSView) in view.convert(part.alignmentRect(forFrame: part.frame), from: part.superview).maxX }
+            #expect(near(at(view.local.newShell), at(view.project.newWorkspace)), "\(window) pt: New Shell ends at \(at(view.local.newShell)), New Workspace at \(at(view.project.newWorkspace))")
+            let (account, accountWindow) = try await AccountPaneTests.signedIn(try Desk(AccountPaneTests.goldens), width: width)
+            defer { accountWindow.orderOut(nil) }
+            let column = PageColumn.frame(width: Double(account.scroll.contentSize.width))
+            #expect(near(account.disc.frame.minX, column.x) && near(account.planeFrame.frame.minX, column.x) && near(account.planeFrame.frame.width, column.width), "\(window) pt: Account's column \(account.planeFrame.frame), the skeleton's \(column)")
         }
+    }
+
+    /// Where `head` and `content` stand in their page's skeleton, each held to its column.
+    static func inColumn(_ page: PageColumn, head: NSView, content: NSView, window: Double) throws -> (head: NSRect, content: NSRect) {
+        let column = PageColumn.frame(width: Double(page.bounds.width))
+        let frame = try #require(content.enclosingScrollView?.superview ?? content.superview)
+        let drawn = (head: page.convert(head.alignmentRect(forFrame: head.frame), from: head.superview), content: page.convert(frame.frame, from: frame.superview))
+        #expect(near(drawn.head.minX, column.x) && near(drawn.head.minY, PageColumn.padding.top), "\(window) pt: \(type(of: page.superview))'s head at \(drawn.head.origin), the column at \(column.x)")
+        #expect(near(drawn.content.minX, column.x) && near(drawn.content.width, column.width), "\(window) pt: \(type(of: page.superview))'s content \(drawn.content), the column \(column)")
+        return drawn
     }
 
     /// This Mac's page alone, `width` wide, drawing `sessions`, its list holding the keys in a key window.
@@ -985,7 +1002,7 @@ import Testing
         let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = local
         window.orderFront(nil)
-        local.render(.listed(sessions), controlPlane: "127.0.0.1")
+        local.render(.listed(sessions))
         window.makeFirstResponder(local.list)
         local.layoutSubtreeIfNeeded()
         return (local, window)
@@ -1088,7 +1105,7 @@ import Testing
         }
     }
 
-    /// The lede names this Mac as its person knows it: the computer's name as System Settings shows
+    /// The one line under the title names this Mac as its person knows it: the computer's name as System Settings shows
     /// it, the host name only when it has none; the page says the name it is given.
     @Test func theLedeNamesTheMacAsItsPersonKnowsIt() async throws {
         let host = "sjc22-be111-e287622e-f4b6-4261-bb25-c670db5e7ab5-76B03C2DC9B2.local", computer = "Uday’s MacBook Pro"
@@ -1099,8 +1116,7 @@ import Testing
         view.panel.onChoose(WorkspacesModel.thisMac)
         view.sessions = .listed(Self.shells)
         view.local.macName = computer
-        let said = "Shells on \(computer). Only this Mac sees them; nothing here is sent to 127.0.0.1."
-        #expect(view.local.lede.stringValue == said && view.text.contains("\n\(said)\n"), "\(view.local.lede.stringValue)")
+        #expect(view.local.skeleton.lede.stringValue == computer && view.text.contains("\nThis Mac\n\(computer)\n"), "\(view.local.skeleton.lede.stringValue)")
     }
 
     /// The keys under This Mac's rows show only while a row is chosen in the list holding the keys,
@@ -1112,12 +1128,12 @@ import Testing
         defer { window.orderOut(nil) }
         view.panel.onChoose(WorkspacesModel.thisMac)
         view.sessions = .listed(Self.shells)
-        let shown = { view.local.keys.arrangedSubviews.filter { !$0.isHidden }.count }
+        let foot = view.local.skeleton
+        let said = { Self.found(NSTextField.self, in: foot.foot).filter { $0 !== foot.count }.map(\.stringValue) }, shown = { said().count }
         #expect(window.makeFirstResponder(view.local.list) && shown() == 0, "keys shown with no row chosen")
         view.local.list.choose("1")
         #expect(shown() == 3, "\(shown()) keys shown with a row chosen")
-        let words = view.local.keys.arrangedSubviews.flatMap { Self.found(NSTextField.self, in: $0).map(\.stringValue) }
-        #expect(words == ["open", "new shell", "end session"])
+        #expect(said() == ["Open", "New", "End Session"])
         #expect(window.makeFirstResponder(nil))
         #expect(await RunnerTabTests.until { shown() == 0 }, "\(shown()) keys shown with the keys out of the list")
         #expect(window.makeFirstResponder(view.local.list))
