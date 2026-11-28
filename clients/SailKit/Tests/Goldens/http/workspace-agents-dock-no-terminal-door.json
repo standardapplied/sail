@@ -1,0 +1,120 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/dock/agents"
+  },
+  "response": {
+    "body": {
+      "offered": [
+        {
+          "chat": {
+            "inside": true,
+            "mode_default": "default",
+            "modes": [
+              {
+                "about": "Asks before it edits a file or runs a command, except commands it counts as safe, such as sleep or echo, which run without asking.",
+                "label": "Asks first",
+                "mode": "default",
+                "risky": false
+              },
+              {
+                "about": "Edits files, and runs file commands such as rm, mv, cp and sed, inside this workspace and any folder you let it work in, without asking; it still asks before such a command anywhere else.",
+                "label": "Edits freely",
+                "mode": "acceptEdits",
+                "risky": false
+              },
+              {
+                "about": "Researches and proposes a plan, and changes nothing until you approve it.",
+                "label": "Plans first",
+                "mode": "plan",
+                "risky": false
+              }
+            ]
+          },
+          "display": "Claude Code",
+          "forms": [
+            "chat"
+          ],
+          "harness": "claude-code",
+          "inside": true,
+          "kinds": [
+            {
+              "how": [
+                {
+                  "text": "Create an API key in the Claude Console"
+                }
+              ],
+              "kind": "api-key",
+              "label": "API key"
+            }
+          ],
+          "login": {
+            "kind": "api-key",
+            "name": "default"
+          },
+          "mode_default": "default",
+          "modes": [
+            {
+              "about": "Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual.",
+              "label": "Claude Code's own",
+              "mode": "default",
+              "risky": false
+            },
+            {
+              "about": "Asks before edits, shell commands and network actions.",
+              "label": "Manual",
+              "mode": "manual",
+              "risky": false
+            },
+            {
+              "about": "Makes file edits and common filesystem commands without asking.",
+              "label": "Accept edits",
+              "mode": "acceptEdits",
+              "risky": false
+            },
+            {
+              "about": "Researches and proposes changes, and edits nothing until you approve the plan.",
+              "label": "Plan",
+              "mode": "plan",
+              "risky": false
+            },
+            {
+              "about": "Runs everything, with a classifier reviewing each action first; Manual where auto is not available.",
+              "label": "Auto",
+              "mode": "auto",
+              "risky": false
+            },
+            {
+              "about": "Refuses anything that would ask, and runs only what is approved beforehand.",
+              "label": "Don't ask",
+              "mode": "dontAsk",
+              "risky": false
+            },
+            {
+              "about": "Skips every permission prompt and safety check.",
+              "label": "Bypass permissions",
+              "mode": "bypassPermissions",
+              "risky": true
+            }
+          ],
+          "sign_in": {
+            "how": [
+              {
+                "text": "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."
+              }
+            ],
+            "name": "Your Claude account",
+            "signed_in": false
+          }
+        }
+      ],
+      "owner": "uday",
+      "project": "harbor",
+      "running": true,
+      "schema_version": 1,
+      "terminal": false,
+      "workspace": "dock"
+    },
+    "status": 200
+  }
+}

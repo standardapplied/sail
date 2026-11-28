@@ -143,6 +143,7 @@
       "project": "harbor",
       "running": false,
       "schema_version": 1,
+      "terminal": true,
       "workspace": "quay"
     },
     "status": 200

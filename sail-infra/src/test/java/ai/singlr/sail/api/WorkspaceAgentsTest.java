@@ -24,6 +24,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -37,10 +38,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -48,8 +51,10 @@ import org.junit.jupiter.api.io.TempDir;
  * owner is offered each harness with its modes and the login it starts signed in with, or why it
  * does not start, in the words and codes a terminal Create of it is refused with; an admin in
  * another person's workspace is told it is not theirs and sees nothing of their logins; a member is
- * refused the workspace as every workspace door refuses it.
+ * refused the workspace as every workspace door refuses it. Each offer holds the forms this runner
+ * opens: the box has a terminal door, but where one is served without it.
  */
+@Timeout(value = 60, unit = TimeUnit.SECONDS)
 class WorkspaceAgentsTest {
 
   private static final HttpClient CLIENT = HttpClient.newHttpClient();
@@ -59,7 +64,16 @@ class WorkspaceAgentsTest {
     CLIENT.close();
   }
 
+  /** A terminal door this route never asks: whether a runner has one is all it reads of it. */
+  private static final TerminalTickets DOOR =
+      new TerminalTickets(
+          (credential, action, target, workspace) -> {
+            throw new IOException("no terminal host here");
+          },
+          new InetSocketAddress("127.0.0.1", 0));
+
   @TempDir Path tempDir;
+  private SailOperations operations;
   private HttpServer server;
   private Sqlite db;
   private ScriptedShellExecutor incus;
@@ -157,20 +171,25 @@ class WorkspaceAgentsTest {
             .onOk("incus exec acme-try ", ".claude/.credentials.json\n")
             .onOk("incus exec beta-tom ", ".codex/auth.json\n.claude.json\n")
             .onFail("incus exec beta-mute ", "Error: websocket: close 1006");
-    var operations =
+    operations =
         TestControlPlane.on(
             OperationsFactory.create(db, incus, null, SyncScheduler.disabled(), SessionYield.NONE),
             db,
             tempDir,
             new SyncConfig(null, null, null, "box"));
+    server = serve(Optional.of(DOOR));
+  }
+
+  /** The router over this box's operations, served with terminal door {@code terminal}. */
+  private HttpServer serve(Optional<TerminalTickets> terminal) throws Exception {
     var auth = TestAuth.tokens(db);
-    var router =
-        new ApiRouter(
-            operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), Optional.empty());
-    server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    server.createContext("/", router);
-    server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
-    server.start();
+    var on = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    on.createContext(
+        "/",
+        new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), terminal));
+    on.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+    on.start();
+    return on;
   }
 
   @AfterEach
@@ -518,6 +537,111 @@ class WorkspaceAgentsTest {
     assertEquals(403, viewer.status(), viewer.toString());
     assertEquals(404, absent.status(), absent.toString());
     assertEquals("not_found", absent.code());
+  }
+
+  /**
+   * On a runner with no terminal door each offer holds only the forms it opens: Claude Code a chat
+   * alone, still in its chat's modes and signed in as with a door; Codex, which has no chat, is not
+   * offered, and the answer refuses nothing while a chat starts. The ticket route refuses a
+   * terminal there by the same door.
+   */
+  @Test
+  void aRunnerWithNoTerminalDoorOffersOnlyAChat() throws Exception {
+    var doorless = serve(Optional.empty());
+    try {
+      var answer = ask(doorless, sam, "acme-try");
+      var both = ask(doorless, tom, "beta-tom");
+      var withDoor = ask(tom, "beta-tom");
+
+      assertEquals(200, answer.status(), answer.toString());
+      assertFalse(answer.body().containsKey("refusal"));
+      assertEquals(
+          List.of("claude-code"),
+          ((List<?>) answer.body().get("offered"))
+              .stream().map(offer -> ((Map<?, ?>) offer).get("harness")).toList(),
+          "Codex, not installed in acme and with no chat, is not offered");
+      assertEquals(List.of("chat"), answer.offer("claude-code").get("forms"));
+      assertEquals(
+          List.of("claude-code"),
+          ((List<?>) both.body().get("offered"))
+              .stream().map(offer -> ((Map<?, ?>) offer).get("harness")).toList(),
+          "Codex, installed in beta, is not offered either");
+      var claude = new LinkedHashMap<Object, Object>(withDoor.offer("claude-code"));
+      claude.put("forms", List.of("chat"));
+      assertEquals(claude, both.offer("claude-code"), "all else as with a door");
+      assertEquals(List.of("terminal"), withDoor.offer("codex").get("forms"));
+      assertEquals(List.of("terminal", "chat"), withDoor.offer("claude-code").get("forms"));
+      var ticket =
+          CLIENT.send(
+              HttpRequest.newBuilder(
+                      URI.create(
+                          "http://127.0.0.1:"
+                              + doorless.getAddress().getPort()
+                              + "/v1/terminal/tickets"))
+                  .header("Authorization", "Bearer " + tom)
+                  .POST(
+                      HttpRequest.BodyPublishers.ofString(
+                          "{\"action\":\"open\",\"project\":\"beta\",\"workspace\":\"tom\"}"))
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+      assertEquals(
+          List.of(404, "terminal_not_offered"),
+          List.of(
+              ticket.statusCode(),
+              ((Map<?, ?>) YamlUtil.parseMap(ticket.body()).get("error")).get("code")));
+    } finally {
+      doorless.stop(0);
+    }
+  }
+
+  /**
+   * The answer says whether this runner opens a terminal at all, refused or not: true with its
+   * door, false without it; and a chat's open of a harness with no chat sends the person to a
+   * terminal only where there is one.
+   */
+  @Test
+  void theAnswerSaysWhetherThisRunnerHasATerminalDoorAndAChatOpenAdvisesNoTerminalWithout()
+      throws Exception {
+    var doorless = serve(Optional.empty());
+    try {
+      assertEquals(
+          List.of(true, false, true, false),
+          List.of(
+              ask(tom, "beta-tom").body().get("terminal"),
+              ask(doorless, tom, "beta-tom").body().get("terminal"),
+              ask(ada, "acme-try").body().get("terminal"),
+              ask(doorless, ada, "acme-try").body().get("terminal")),
+          "an answer that refuses says it too");
+      assertEquals(
+          List.of(
+              "422 Codex CLI has no chat form; start it in a terminal.",
+              "422 Codex CLI has no chat form."),
+          List.of(openCodexChat(server, tom), openCodexChat(doorless, tom)));
+    } finally {
+      doorless.stop(0);
+    }
+  }
+
+  /**
+   * {@code token}'s chat with Codex in beta's workspace tom, on {@code on}: its status and words.
+   */
+  private static String openCodexChat(HttpServer on, String token) throws Exception {
+    var response =
+        CLIENT.send(
+            HttpRequest.newBuilder(
+                    URI.create(
+                        "http://127.0.0.1:"
+                            + on.getAddress().getPort()
+                            + "/v1/projects/beta/workspaces/tom/chats"))
+                .header("Authorization", "Bearer " + token)
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        "{\"harness\":\"codex\",\"mode\":\"full-access\"}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    return response.statusCode()
+        + " "
+        + ((Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")).get("message");
   }
 
   /**

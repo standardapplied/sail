@@ -2095,7 +2095,8 @@ class ClientGoldensTest {
      * login and a Codex login, holding Codex's own sign-in and not Claude Code's; dock once it
      * holds both, and while it holds neither; pier, uday's and stopped; quay, ana's; dock with no
      * Claude Code login stored, then with harbor installing Claude Code alone; and pier once its
-     * person is gone.
+     * person is gone. Dock is also asked of a box with no terminal door, which offers Claude Code's
+     * chat alone.
      */
     void recordDriveAgents(Map<String, String> goldens) throws Exception {
       var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
@@ -2124,6 +2125,18 @@ class ClientGoldensTest {
           goldens, "workspace-agents-dock-signed-out", "GET", agents.formatted("dock"), uday, null);
       incus.onOk("incus exec harbor-dock ", ".codex/auth.json\n");
       record(goldens, "workspace-agents-dock", "GET", agents.formatted("dock"), uday, null);
+      golden(
+          goldens,
+          "workspace-agents-dock-no-terminal-door",
+          "GET",
+          agents.formatted("dock"),
+          null,
+          exchange(
+              "http://127.0.0.1:" + unconfigured.getAddress().getPort(),
+              "GET",
+              agents.formatted("dock"),
+              uday,
+              null));
       record(goldens, "workspace-agents-pier", "GET", agents.formatted("pier"), uday, null);
       record(goldens, "workspace-agents-quay", "GET", agents.formatted("quay"), uday, null);
       logins.remove(udayId, claude, "default");
