@@ -4472,8 +4472,10 @@ is handed) and written by the process's one writer (`ChatWriter`), on a thread o
 order handed, never under the chat's lock or the monitor: at most 64 lines and 4 MiB wait, and a
 line past either, or after one the harness did not take, is refused at once, as a write the harness
 refuses is; a line whose taking Sail cannot record (a store write that throws) is refused too, the
-first, so its process ends at once and its turn is cut saying so ("Sail could not record what it
-wrote to…"); however many lines are refused, the process is ended once; a caller waits for its own
+first, so its process ends at once and its turn is cut saying so ("Claude Code was restarted; your
+message was sent again."): a message's taking says its turn open, then marks it handed with its
+`delivered` item in one transaction, so a message not recorded whole is handed to the next process;
+however many lines are refused, the process is ended once; a caller waits for its own
 line at most `ProcessEnd.Grace.afterInt`, then goes on; stdin is closed only after the lines handed
 before the close; and a line the harness has not taken `ChatTiming.stopBound` after its write began
 (never counting the time it waited behind others) ends the process, its turn cut in that line's

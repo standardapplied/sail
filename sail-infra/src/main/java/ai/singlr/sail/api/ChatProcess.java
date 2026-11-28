@@ -104,9 +104,7 @@ final class ChatProcess {
             handle.stdin(),
             timing.clock(),
             timing.grace().afterInt(),
-            "Sail could not record what it wrote to "
-                + agent
-                + "'s process, so Sail ended it; your next message starts it again.");
+            agent + " was restarted; your message was sent again.");
     this.end = new ChatEnd(this, writer::close, agent, handle, timing);
     this.broken =
         agent
@@ -371,10 +369,7 @@ final class ChatProcess {
           if (turnOpen) {
             log.turn(true);
           }
-          log.handed(seq);
-          if (queued) {
-            log.log(new ChatWire.Delivered(seq));
-          }
+          log.handed(seq, queued);
         };
     var lines = wire.message((String) message.get("text"));
     if (lines.isEmpty()) {

@@ -168,11 +168,14 @@ final class ChatWriter {
   }
 
   private void writeAll() {
-    Line line;
-    while ((line = next()) != null) {
-      tell(line, !refuses(line.place()) && took(line.text()));
+    try {
+      Line line;
+      while ((line = next()) != null) {
+        tell(line, !refuses(line.place()) && took(line.text()));
+      }
+    } finally {
+      stdin.close();
     }
-    stdin.close();
   }
 
   /** The line to write next, its write begun now; null once closed with none left. */

@@ -164,9 +164,20 @@ final class ChatLog {
     store.turn(session, open);
   }
 
-  /** The person's message logged at {@code seq} went to the harness. */
-  void handed(long seq) {
-    store.handed(session, seq);
+  /**
+   * The person's message logged at {@code seq} went to the harness, with its {@code delivered} item
+   * when it had waited ({@code queued}): both or neither, so one not recorded whole is handed
+   * again.
+   */
+  synchronized void handed(long seq, boolean queued) {
+    flush();
+    store.together(
+        () -> {
+          store.handed(session, seq);
+          if (queued) {
+            append(new ChatWire.Delivered(seq));
+          }
+        });
   }
 
   /**
