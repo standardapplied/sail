@@ -121,7 +121,7 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
 
   @Override
   public SignIn signIn() {
-    return new SignIn("Your account", Remedy.of("Sign in inside"), ".stub/sign-in");
+    return new SignIn("Your account", Remedy.of("Sign in inside"), Remedy.NONE, ".stub/sign-in");
   }
 
   @Override

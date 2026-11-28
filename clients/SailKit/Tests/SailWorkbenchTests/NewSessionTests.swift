@@ -83,15 +83,15 @@ import Testing
         var panel = NewSession(agents, memory: ModeMemory())
         #expect(claude.login?.name == "default" && panel.way(of: claude.harness) == .signIn)
         #expect(NewSessionWords.line(claude, way: .signIn) == "Your Claude account", "the row says other than Sign in")
-        #expect(NewSessionWords.signInHelp(claude, way: .signIn, in: "dock") == "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace.")
+        #expect(NewSessionWords.signInHelp(claude, way: .signIn) == "Sign in with Claude when it starts.")
         #expect(NewSessionWords.primary(panel.readiness) == "Start Claude Code")
         let made = panel.start()
         #expect(made?.wire == SessionAgent(harness: claude.harness, mode: claude.modeDefault, inside: true))
         #expect(panel.memory.ways == [claude.harness: .signIn])
     }
 
-    /// The key chosen: the row says it, the help offers the sign-in by its name as the server writes
-    /// it, Start names the harness, the start
+    /// The key chosen: the row says it, nothing is said under Sign in (its menu holds the sign-in),
+    /// Start names the harness, the start
     /// passes the key (`inside` false), and the choice is remembered for that harness alone.
     @Test func theKeyChosenStartsWithItAndIsRememberedPerHarness() throws {
         let agents = try Self.agents("workspace-agents-dock")
@@ -99,8 +99,7 @@ import Testing
         var panel = NewSession(agents, memory: ModeMemory())
         panel.choose(way: .key)
         #expect(panel.way(of: claude.harness) == .key && NewSessionWords.line(claude, way: .key) == "API key “default”")
-        #expect(NewSessionWords.signInHelp(claude, way: .key, in: "dock") == "Your Claude account can be chosen here instead.")
-        #expect(NewSessionWords.signInHelp(codex, way: .key, in: "dock") == "Your ChatGPT account can be chosen here instead.")
+        #expect(NewSessionWords.signInHelp(claude, way: .key) == nil && NewSessionWords.signInHelp(codex, way: .key) == nil, "the menu's other item is said again under it")
         #expect(NewSessionWords.primary(panel.readiness) == "Start Claude Code")
         let made = panel.start()
         #expect(made?.wire == SessionAgent(harness: claude.harness, mode: claude.modeDefault, inside: false))
@@ -114,12 +113,12 @@ import Testing
     @Test func theSignInsHelpSaysWhetherTheWorkspaceHoldsIt() throws {
         let held = NewSession(try Self.agents("workspace-agents-dock-signed-in"), memory: ModeMemory())
         let claude = held.agents.offered[0]
-        #expect(held.way(of: "claude-code") == .signIn && NewSessionWords.signInHelp(claude, way: .signIn, in: "dock") == "Already signed in in dock.")
+        #expect(held.way(of: "claude-code") == .signIn && NewSessionWords.signInHelp(claude, way: .signIn) == "Already signed in.")
         #expect(NewSessionWords.primary(held.readiness) == "Start Claude Code")
         let stopped = try Self.agents("workspace-agents-stopped-no-login")
         #expect(stopped.offered[0].signIn?.signedIn == nil)
-        #expect(NewSessionWords.signInHelp(stopped.offered[0], way: .signIn, in: "quay") == "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace.")
-        #expect(NewSessionWords.signInHelp(stopped.offered[1], way: .signIn, in: "quay") == nil, "a harness with no sign-in of its own says one")
+        #expect(NewSessionWords.signInHelp(stopped.offered[0], way: .signIn) == "Sign in with Claude when it starts.")
+        #expect(NewSessionWords.signInHelp(stopped.offered[1], way: .signIn) == nil, "a harness with no sign-in of its own says one")
     }
 
     /// With no key stored the key cannot be chosen, nor a remembered key taken: the sign-in starts.
@@ -156,14 +155,15 @@ import Testing
             .altered(at: ["offered", 0, "display"], to: "Made Up")
             .altered(at: ["offered", 0, "sign_in", "name"], to: "GitHub account")
             .altered(at: ["offered", 0, "sign_in", "how"], to: [["text": "Made Up asks you once"]])
+            .altered(at: ["offered", 0, "sign_in", "more"], to: [["text": "Turn it on first"]])
             .altered(at: ["offered", 0, "kinds", 0, "label"], to: "Made-up token")
         let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: made.body))
         let offer = agents.offered[0]
         var panel = NewSession(agents, memory: ModeMemory())
         #expect(NewSessionWords.line(offer, way: .key) == "Made-up token “default”" && offer.signIn?.said == "Made Up asks you once.")
         #expect(NewSessionWords.line(offer, way: .signIn) == "GitHub account" && NewSessionWords.way(offer, .signIn) == "GitHub account")
-        #expect(NewSessionWords.signInHelp(offer, way: .signIn, in: "dock") == "Made Up asks you once.")
-        #expect(NewSessionWords.signInHelp(offer, way: .key, in: "dock") == "GitHub account can be chosen here instead.", "the server's name was cased again")
+        #expect(NewSessionWords.signInHelp(offer, way: .signIn) == "Made Up asks you once.")
+        #expect(NewSessionWords.signInHelp(offer, way: .key) == nil && NewSessionWords.more(offer, way: .signIn) == "Turn it on first.")
         #expect(NewSessionWords.primary(panel.readiness) == "Start Made Up" && NewSessionWords.monogram(offer.display) == "Ma")
         #expect(panel.start()?.wire == SessionAgent(harness: "made-up", mode: offer.modeDefault, inside: true))
     }
@@ -331,13 +331,30 @@ import Testing
         #expect(NewSessionWords.refused(notInstalled) == "Codex CLI is not installed in harbor's workspaces. An admin adds codex to harbor's agent install list.")
     }
 
-    /// A harness of one mode says the server's note on why it has no other; one of many says the
-    /// chosen mode's own words.
-    @Test func theChosenModeSaysItsWordsAndAHarnessOfOneModeItsNote() throws {
+    /// The chosen mode says its own words, a harness of one mode as one of many: nothing else.
+    @Test func theChosenModeSaysItsOwnWords() throws {
         let agents = try Self.agents("workspace-agents-dock")
         let claude = agents.offered[0], codex = agents.offered[1]
-        #expect(NewSessionWords.about(claude, mode: "plan") == "Researches and proposes changes, and edits nothing until you approve the plan.")
-        #expect(codex.modes.count == 1 && NewSessionWords.about(codex, mode: codex.modeDefault) == codex.note)
+        #expect(NewSessionWords.about(claude, mode: "plan") == "Changes nothing until you approve its plan.")
+        #expect(codex.modes.count == 1 && NewSessionWords.about(codex, mode: codex.modeDefault) == "Runs every command without asking.")
+    }
+
+    /// What a person must do beyond Sign in's line is the server's `more`, behind Learn more: said
+    /// only on the harness's own sign-in where the workspace may not hold it, never on the key, and
+    /// open once asked, for the panel's every harness.
+    @Test func whatAPersonMustDoFirstIsOneClickAway() throws {
+        let out = try Self.agents("workspace-agents-dock-signed-out"), held = try Self.agents("workspace-agents-dock-signed-in")
+        let codex = out.offered[1], claude = out.offered[0]
+        #expect(NewSessionWords.signInHelp(codex, way: .signIn) == "Choose “Sign in with Device Code” when it starts.")
+        #expect(NewSessionWords.more(codex, way: .signIn) == "First turn on device code sign-in in your ChatGPT security settings.")
+        #expect(NewSessionWords.more(codex, way: .key) == nil, "said on the key")
+        #expect(NewSessionWords.more(claude, way: .signIn) == nil, "said where the server says nothing")
+        #expect(NewSessionWords.more(held.offered[1], way: .signIn) == nil, "said where the workspace holds the sign-in")
+        var panel = NewSession(out, memory: ModeMemory())
+        #expect(!panel.more)
+        panel.openMore()
+        panel.choose(.harness(claude.harness))
+        #expect(panel.more, "choosing another harness closed it")
     }
 
     @Test func aRowOnItsKeyNamesTheKindsLabelAndTheKey() throws {

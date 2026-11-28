@@ -138,19 +138,9 @@ final class Codex implements Harness {
         new Mode(
             "full-access",
             "Full access",
-            "Runs every command without asking and outside Codex's sandbox.",
+            "Runs every command without asking.",
             " --dangerously-bypass-approvals-and-sandbox",
             true));
-  }
-
-  @Override
-  public Optional<String> modesNote() {
-    return Optional.of(
-        "Sail starts "
-            + displayName()
-            + " in a workspace with full access, running every command without asking and"
-            + " without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's"
-            + " container.");
   }
 
   /**
@@ -214,10 +204,8 @@ final class Codex implements Harness {
   public SignIn signIn() {
     return new SignIn(
         "Your ChatGPT account",
-        Remedy.of(
-            "Codex CLI asks you to sign in with your ChatGPT account when it starts, once in each"
-                + " workspace. Choose “Sign in with Device Code” there, after turning it on in"
-                + " your ChatGPT security settings."),
+        Remedy.of("Choose “Sign in with Device Code” when it starts."),
+        Remedy.of("First turn on device code sign-in in your ChatGPT security settings."),
         AUTH);
   }
 

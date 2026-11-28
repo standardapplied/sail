@@ -12,15 +12,17 @@ import java.util.Objects;
 /**
  * A harness's own sign-in, which a person makes inside its session in their workspace with a
  * subscription or the vendor's account, and which Sail never holds: the {@code name} a person knows
- * it by, {@code how} it goes in a sentence the New Session panel says, and the {@code file} under
- * the dev user's home it keeps it in, whose presence says the workspace holds it. That file is
- * never opened.
+ * it by, {@code how} it goes in the one line the New Session panel says, what a person must do
+ * first that the line cannot hold ({@code more}, said behind Learn more; none for nothing), and the
+ * {@code file} under the dev user's home it keeps it in, whose presence says the workspace holds
+ * it. That file is never opened.
  */
-public record SignIn(String name, Remedy how, String file) {
+public record SignIn(String name, Remedy how, Remedy more, String file) {
 
   public SignIn {
     Strings.requireNonBlank(name, "name");
     Objects.requireNonNull(how, "how");
+    Objects.requireNonNull(more, "more");
     Strings.requireNonBlank(file, "file");
   }
 }

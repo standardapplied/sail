@@ -318,6 +318,10 @@ struct Step: Decodable {
     var newSessionClick: String?
     /// The panel is open (true) or closed (false), within `seconds` (5 by default).
     var newSessionOpen: Bool?
+    /// The panel's words of this text clicked with real mouse events through the panel's own
+    /// window: the mouse-down is handled before the click returns, so they are read at once, having
+    /// taken no editor and no keys, and kept their ink and shape.
+    var newSessionClickWords: String?
     /// ⌘M pressed with the panel open, and the mode of this label chosen from the menu it opens,
     /// while AppKit tracks it.
     var newSessionMode: String?

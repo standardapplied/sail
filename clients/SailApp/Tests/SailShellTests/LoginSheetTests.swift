@@ -155,6 +155,20 @@ import Testing
         #expect(sheets.allSatisfy { $0.store.frame == first.0 && $0.cancel.frame == first.1 }, "Store changed width or Cancel moved: \(sheets.map { ($0.store.frame, $0.cancel.frame) })")
     }
 
+    /// No word the sheet shows, its heading and its quiet line included, takes a click: only its
+    /// fields do. A selectable label clicked became the first responder, its words redrawn by the
+    /// field editor in the field's own font and colour.
+    @Test func noWordOfTheSheetTakesAClick() throws {
+        var faults: [String] = []
+        for (name, model) in try Self.stages() {
+            let sheet = try Self.sheet(model)
+            defer { sheet.orderOut(nil) }
+            let words = WorkspacesViewTests.found(NSTextField.self, in: try #require(sheet.contentView)).filter { !$0.isEditable }
+            faults += words.filter(\.acceptsFirstResponder).map { "\(name): “\($0.stringValue)”" }
+        }
+        #expect(faults.isEmpty, "these take a click: \(faults.joined(separator: "\n"))")
+    }
+
     /// What the sheet shows takes a click in the turn it is made, before any display pass.
     @Test func whatTheSheetShowsTakesAClickAtOnce() throws {
         var faults: [String] = []
@@ -261,7 +275,7 @@ import Testing
         #expect(panel.isOpen && !panel.popover.stays && panel.loginSheet == nil && !panel.view.veiled)
         #expect(panel.view.rows.first?.line.stringValue == "API key “default”" && panel.view.rows.first?.chosen == true)
         #expect(panel.view.signIn?.title == "API key “default”" && view.memory.ways == ["claude-code": .key], "storing a key did not choose it")
-        #expect(panel.view.words.contains("Stored Claude Code key “default”. An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.contains("asks you to sign in") }, "the store, and the server's note on the key it replaced, are not said: \(panel.view.words)")
+        #expect(panel.view.words.contains("Stored Claude Code key “default”. An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.hasPrefix("Sign in with") }, "the store, and the server's note on the key it replaced, are not said: \(panel.view.words)")
         let start = try #require(panel.view.primary)
         #expect(start.title == "Start Claude Code" && start.isEnabled && start.holdsKeys && start.namesKey)
         #expect(WorkspacesViewTests.footSays(view.project) == ["New"], "the sheet gone, the foot under the panel says \(WorkspacesViewTests.footSays(view.project))")

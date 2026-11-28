@@ -105,6 +105,9 @@ public struct NewSession: Equatable, Sendable {
     public private(set) var filter = ""
     /// The row chosen before typing narrowed the rows, chosen again once it is erased.
     private var unfiltered: Choice?
+    /// Learn more was asked: what a person must do first is said in its place, for every harness
+    /// while the panel is open.
+    public private(set) var more = false
     private var modes: [String: String]
     private var ways: [String: Way]
 
@@ -194,6 +197,10 @@ public struct NewSession: Equatable, Sendable {
         let all = choices
         guard let at = all.firstIndex(of: chosen) else { return }
         chosen = all[max(0, min(all.count - 1, at + step))]
+    }
+
+    public mutating func openMore() {
+        more = true
     }
 
     /// Chooses `mode` for the chosen harness when that harness offers it; anything else is ignored.
@@ -317,14 +324,21 @@ public enum NewSessionWords {
         return (way == .key ? key(offer) ?? account : account ?? key(offer)) ?? ""
     }
 
-    /// The line under Sign in: on the sign-in, that `workspace` holds it already, else its own
-    /// sentence of what happens; on the key, the sign-in offered by its name, as the server writes it.
-    public static func signInHelp(_ offer: AgentOffer, way: Way, in workspace: String) -> String? {
-        guard let signIn = offer.signIn else { return nil }
-        switch way {
-        case .key: return "\(signIn.name) can be chosen here instead."
-        case .signIn: return signIn.signedIn == true ? "Already signed in in \(workspace)." : signIn.said
-        }
+    /// The line under Sign in: on the sign-in, that the workspace holds it already, else its own
+    /// sentence of what happens; nothing on the key, whose menu offers the sign-in.
+    public static func signInHelp(_ offer: AgentOffer, way: Way) -> String? {
+        guard let signIn = offer.signIn, way == .signIn else { return nil }
+        return signIn.signedIn == true ? signedIn : signIn.said
+    }
+
+    public static let signedIn = "Already signed in."
+    public static let learnMore = "Learn more"
+
+    /// What a person must do first, behind Learn more under Sign in's line: the server's `more`, on
+    /// the harness's own sign-in where the workspace may not hold it yet; nil otherwise.
+    public static func more(_ offer: AgentOffer, way: Way) -> String? {
+        guard let signIn = offer.signIn, way == .signIn, signIn.signedIn != true else { return nil }
+        return signIn.moreSaid
     }
 
     /// The person's default key of `offer`: the kind's label and its name, nil with none.
@@ -363,11 +377,9 @@ public enum NewSessionWords {
         return said.isEmpty ? nil : said
     }
 
-    /// What the chosen harness's mode says under it: a harness of one mode the server's note on
-    /// why it has no other, else the mode's own words.
+    /// What the chosen harness's mode says under it: the mode's own words.
     public static func about(_ offer: AgentOffer, mode: String) -> String {
-        let about = offer.modes.first { $0.mode == mode }?.about ?? ""
-        return offer.modes.count == 1 ? offer.note ?? about : about
+        offer.modes.first { $0.mode == mode }?.about ?? ""
     }
 
     /// The primary, which names the choice: the harness started, the Shell opened; none where the

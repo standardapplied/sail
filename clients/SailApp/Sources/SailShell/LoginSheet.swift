@@ -91,6 +91,9 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
         super.init(contentRect: NSRect(x: 0, y: 0, width: width, height: 300), styleMask: [.titled], backing: .buffered, defer: true)
         title = model.title
         contentView = content
+        for label in [heading, kept] {
+            label.isSelectable = false
+        }
         cancel.target = self
         cancel.action = #selector(cancelled(_:))
         store.target = self

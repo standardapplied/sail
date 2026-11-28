@@ -1,0 +1,4 @@
+- **New Session says each mode and sign-in in one line.** Every mode of Claude Code and Codex CLI, in a terminal and in a chat, now says what it does to you in a few words ("Runs every command without asking.", "Asks before it edits or runs a command."), and Sign in says what to do in one line ("Sign in with Claude when it starts."). The long note on why Codex CLI has one mode is gone, and so is the line naming the other choice of Sign in.
+- **Learn more under Codex CLI's sign-in.** The step you must take first, turning on device code sign-in in your ChatGPT settings, opens in place under Sign in's line.
+- **Clicking a note in New Session changes nothing.** Clicking a mode's warning no longer changes its shape and colour or takes the keys from the panel.
+- **A harness with one mode shows it as a value.** Codex CLI's Full access is said as text beside Mode, no longer as a greyed button.

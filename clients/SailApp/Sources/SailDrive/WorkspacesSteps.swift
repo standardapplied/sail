@@ -826,11 +826,18 @@ extension Driver {
         }
         if let title = step.newSessionClick {
             let view = panel.view
-            let controls: [NSView] = view.rows + [view.primary, view.secondary, view.modes, view.signIn].compactMap { $0 }
+            let controls: [NSView] = view.rows + [view.primary, view.secondary, view.modes, view.signIn, view.learnMore].compactMap { $0 }
             let named = { (control: NSView) -> String in (control as? NewSessionRow)?.name.stringValue ?? (control as? NSButton)?.title ?? "" }
             guard panel.isOpen, let target = controls.first(where: { named($0) == title }) else { return (false, "the panel shows no \(title); " + said()) }
             guard await click(target, at: NSPoint(x: target.bounds.midX, y: target.bounds.midY)) else { return (false, "\(title) could not be clicked") }
             return (true, "clicked \(title)")
+        }
+        if let words = step.newSessionClickWords {
+            guard panel.isOpen, let label = Self.found(NSTextField.self, in: panel.view).first(where: { $0.stringValue == words }), let box = label.window else { return (false, "the panel shows no “\(words)”; " + said()) }
+            let before = label.attributedStringValue, frame = label.frame, keys = shell.window.firstResponder, held = box.firstResponder
+            guard await click(label, at: NSPoint(x: label.bounds.midX, y: label.bounds.midY)) else { return (false, "“\(words)” could not be clicked") }
+            let kept = label.currentEditor() == nil && label.attributedStringValue.isEqual(to: before) && label.frame == frame && box.firstResponder === held && shell.window.firstResponder === keys
+            return (kept, kept ? "“\(words)” took no click" : "“\(words)” took the click: editor \(label.currentEditor().map { String(describing: type(of: $0)) } ?? "none"), the panel's keys with \(String(describing: box.firstResponder))")
         }
         if let open = step.newSessionOpen {
             let found = await waitUntil(step.seconds ?? 5) { panel.isOpen == open }

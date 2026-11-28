@@ -373,11 +373,11 @@ import Testing
         #expect(shown.rows.map(\.chosen) == [true, false, false])
         #expect(shown.words.first == "New session in dock")
         #expect(shown.modes?.title == "Claude Code's own" && shown.signIn?.title == "Your Claude account")
-        let order = try ["Shell", "CLAUDE CODE", "Mode", "Claude Code's own", "Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual.", "Sign in", "Already signed in in dock.", "Start Claude Code"].map { said in
+        let order = try ["Shell", "CLAUDE CODE", "Mode", "Claude Code's own", "Starts as Claude Code starts on its own.", "Sign in", "Already signed in.", "Start Claude Code"].map { said in
             try #require(shown.words.firstIndex(of: said), "\(said) is not said: \(shown.words)")
         }
         #expect(order == order.sorted(), "the options do not stand under the rows in order: \(shown.words)")
-        #expect(!shown.words.contains { $0.contains("asks you to sign in") }, "a workspace holding the sign-in was told to sign in")
+        #expect(!shown.words.contains { $0.hasPrefix("Sign in with") }, "a workspace holding the sign-in was told to sign in")
         #expect(shown.primary?.isEnabled == true && shown.words.contains(NewSessionWords.hint(.rows, modes: true)) && shown.warned == nil)
         #expect(!shown.words.contains { $0.contains("stopped") }, "a running workspace said it is stopped")
         let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) }), box = panel.popover.frame
@@ -387,7 +387,7 @@ import Testing
     }
 
     /// ↓ and ↑ choose and stop at the ends; the chosen harness alone shows its mode; Codex, of one
-    /// mode, shows it as words with the server's note; ⌘M opens the mode's menu, its labels the
+    /// mode, says it as a value with its own words, no button; ⌘M opens the mode's menu, its labels the
     /// server's with the chosen one checked; a mode chosen there is what Return starts, on the
     /// harness's own sign-in where nothing else was chosen, with no command, and is remembered for
     /// that harness with the start.
@@ -399,9 +399,12 @@ import Testing
         panel.popUp = { popped.append($0) }
         try Self.press(try Self.down(), in: window)
         #expect(panel.view.rows.map(\.chosen) == [false, true, false] && panel.view.modes == nil)
-        let fixed = try #require(WorkspacesViewTests.found(SailButton.self, in: panel.view).first { $0.title == "Full access" }, "Codex's one mode is not shown")
-        #expect(!fixed.isEnabled && fixed.menu == nil, "a harness of one mode offers a menu")
-        #expect(panel.view.words.contains { $0.hasPrefix("Sail starts Codex CLI in a workspace with full access") } && panel.view.primary?.title == "Start Codex CLI")
+        #expect(panel.view.modeValue?.stringValue == "Full access", "Codex's one mode is not said: \(panel.view.words)")
+        #expect(!WorkspacesViewTests.found(NSButton.self, in: panel.view).contains { $0.title == "Full access" }, "a harness of one mode shows it as a button")
+        let value = try #require(panel.view.modeValue), signIn = try #require(panel.view.signIn)
+        #expect(value.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(view.look.text) && !value.isSelectable, "the value is not said in ink")
+        #expect(abs(value.frame.minX - signIn.frame.insetBy(dx: Look.haloRoom, dy: Look.haloRoom).minX) < 0.5, "the value does not stand where Sign in's pop-up does")
+        #expect(panel.view.words.contains("Runs every command without asking.") && panel.view.primary?.title == "Start Codex CLI")
         try Self.press(try Self.key(46, "m", .command), in: window)
         #expect(popped.isEmpty, "⌘M opened a menu for a harness of one mode")
         #expect(panel.view.words.contains(NewSessionWords.hint(.rows, modes: false)) && !panel.view.words.contains(NewSessionWords.hint(.rows, modes: true)), "⌘M is named where it opens nothing")
@@ -416,7 +419,7 @@ import Testing
         #expect(modes.items.map(\.title) == ["Claude Code's own", "Manual", "Accept edits", "Plan", "Auto", "Don't ask", "Bypass permissions"])
         #expect(modes.items.filter { $0.state == .on }.map(\.title) == ["Claude Code's own"])
         modes.performActionForItem(at: 3)
-        #expect(panel.view.modes?.title == "Plan" && panel.view.words.contains("Researches and proposes changes, and edits nothing until you approve the plan."))
+        #expect(panel.view.modes?.title == "Plan" && panel.view.words.contains("Changes nothing until you approve its plan."))
         var started: [(AgentStart?, String, String)] = []
         view.onStart = { started.append(($0, $1, $2)) }
         try Self.press(try Self.returnKey(), in: window)
@@ -480,7 +483,7 @@ import Testing
         defer { window.orderOut(nil) }
         let panel = try await Self.open("pier", in: view)
         #expect(panel.view.words.contains("pier is stopped. Starting a session starts it."))
-        #expect(panel.view.primary?.title == "Start Claude Code" && panel.view.words.contains("Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."))
+        #expect(panel.view.primary?.title == "Start Claude Code" && panel.view.words.contains("Sign in with Claude when it starts."))
     }
 
     /// No key stored: no refusal, the harness's own sign-in is the way in. Sign in reads its name and
@@ -496,7 +499,7 @@ import Testing
         #expect(menu.items.map { $0.isSeparatorItem ? "-" : $0.title } == ["Your Claude account", "-", "Store a Key"])
         #expect(menu.items.filter { $0.state == .on }.map(\.title) == ["Your Claude account"])
         #expect(panel.view.signIn?.title == "Your Claude account")
-        let order = try ["Mode", "Claude Code's own", "Sign in", "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."].map { said in
+        let order = try ["Mode", "Claude Code's own", "Sign in", "Sign in with Claude when it starts."].map { said in
             try #require(words.firstIndex(of: said), "\(said) is not said: \(words)")
         }
         #expect(order == order.sorted(), "\(words)")
@@ -522,12 +525,12 @@ import Testing
         #expect(menu.items.map { $0.isSeparatorItem ? "-" : $0.title } == ["Your Claude account", "API key “default”", "-", "Store a Key"])
         #expect(panel.view.signIn?.title == "Your Claude account" && panel.view.primary?.title == "Start Claude Code")
         #expect(panel.view.rows.first?.line.stringValue == "Your Claude account", "the row says other than Sign in")
-        #expect(panel.view.words.contains("Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."))
+        #expect(panel.view.words.contains("Sign in with Claude when it starts."))
         #expect(panel.view.signIn?.accessibilityLabel() == "Sign in" && panel.view.signIn?.accessibilityValue() as? String == "Your Claude account")
         menu.performActionForItem(at: 1)
         #expect(panel.view.signIn?.title == "API key “default”" && panel.view.rows.first?.line.stringValue == "API key “default”")
-        #expect(panel.view.primary?.title == "Start Claude Code" && !panel.view.words.contains { $0.contains("asks you to sign in") })
-        #expect(panel.view.words.contains("Your Claude account can be chosen here instead."))
+        #expect(panel.view.primary?.title == "Start Claude Code" && !panel.view.words.contains { $0.hasPrefix("Sign in with") })
+        #expect(Array(panel.view.words.drop { $0 != NewSessionWords.signIn }.prefix(3)) == ["Sign in", "API key “default”", "Start Claude Code"], "something is said under Sign in on the key: \(panel.view.words)")
         var started: [AgentStart?] = []
         view.onStart = { start, _, _ in started.append(start) }
         try Self.press(try Self.returnKey(), in: window)
@@ -597,7 +600,7 @@ import Testing
     }
 
     /// A mode the server calls risky says its words in the warning tone after the warning mark,
-    /// wherever they show: Bypass permissions chosen by ⌘M, Codex's one mode with its note, and a
+    /// wherever they show: Bypass permissions chosen by ⌘M, Codex's one mode, and a
     /// made-up harness's mode under a name the app has never seen; a mode not flagged says them
     /// quietly, Bypass permissions too once the server stops flagging it.
     @Test func aRiskyModeWarnsInItsOwnTone() async throws {
@@ -609,16 +612,15 @@ import Testing
         #expect(panel.view.warned == nil)
         #expect(panel.view.modes?.accessibilityLabel() == "Mode")
         try Self.mode("Bypass permissions", in: panel)
-        #expect(panel.view.warned == "Skips every permission prompt and safety check.")
+        #expect(panel.view.warned == "Runs everything without asking.")
         #expect(panel.view.modes?.accessibilityLabel() == NewSessionWords.modeWarning, "VoiceOver hears no warning, or hears its words twice")
-        let label = try #require(WorkspacesViewTests.found(NSTextField.self, in: panel.view).first { $0.stringValue == "Skips every permission prompt and safety check." })
+        let label = try #require(WorkspacesViewTests.found(NSTextField.self, in: panel.view).first { $0.stringValue == "Runs everything without asking." })
         #expect(label.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(Tint(view.look.warning)), "the warning is not in the warning tone")
         try Self.mode("Plan", in: panel)
         #expect(panel.view.warned == nil, "a mode not flagged warns")
         try Self.press(try Self.down(), in: window)
-        #expect(panel.view.warned?.hasPrefix("Sail starts Codex CLI in a workspace with full access") == true, "Codex's one risky mode says its note quietly")
-        let one = try #require(WorkspacesViewTests.found(SailButton.self, in: panel.view).first { $0.title == "Full access" })
-        #expect(one.accessibilityLabel() == NewSessionWords.modeWarning, "VoiceOver hears no warning on Codex's one mode")
+        #expect(panel.view.warned == "Runs every command without asking.", "Codex's one risky mode says its words quietly")
+        #expect(panel.view.modeValue?.accessibilityLabel() == NewSessionWords.modeWarning, "VoiceOver hears no warning on Codex's one mode")
         try Self.press(try Self.down(), in: window)
         #expect(panel.view.rows.first(where: \.chosen)?.name.stringValue == "Tide" && panel.view.warned == nil)
         try Self.mode("Reckless", in: panel)
@@ -628,6 +630,85 @@ import Testing
         let quiet = try await Self.open("dock", in: calm)
         try Self.mode("Bypass permissions", in: quiet)
         #expect(quiet.view.warned == nil, "a mode warned by its name")
+    }
+
+    /// The owner, 28 November: "the mode warnings are so long. copy vomit. keep it short and
+    /// simple." Every mode's words and every Sign in line are one line, at the design's window and
+    /// the least, for each harness, each of its modes and each way in, from a workspace that holds
+    /// no sign-in, one that holds both, and a person with no key; Learn more opens what a person must
+    /// do first in place, its top where it was, the box in the page.
+    @Test func everyModeAndSignInSaysItInOneLine() async throws {
+        var faults: [String] = [], said = Set<String>()
+        for golden in ["workspace-agents-dock", "workspace-agents-dock-signed-out", "workspace-agents-dock-signed-in", "workspace-agents-dock-no-login"] {
+            for (width, height) in Self.windows {
+                let (view, window) = try await Self.atTheTop(try Exchange(golden), width: width, height: height)
+                defer { window.orderOut(nil) }
+                let panel = try await Self.open("dock", in: view)
+                let top = panel.popover.frame.maxY
+                for at in 0 ..< 2 {
+                    if at > 0 { try Self.press(try Self.down(), in: window) }
+                    guard case let .offered(shown)? = panel.content, case let .harness(harness) = shown.chosen, let offer = shown.offer(harness) else { continue }
+                    for mode in offer.modes {
+                        if offer.modes.count > 1 { try Self.mode(mode.label, in: panel) }
+                        let ways = try #require(panel.view.signIn?.menu).items.filter { $0.representedObject is String }.map(\.title)
+                        for way in ways {
+                            let menu = try #require(panel.view.signIn?.menu)
+                            menu.performActionForItem(at: try #require(menu.items.firstIndex { $0.title == way }))
+                            let at = "\(golden) at \(width) pt, \(offer.display) in \(mode.label) on \(way)"
+                            guard case let .offered(now)? = panel.content, let chosen = now.way(of: harness) else { faults.append("\(at): nothing offered"); continue }
+                            for line in [mode.about, NewSessionWords.signInHelp(offer, way: chosen)].compactMap(\.self) {
+                                said.insert(line)
+                                guard let label = WorkspacesViewTests.found(NSTextField.self, in: panel.view).first(where: { $0.stringValue == line }) else { faults.append("\(at): “\(line)” not shown"); continue }
+                                let needs = NewSessionView.height(of: label, width: Double(label.frame.width))
+                                if needs > NewSessionView.about + 0.5 || Double(label.frame.height) > NewSessionView.about + 0.5 { faults.append("\(at): “\(line)” takes \(needs) pt in \(label.frame.height), not one line") }
+                            }
+                            if let learnMore = panel.view.learnMore {
+                                try Self.press(learnMore)
+                                let more = try #require(NewSessionWords.more(offer, way: .signIn))
+                                if !panel.view.words.contains(more) || panel.view.learnMore != nil { faults.append("\(at): Learn more opened nothing: \(panel.view.words)") }
+                                faults += Self.misplaced(panel, in: view, top: top, "\(at), Learn more opened")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        #expect(faults.isEmpty, "\(faults.count) faults: \(faults.prefix(20).joined(separator: "\n"))")
+        #expect(said.isSuperset(of: ["Runs every command without asking.", "Runs everything without asking.", "Sign in with Claude when it starts.", "Choose “Sign in with Device Code” when it starts.", "Already signed in."]), "a line was never checked: \(said)")
+    }
+
+    /// The owner, 28 November: "when I click on the text, it changes shape a little bit, loses its
+    /// warning font color." A wrapping label is selectable, and a click made it the first responder,
+    /// its words handed to the field editor in the field's own font and colour. No word the panel
+    /// shows takes a click: none becomes the first responder, gets an editor or changes, the
+    /// warning's included, on Claude Code in Bypass permissions, Codex signed out, and Learn more
+    /// opened.
+    @Test func aClickOnAnyWordChangesNothing() async throws {
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock-signed-out"])
+        defer { window.orderOut(nil) }
+        let panel = try await Self.open("dock", in: view)
+        var faults: [String] = []
+        func clickEveryWord(_ scene: String) {
+            let box = panel.popover.panel
+            for label in WorkspacesViewTests.found(NSTextField.self, in: panel.view) {
+                let before = label.attributedStringValue, held = box.firstResponder
+                let took = box.makeFirstResponder(label) && box.firstResponder !== held
+                let editor = label.currentEditor() as? NSTextView
+                let ink = editor?.textStorage.flatMap { $0.length > 0 ? $0.attribute(.foregroundColor, at: 0, effectiveRange: nil) : nil }
+                if took || editor != nil || !label.attributedStringValue.isEqual(to: before) {
+                    faults.append("\(scene): “\(label.stringValue)” took the click\(editor.map { _ in ", drawn by the field editor in \(String(describing: ink)), not \(String(describing: before.attribute(.foregroundColor, at: 0, effectiveRange: nil)))" } ?? "")")
+                }
+                box.makeFirstResponder(held)
+            }
+        }
+        try Self.mode("Bypass permissions", in: panel)
+        clickEveryWord("Claude Code in Bypass permissions")
+        try Self.press(try Self.down(), in: window)
+        clickEveryWord("Codex CLI signed out")
+        try Self.press(panel.view.learnMore)
+        clickEveryWord("Learn more opened")
+        #expect(panel.view.warned == "Runs every command without asking." && window.firstResponder is NewSessionKeys, "the keys left the panel")
+        #expect(faults.isEmpty, "\(faults.joined(separator: "\n"))")
     }
 
     /// `label` chosen in the chosen harness's mode menu, as the menu chooses it.
@@ -970,14 +1051,14 @@ import Testing
         let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: try Exchange("workspace-agents-dock").body))
         let panel = try await Self.open("dock", in: view)
         let store = { panel.show(.agents(agents), memory: ModeMemory(modes: [:], ways: ["claude-code": .key]), stored: Self.storedLine, harness: "claude-code", inUse: true) }
-        let onKey = "Your Claude account can be chosen here instead.", onAccount = "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."
+        let onAccount = "Sign in with Claude when it starts."
         store()
-        #expect(panel.view.words.contains(Self.storedLine) && !panel.view.words.contains(onKey), "\(panel.view.words)")
+        #expect(panel.view.words.contains(Self.storedLine) && !panel.view.words.contains(onAccount), "\(panel.view.words)")
         try Self.press(try Self.down(), in: window)
-        let codex = try #require(NewSessionWords.signInHelp(agents.offered[1], way: .signIn, in: "dock"))
+        let codex = try #require(NewSessionWords.signInHelp(agents.offered[1], way: .signIn))
         #expect(panel.line == nil && !panel.view.words.contains(Self.storedLine) && panel.view.words.contains(codex), "Codex CLI chosen: \(panel.view.words)")
         try Self.press(try Self.up(), in: window)
-        #expect(panel.line == nil && panel.view.words.contains(onKey), "back on Claude Code: \(panel.view.words)")
+        #expect(panel.line == nil && !panel.view.words.contains(Self.storedLine) && !panel.view.words.contains(onAccount), "back on Claude Code: \(panel.view.words)")
         store()
         try #require(panel.view.signIn?.menu).performActionForItem(at: 0)
         #expect(panel.line == nil && !panel.view.words.contains(Self.storedLine) && panel.view.words.contains(onAccount), "the account chosen: \(panel.view.words)")

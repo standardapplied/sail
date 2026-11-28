@@ -247,11 +247,11 @@ func answer<Response>(
         #expect(claude.login?.name == "work" && claude.login?.kind == "api-key")
         #expect(claude.modeDefault == claude.modes.first?.mode)
         #expect(claude.modes.count == 7 && claude.refusal == nil && claude.inside)
-        #expect(claude.signIn?.name == "Your Claude account" && claude.signIn?.signedIn == false && claude.signIn?.said?.hasPrefix("Claude Code asks you to sign in") == true)
+        #expect(claude.signIn?.name == "Your Claude account" && claude.signIn?.signedIn == false && claude.signIn?.said == "Sign in with Claude when it starts." && claude.signIn?.more == nil)
         #expect(claude.kinds.map(\.label) == ["API key"], "its one key")
         let codex = try #require(owned.offered.last)
         #expect(codex.refusal?.code == .known(.harnessNotInstalled) && !codex.inside && codex.login == nil)
-        #expect(codex.note?.hasPrefix("Sail starts Codex CLI in a workspace with full access") == true && codex.modes.count == 1)
+        #expect(codex.modes.map(\.about) == ["Runs every command without asking."])
 
         let stopped = try agents("workspace-agents-stopped-no-login", "quay")
         #expect(!stopped.running && stopped.refusal == nil)

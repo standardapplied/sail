@@ -184,7 +184,7 @@ public struct Exchange: Sendable {
             "modes": risky ? [own, reckless] : [own],
             "kinds": [["kind": "token", "label": "\(display) token", "how": [["text": "Create a token in \(display)'s settings"]]]],
             "login": ["name": "default", "kind": "token"],
-            "sign_in": ["name": "Your \(display) account", "signed_in": false, "how": [["text": "\(display) asks you to sign in when it starts, once in each workspace."]]],
+            "sign_in": ["name": "Your \(display) account", "signed_in": false, "how": [["text": "Sign in with \(display) when it starts."]]],
         ]
         if let unavailable {
             offer["refusal"] = ["code": "harness_not_installed", "message": "\(display) is not installed in harbor's workspaces.", "action": "An admin adds it to harbor's agent install list.", "field_errors": [Any]()]

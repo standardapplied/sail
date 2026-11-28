@@ -234,6 +234,38 @@ class HarnessContractTest {
             + harness.storedLogins());
   }
 
+  /**
+   * What New Session says of a harness, each mode's words (a chat's too) and its sign-in's, is one
+   * short sentence of what happens to the person, never of how the harness works inside; anything a
+   * person must do beyond it is the sign-in's {@code more}, words alone.
+   */
+  @ParameterizedTest
+  @MethodSource("harnesses")
+  void everyModeAndSignInIsSaidInOneShortSentence(Harness harness) {
+    var said =
+        Stream.concat(
+                Stream.concat(
+                        harness.modes().stream(),
+                        harness.chat().stream().flatMap(chat -> chat.modes().stream()))
+                    .map(Harness.Mode::about),
+                Stream.of(harness.signIn().how().plain()))
+            .toList();
+
+    assertEquals(
+        List.of(),
+        said.stream()
+            .filter(
+                words ->
+                    words.split(" ").length > 9
+                        || !words.endsWith(".")
+                        || words.indexOf('.') != words.length() - 1
+                        || Stream.of("sandbox", "bubblewrap", "Sail ", "classifier")
+                            .anyMatch(words::contains))
+            .toList(),
+        harness.yamlName() + " says more than one short sentence of what happens to the person");
+    assertEquals(List.of(), harness.signIn().more().commands(), harness.yamlName());
+  }
+
   @ParameterizedTest
   @MethodSource("harnesses")
   void aKindTheHarnessDoesNotDeclareIsRefusedNamingTheOnesItDoes(Harness harness) {

@@ -290,11 +290,7 @@ class WorkspaceAgentsTest {
             "name",
             "Your Claude account",
             "how",
-            List.of(
-                Map.of(
-                    "text",
-                    "Claude Code asks you to sign in with your Claude account when it starts, once"
-                        + " in each workspace.")),
+            List.of(Map.of("text", "Sign in with Claude when it starts.")),
             "signed_in",
             true),
         claude.get("sign_in"),
@@ -318,7 +314,7 @@ class WorkspaceAgentsTest {
         ((List<?>) codex.get("modes"))
             .stream().map(mode -> ((Map<?, ?>) mode).get("risky")).toList(),
         "Codex's one mode skips its own checks");
-    assertEquals(Harnesses.of("codex").modesNote().orElseThrow(), codex.get("note"));
+    assertFalse(codex.containsKey("note"), "its one mode's words say it all");
     assertFalse(answer.toString().contains("sk-"), "no login's value is answered");
   }
 
@@ -355,6 +351,17 @@ class WorkspaceAgentsTest {
           List.of(agent.get("sign_in"), agent.get("kinds")),
           harness);
     }
+    assertEquals(
+        List.of(
+            false,
+            List.of(
+                Map.of(
+                    "text",
+                    "First turn on device code sign-in in your ChatGPT security settings."))),
+        List.of(
+            ((Map<?, ?>) offered.offer("claude-code").get("sign_in")).containsKey("more"),
+            ((Map<?, ?>) offered.offer("codex").get("sign_in")).get("more")),
+        "what a person must do beyond the line is said only where there is something");
   }
 
   /**
