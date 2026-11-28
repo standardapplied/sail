@@ -149,12 +149,18 @@ public final class ChatHost implements AutoCloseable {
   /**
    * Opens a chat with {@code harness} in the caller's workspace {@code workspace} of {@code
    * project}, in {@code mode}, signed in with their stored login or, {@code inside}, with the
-   * harness's own sign-in there: refused as a pty agent start of it is, word for word. No process
-   * starts until a message is sent.
+   * harness's own sign-in there: refused as a pty agent start of it is, word for word, and a
+   * harness with no chat sent to a terminal only on a runner with a terminal door ({@code
+   * terminal}). No process starts until a message is sent.
    */
   public Opened open(
-      String project, String workspace, String harness, String mode, boolean inside) {
-    var opener = launch.admit(project, workspace, harness, mode, inside);
+      String project,
+      String workspace,
+      String harness,
+      String mode,
+      boolean inside,
+      boolean terminal) {
+    var opener = launch.admit(project, workspace, harness, mode, inside, terminal);
     var session = Ids.newId().toString();
     store.open(
         new ChatStore.Chat(

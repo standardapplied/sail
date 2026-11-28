@@ -190,7 +190,9 @@ class ChatEdgesTest {
         assertThrows(
             ApiException.class,
             () ->
-                as("ghost", () -> bench.host.open("acme", "try", "claude-code", "default", true)));
+                as(
+                    "ghost",
+                    () -> bench.host.open("acme", "try", "claude-code", "default", true, true)));
 
     assertEquals("forbidden", refused.code());
   }

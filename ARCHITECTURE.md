@@ -4579,7 +4579,15 @@ ended otherwise, stopped or cut) and `idle` (no turn yet). A terminal row carrie
 "inside"}`: `HarnessChat.modes` in the words a person reads, its first, and `inside`, the offer's
 `inside` and `HarnessChat.signsInInside` together, the one switch for whether a chat may use the
 sign-in a person made inside their workspace, which Sail never holds, copies or relays (true for
-Claude Code, the owner's stated default for internal staff). A chat's open reads the same seam
+Claude Code, the owner's stated default for internal staff). On a runner with no terminal door (no
+`terminal-listen`) each offer holds only the forms it opens (`AgentOffer.forms`), Claude Code
+`["chat"]`, an offer left with none (Codex) is not offered, and an answer left with no offer says once
+why as its `refusal`, in the ticket route's own `terminal_not_offered` words
+(`TerminalTickets.notOffered`). The answer says at its top level whether this runner opens a
+terminal at all (`"terminal": true|false`, the router's door, refused answers too), for what is no
+offer (a Shell, a shell beside a chat); a chat's open of a harness with no chat says "…; start it in
+a terminal." only where it does, and "Codex CLI has no chat form." where it does not, by the same
+`AgentOffer.opens`. A chat's open reads the same seam
 (`ChatLaunch.form`): a harness with no chat form is refused, and while the switch is off an
 `inside` open is `422` "Claude Code's chat takes your stored API key here, not the sign-in made in
 the workspace."; a stored key is always offered (`kinds`). `GET /v1/me/preferences` answers
