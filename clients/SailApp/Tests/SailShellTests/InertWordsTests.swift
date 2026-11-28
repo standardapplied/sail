@@ -6,7 +6,8 @@ import SailDesign
 import SailLook
 import Testing
 
-/// The words a card, a sheet and an empty state show take no click: a selectable label clicked
+/// The words a card, a sheet and an empty state show take no click, so none is selectable, which
+/// is what AppKit asks before a click starts a selection: a selectable label clicked
 /// becomes the first responder, takes the keys from what it lies over and hands its words to the
 /// field editor, drawn in the field's own font and colour, without their ink or line height.
 @MainActor @Suite(.timeLimit(.minutes(1))) struct InertWordsTests {
@@ -21,7 +22,7 @@ import Testing
         let sheet = Sheet(title: "Delete dock?", body: "Its files go with it.", confirm: "Delete", kind: .destructive, look: look, titleFont: titleFont)
         let empty = EmptyState(icon: .box, title: "No workspaces in harbor yet", body: "A workspace is your own copy of harbor.", actions: [], look: look, titleFont: titleFont, mono: try LabelFont(directory: LookTests.fonts))
         let shown: [(String, NSView)] = [("card", card), ("sheet", try #require(sheet.window.contentView)), ("empty state", empty)]
-        let taking = shown.flatMap { name, view in Self.words(in: view).filter(\.acceptsFirstResponder).map { "\(name): “\($0.stringValue)”" } }
+        let taking = shown.flatMap { name, view in Self.words(in: view).filter(\.isSelectable).map { "\(name): “\($0.stringValue)”" } }
         #expect(shown.allSatisfy { !Self.words(in: $1).isEmpty } && taking.isEmpty, "these take a click: \(taking)")
     }
 

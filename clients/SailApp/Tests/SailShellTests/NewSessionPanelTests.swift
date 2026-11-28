@@ -402,7 +402,7 @@ import Testing
         #expect(panel.view.modeValue?.stringValue == "Full access", "Codex's one mode is not said: \(panel.view.words)")
         #expect(!WorkspacesViewTests.found(NSButton.self, in: panel.view).contains { $0.title == "Full access" }, "a harness of one mode shows it as a button")
         let value = try #require(panel.view.modeValue), signIn = try #require(panel.view.signIn)
-        #expect(value.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(view.look.text) && !value.isSelectable, "the value is not said in ink")
+        #expect(value.attributedStringValue.length > 0 && value.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(view.look.text) && !value.isSelectable, "the value is not said in ink")
         #expect(abs(value.frame.minX - signIn.frame.insetBy(dx: Look.haloRoom, dy: Look.haloRoom).minX) < 0.5, "the value does not stand where Sign in's pop-up does")
         #expect(panel.view.words.contains("Runs every command without asking.") && panel.view.primary?.title == "Start Codex CLI")
         try Self.press(try Self.key(46, "m", .command), in: window)
@@ -695,8 +695,9 @@ import Testing
                 let took = box.makeFirstResponder(label) && box.firstResponder !== held
                 let editor = label.currentEditor() as? NSTextView
                 let ink = editor?.textStorage.flatMap { $0.length > 0 ? $0.attribute(.foregroundColor, at: 0, effectiveRange: nil) : nil }
-                if took || editor != nil || !label.attributedStringValue.isEqual(to: before) {
-                    faults.append("\(scene): “\(label.stringValue)” took the click\(editor.map { _ in ", drawn by the field editor in \(String(describing: ink)), not \(String(describing: before.attribute(.foregroundColor, at: 0, effectiveRange: nil)))" } ?? "")")
+                let own = before.length > 0 ? before.attribute(.foregroundColor, at: 0, effectiveRange: nil) : nil
+                if label.isSelectable || took || editor != nil || !label.attributedStringValue.isEqual(to: before) {
+                    faults.append("\(scene): “\(label.stringValue)” takes a click\(label.isSelectable ? ", selectable" : "")\(editor.map { _ in ", drawn by the field editor in \(String(describing: ink)), not \(String(describing: own))" } ?? "")")
                 }
                 box.makeFirstResponder(held)
             }

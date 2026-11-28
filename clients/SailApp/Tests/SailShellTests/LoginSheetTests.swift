@@ -164,7 +164,7 @@ import Testing
             let sheet = try Self.sheet(model)
             defer { sheet.orderOut(nil) }
             let words = WorkspacesViewTests.found(NSTextField.self, in: try #require(sheet.contentView)).filter { !$0.isEditable }
-            faults += words.filter(\.acceptsFirstResponder).map { "\(name): “\($0.stringValue)”" }
+            faults += words.filter(\.isSelectable).map { "\(name): “\($0.stringValue)”" }
         }
         #expect(faults.isEmpty, "these take a click: \(faults.joined(separator: "\n"))")
     }
