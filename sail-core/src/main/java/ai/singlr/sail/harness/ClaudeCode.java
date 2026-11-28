@@ -313,11 +313,7 @@ final class ClaudeCode implements Harness {
         new Mode(
             "default", "Claude Code's own", "Starts as Claude Code starts on its own.", "", false),
         permissionMode("manual", "Manual", "Asks before it edits or runs a command.", false),
-        permissionMode(
-            "acceptEdits",
-            "Accept edits",
-            "Changes files without asking.",
-            false),
+        permissionMode("acceptEdits", "Accept edits", "Changes files without asking.", false),
         permissionMode("plan", "Plan", "Changes nothing until you approve its plan.", false),
         permissionMode("auto", "Auto", "Runs without asking, but blocks risky actions.", false),
         permissionMode(
