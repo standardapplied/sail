@@ -270,17 +270,35 @@ public final class ChatStore {
   }
 
   /**
-   * The chats {@code opener} opened in workspace {@code workspace} of {@code project} that are open
-   * or ended at or after {@code endedSince}, newest first, then by id; at most {@code limit}.
+   * A chat as its workspace's listing reads it: the chat, and the first {@code chars} characters of
+   * the {@code text} of its first item of kind {@code firstOf}, null when it has none.
    */
-  public List<Chat> listed(
-      String opener, String project, String workspace, Instant endedSince, int limit) {
+  public record Listed(Chat chat, String opening) {}
+
+  /**
+   * The chats {@code opener} opened in workspace {@code workspace} of {@code project} that are open
+   * or ended at or after {@code endedSince}, newest first, then by id; at most {@code limit}; each
+   * with the opening {@code chars} characters of its first item of kind {@code firstOf}, read in
+   * the same query.
+   */
+  public List<Listed> listed(
+      String opener,
+      String project,
+      String workspace,
+      Instant endedSince,
+      int limit,
+      String firstOf,
+      int chars) {
     return db.query(
         "SELECT "
             + COLUMNS
+            + ", (SELECT substr(json_extract(payload, '$.text'), 1, ?) FROM chat_items"
+            + " WHERE session = chat_sessions.id AND kind = ? ORDER BY seq LIMIT 1)"
             + " FROM chat_sessions WHERE opener = ? AND project = ? AND workspace = ?"
             + " AND (ended_at IS NULL OR ended_at >= ?) ORDER BY created_at DESC, id LIMIT ?",
-        ChatStore::chat,
+        row -> new Listed(chat(row), row.text(13)),
+        chars,
+        firstOf,
         opener,
         project,
         workspace,

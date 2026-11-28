@@ -894,9 +894,10 @@ echo "CHAT WALKED"'
 # A chat in its workspace's sessions listing through a real turn, on the API as the app reads it, on a
 # box that offers no terminal door yet, so the listing is her chats alone, never a refusal: the
 # opener stores the fleet's key (read from root's file, on the request's input, never a command line)
-# and makes it her default, opens a chat with Claude Code in her workspace and finds it listed idle;
-# one message read to its turn's end lists it your_turn; a command Claude Code asks before running,
-# read to its permission, lists it needs_you; ended, it is listed ended and not live. Another member
+# and makes it her default, opens a chat with Claude Code in her workspace and finds it listed idle
+# and untitled; one message read to its turn's end lists it your_turn, titled by that message; a
+# command Claude Code asks before running, read to its permission, lists it needs_you, its title still
+# the first message's; ended, it is listed ended and not live. Another member
 # listing the workspace sees no such chat while the opener still does. Her preference reads chat, is
 # set to terminal and read back, the other member's still reads chat, and a word no preference
 # takes is refused. With no terminal door the agents route says terminal false, Claude Code offers a
@@ -927,7 +928,7 @@ listed() {
   python3 -I -c "
 import json, sys
 rows = [r for r in json.load(open(\"/tmp/list.json\"))[\"sessions\"] if r[\"name\"] == sys.argv[1]]
-print(\" \".join([rows[0][\"form\"], rows[0][\"state\"], str(rows[0][\"live\"]).lower()]) if rows else \"none\")
+print(\" \".join([rows[0][\"form\"], rows[0][\"state\"], str(rows[0][\"live\"]).lower(), rows[0].get(\"title\", \"untitled\")]) if rows else \"none\")
 " "$session"
 }
 read_to() {
@@ -959,22 +960,23 @@ status=$(call "$token" POST "$place/chats" "{\"harness\":\"claude-code\",\"mode\
 [ "$status" = 201 ] || fail "the chat did not open: HTTP $status"
 session=$(python3 -I -c "import json; print(json.load(open(\"/tmp/list.json\"))[\"session\"])")
 said=$(listed "$token"); echo "opened: $said"
-[ "$said" = "chat idle true" ] || fail "a chat just opened is listed as $said"
+[ "$said" = "chat idle true untitled" ] || fail "a chat just opened is listed as $said"
 after=0
-status=$(call "$token" POST "/v1/sessions/$session/chat/messages" "{\"text\":\"Reply with the single word pong and nothing else.\"}")
+first="Reply with the single word pong and nothing else."
+status=$(call "$token" POST "/v1/sessions/$session/chat/messages" "{\"text\":\"$first\\nThis second line is no title.\"}")
 [ "$status" = 200 ] || fail "the message was not taken: HTTP $status"
 read_to turn_ended
 said=$(listed "$token"); echo "its turn ended: $said"
-[ "$said" = "chat your_turn true" ] || fail "a chat whose turn ended is listed as $said"
+[ "$said" = "chat your_turn true $first" ] || fail "a chat whose turn ended is listed as $said"
 status=$(call "$token" POST "/v1/sessions/$session/chat/messages" "{\"text\":\"Run the shell command printf x > listed.txt in the workspace.\"}")
 [ "$status" = 200 ] || fail "the second message was not taken: HTTP $status"
 read_to permission
 said=$(listed "$token"); echo "it asks: $said"
-[ "$said" = "chat needs_you true" ] || fail "a chat that asks is listed as $said"
+[ "$said" = "chat needs_you true $first" ] || fail "a chat that asks is listed as $said"
 status=$(call "$token" POST "/v1/sessions/$session:end")
 [ "$status" = 204 ] || fail "the end was refused: HTTP $status"
 said=$(listed "$token"); echo "ended: $said"
-[ "$said" = "chat ended false" ] || fail "an ended chat is listed as $said"
+[ "$said" = "chat ended false $first" ] || fail "an ended chat is listed as $said"
 said=$(listed "$stranger"); echo "$other lists: $said"
 [ "$said" = none ] || fail "$other was listed $handle chat: $said"
 status=$(call "$token" GET /v1/me/preferences)
@@ -2791,7 +2793,7 @@ storage() {
     chat_answers "$run" main eng acme eng-own client
   check "$run" "main holds the fleet's Claude Code key again where only root reads it, for eng's listed chat" \
     place_secret "$run" main fleet-anthropic-key anthropic
-  check "$run" "eng's chat in eng-own is listed through a real turn on main's API while main offers no terminal door, so the listing is her chats alone and not refused: idle when opened, your_turn once pong's turn ended, needs_you while Claude Code asks before printf x > listed.txt, ended and not live once she ends it; client lists none of it; eng's preference reads chat, is set to terminal and read back, client's still reads chat, and tab is refused; with no terminal door the agents route says terminal false, Claude Code offers a chat alone, in three modes, and Codex is not offered; the chat ended, the preference put back, the key, the login and the tokens removed after" \
+  check "$run" "eng's chat in eng-own is listed through a real turn on main's API while main offers no terminal door, so the listing is her chats alone and not refused: idle and untitled when opened, your_turn once pong's turn ended and titled by the first line of that first message, needs_you while Claude Code asks before printf x > listed.txt with the same title, ended and not live once she ends it; client lists none of it; eng's preference reads chat, is set to terminal and read back, client's still reads chat, and tab is refused; with no terminal door the agents route says terminal false, Claude Code offers a chat alone, in three modes, and Codex is not offered; the chat ended, the preference put back, the key, the login and the tokens removed after" \
     chat_lists "$run" main eng acme eng-own client
   check "$run" "eng's workspace commits as eng" commits_as "$run" main acme-eng-own eng@fleet.example
   check "$run" "eng's workspace holds none of main's person's forge token" holds_no_forge_token "$run" main acme-eng-own

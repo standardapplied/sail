@@ -4571,7 +4571,14 @@ process is asked or started and no lock taken, and whether a process holds the c
 state (an idle end is not seen): the first that holds of `ended` (`ended_at` set), `needs_you` (a
 turn open and `ChatLog.open` holds a request), `working` (a turn open), `error` (of `failed`,
 `interrupted` and `turn_ended`, the last two are `failed` then `turn_ended`), `your_turn` (a turn
-ended otherwise, stopped or cut) and `idle` (no turn yet). A terminal row carries no `state`.
+ended otherwise, stopped or cut) and `idle` (no turn yet). A terminal row carries no `state`. A chat
+row's `title` is the first line with words (a letter, number, punctuation or symbol) of the person's
+first message, queued or not, each run of whitespace, control characters and bidi embeddings,
+overrides and isolates one space, cut on the last whole word within 80 code points
+(`ChatListing.TITLE_MOST`), or on the last whole grapheme when one word is longer, and absent while
+they have said nothing; it is read from the first 1,024
+characters of that message (`ChatListing.TITLE_READ`) in the query that lists the chat, so the
+listing makes no query more, and it is only the opener's own words shown back to them.
 
 **Which harness chats, and who starts in Chat.** Each offer of the agents route carries `forms`
 (`Harness.forms`, from `Harness.chat` alone: `["terminal", "chat"]` for Claude Code,
