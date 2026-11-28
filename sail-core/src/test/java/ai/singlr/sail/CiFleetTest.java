@@ -126,14 +126,22 @@ class CiFleetTest {
     remote(READS_ITS_INPUT);
   }
 
-  /** A timer a failed test left running, waiting on a FIFO of its, is ended with it. */
+  /**
+   * A timer a failed test left waiting on one of the test's FIFOs is ended with the test; its shell
+   * then runs to its end. A pid taken since by a process that names no file of the test's is left.
+   */
   @AfterEach
   void noTimerOutlivesItsTest() throws IOException {
     var timers = dir.resolve("timers");
     if (Files.exists(timers)) {
       for (var line : Files.readAllLines(timers)) {
         for (var pid : line.split(" ")) {
-          ProcessHandle.of(Long.parseLong(pid)).ifPresent(ProcessHandle::destroyForcibly);
+          ProcessHandle.of(Long.parseLong(pid))
+              .filter(
+                  process ->
+                      Stream.of(process.info().arguments().orElse(new String[0]))
+                          .anyMatch(argument -> argument.startsWith(dir.toString())))
+              .ifPresent(ProcessHandle::destroyForcibly);
         }
       }
     }
