@@ -404,8 +404,8 @@ enum Examples {
             self.depth = depth
         }
 
-        var text: String {
-            String(String(head + String(repeating: unit, count: MessageBlocksBoundsTests.codePoints / unit.unicodeScalars.count + 1)).unicodeScalars.prefix(MessageBlocksBoundsTests.codePoints))
+        func text(_ codePoints: Int = MessageBlocksBoundsTests.codePoints) -> String {
+            String(String(head + String(repeating: unit, count: codePoints / unit.unicodeScalars.count + 1)).unicodeScalars.prefix(codePoints))
         }
     }
 
@@ -460,11 +460,18 @@ enum Examples {
     }
 
     @Test(arguments: shapes) func aTextOfTheLongestSplitsInBoundedTime(_ shape: Shape) throws {
-        let text = shape.text
+        let text = shape.text()
         try #require(text.unicodeScalars.count == Self.codePoints)
         let blocks = MessageBlocks.split(text)
         #expect(blocks.count == shape.blocks)
         #expect(Self.depth(blocks) == shape.depth)
+    }
+
+    /// Four times the longest text: work growing with the square of the text takes 16 times as long
+    /// as at the longest (a quadratic item took 9 s there, against 0.04 s), so it cannot end within
+    /// the suite's limit, while linear work ends in a few seconds.
+    @Test(arguments: shapes) func fourTimesTheLongestSplitsWithinTheLimit(_ shape: Shape) {
+        #expect(Self.depth(MessageBlocks.split(shape.text(4 * Self.codePoints))) == shape.depth)
     }
 
     @Test func tenThousandQuoteMarkersAreDrawnAtTheEighthLevel() {
