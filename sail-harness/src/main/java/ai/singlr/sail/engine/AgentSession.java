@@ -375,11 +375,11 @@ public final class AgentSession {
    * Halts a session and reports what the halt did. A run that owns a systemd unit is killed through
    * the unit's whole cgroup — SIGTERM to every member, a grace period, then SIGKILL to every member
    * — because the pid file names only the launch wrapper: signalling that single pid orphans the
-   * agent's children inside the still-active unit. Only a unitless foreground session falls back to
-   * pid-file surgery, where the wrapper {@code exec}'d into the agent and the pid names the whole
-   * story: its signals and the question of whether the process is gone run as one script in the
-   * container, whose printed answer is the only thing believed — a pid file that could not be read,
-   * a signal that could not be delivered and an exec that came back with no answer are all {@link
+   * agent's children inside the still-active unit. A unitless run, a foreground session's, a live
+   * member's or a workspace's terminal's, whose wrapper {@code exec}'d into the agent so that the
+   * pid names the whole story, is halted as every process a wrapper started is ({@link
+   * #killStarted}): only while the pid names the process whose start its wrapper recorded. A signal
+   * that could not be delivered and an exec that came back with no answer are {@link
    * Halt.Unanswered}, never a process taken for gone because a command about it failed. The run's
    * pid file is removed, and its unit reset, only once the agent is {@link Halt.Ended}: a run whose
    * halt is {@link Halt.Survived} or {@link Halt.Unanswered} still probes as it did before, so
@@ -387,7 +387,7 @@ public final class AgentSession {
    */
   public Halt killAgent(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    return unit.systemd() ? killUnit(containerName, unit) : killByPidFile(containerName, unit);
+    return unit.systemd() ? killUnit(containerName, unit) : killStarted(containerName, unit);
   }
 
   private Halt killUnit(String containerName, AgentUnit unit)
@@ -442,41 +442,12 @@ public final class AgentSession {
 
   private Halt ended(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    if (unit.systemd()) {
-      shell.exec(
-          ContainerExec.asDevUser(
-              containerName, List.of("systemctl", "--user", "reset-failed", unit.service())));
-    }
+    shell.exec(
+        ContainerExec.asDevUser(
+            containerName, List.of("systemctl", "--user", "reset-failed", unit.service())));
     shell.exec(ContainerExec.asDevUser(containerName, List.of("rm", "-f", unit.pidPath())));
     return new Halt.Ended();
   }
-
-  /**
-   * Ends the process whose pid is its first argument and says what became of it, {@code gone} or
-   * {@code alive}, from inside the container, by the ladder a unit is ended by: SIGTERM, the grace
-   * its second argument gives in seconds, SIGKILL when it is still there, and then as many asks a
-   * second apart as its third argument allows. It says either only once its SIGTERM was delivered,
-   * so a run of it that printed neither — the signal refused, the exec lost on the way in or out —
-   * says nothing of the process.
-   */
-  private static final String HALT_PID_SCRIPT =
-      """
-      kill "$1" || exit 1
-      sleep "$2"
-      if kill -0 "$1" 2>/dev/null; then
-        kill -9 "$1"
-        asks=0
-        while [ "$asks" -lt "$3" ] && kill -0 "$1" 2>/dev/null; do
-          sleep 1
-          asks=$((asks + 1))
-        done
-      fi
-      if kill -0 "$1" 2>/dev/null; then
-        printf alive
-      else
-        printf gone
-      fi
-      """;
 
   /**
    * Removes the pid file of {@code unit} in {@code containerName} while it still names {@code pid},
@@ -496,22 +467,44 @@ public final class AgentSession {
       "if [ \"$(cat -- \"$1\" 2>/dev/null)\" = \"$2\" ]; then rm -f -- \"$1\"; fi";
 
   /**
-   * Halts, from inside the container, the process the pid file its first argument names, only while
-   * it is the process whose start the record its second names holds (field 22 of {@code
-   * /proc/<pid>/stat}, read as {@link #parseStartTicks} reads it), and says what became of it: by
-   * SIGTERM, the grace its third argument gives in seconds, and SIGKILL only to that same process
-   * still there, then as many asks a second apart as its fourth allows. It prints {@code gone}, the
-   * pid file removed, once no process holds that pid with that start (another process at the pid, a
-   * record missing, a pid file naming none are never signalled), and {@code alive} when the process
-   * outlived its signals; a run of it that printed neither says nothing of the process.
+   * The one identity rule every signal to a process a wrapper started goes by, the head of each
+   * script that sends one: the pid file its first argument names and the start record its second
+   * names, which the wrapper wrote beside it ({@link AgentUnit#startPath}). {@code ours} holds only
+   * while the process at that pid has the recorded start (field 22 of {@code /proc/<pid>/stat},
+   * read as {@link #parseStartTicks} reads it, from the last {@code ") "} on, a name holding a
+   * newline included): another process the box gave the pid, a record missing or unreadable, and a
+   * process gone are never it. A pid file that names no pid, or one written with a leading zero,
+   * ends the script, with {@code gone} printed and nothing signalled.
    */
-  static final String KILL_STARTED_SCRIPT =
+  private static final String STARTED =
       """
-      ticks() { set -- $(sed 's/.*) //' "$1" 2>/dev/null); printf %s "${20}"; }
+      ticks() { set -f; set -- $(tr '\\n' ' ' < "$1" 2>/dev/null | sed 's/.*) //'); printf %s "${20}"; }
       pid=$(tr -d '[:space:]' < "$1" 2>/dev/null)
-      case "$pid" in ''|0|*[!0-9]*) printf gone; exit 0 ;; esac
+      case "$pid" in ''|0*|*[!0-9]*) printf gone; exit 0 ;; esac
       mine=$(ticks "$2")
       ours() { [ -n "$mine" ] && [ "$(ticks "/proc/$pid/stat")" = "$mine" ]; }
+      """;
+
+  /**
+   * Sends the signal its third argument names, once, to the process its wrapper recorded ({@link
+   * #STARTED}), and to nothing else; it removes nothing, so a run of it that failed changed
+   * nothing.
+   */
+  static final String SIGNAL_STARTED_SCRIPT = STARTED + "ours && kill -s \"$3\" \"$pid\"\n";
+
+  /**
+   * Halts, from inside the container, the process its wrapper recorded ({@link #STARTED}), and says
+   * what became of it: by SIGTERM, the grace its third argument gives in seconds, and SIGKILL only
+   * to that same process still there, then as many asks a second apart as its fourth allows. It
+   * prints {@code gone} once no process holds that pid with that start, and {@code alive} when the
+   * process outlived its signals; a run of it that printed neither says nothing of the process. The
+   * pid file goes with a {@code gone} only while it still names the pid the script judged: a
+   * process that named itself there meanwhile, a terminal opening as a claim ends a stale one,
+   * keeps its name.
+   */
+  static final String KILL_STARTED_SCRIPT =
+      STARTED
+          + """
       if ours; then
         kill "$pid" || exit 1
         sleep "$3"
@@ -521,16 +514,16 @@ public final class AgentSession {
           while [ "$asks" -lt "$4" ] && ours; do sleep 1; asks=$((asks + 1)); done
         fi
       fi
-      if ours; then printf alive; else rm -f -- "$1"; printf gone; fi
+      if ours; then printf alive; else [ "$(tr -d '[:space:]' < "$1" 2>/dev/null)" != "$pid" ] || rm -f -- "$1"; printf gone; fi
       """;
 
   /**
-   * Halts the process {@code unit}'s pid file names, which a wrapper over pipes started and whose
-   * start it recorded beside the pid ({@link AgentUnit#startPath}), in one script in the container
-   * ({@link #KILL_STARTED_SCRIPT}) whose printed answer is the only thing believed: a pid the box
-   * has given another process since, or one whose start is not recorded, is never signalled and
-   * reads as {@link Halt.Ended}, its process gone; a script that could not be run, or came back
-   * with no answer, is {@link Halt.Unanswered}, and nothing is removed.
+   * Halts the process {@code unit}'s pid file names, which a wrapper started and whose start it
+   * recorded beside the pid ({@link AgentUnit#startPath}), in one script in the container ({@link
+   * #KILL_STARTED_SCRIPT}) whose printed answer is the only thing believed: a pid the box has given
+   * another process since, or one whose start is not recorded, is never signalled and reads as
+   * {@link Halt.Ended}, its process gone; a script that could not be run, or came back with no
+   * answer, is {@link Halt.Unanswered}, and nothing is removed.
    */
   public Halt killStarted(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
@@ -559,31 +552,6 @@ public final class AgentSession {
     var pidResult =
         shell.exec(ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath())));
     return pidResult.ok() ? parsePid(pidResult.stdout()) : null;
-  }
-
-  private Halt killByPidFile(String containerName, AgentUnit unit)
-      throws IOException, InterruptedException, TimeoutException {
-    var pid = pidOf(containerName, unit);
-    if (pid == null) {
-      return new Halt.Unanswered();
-    }
-    var halted =
-        shell.exec(
-            ContainerExec.asDevUser(
-                containerName,
-                List.of(
-                    "bash",
-                    "-c",
-                    HALT_PID_SCRIPT,
-                    "bash",
-                    String.valueOf(pid),
-                    String.valueOf(TERM_GRACE_SECONDS),
-                    String.valueOf(KILL_SETTLE_ASKS))));
-    return switch (halted.ok() ? halted.stdout().strip() : "") {
-      case "gone" -> ended(containerName, unit);
-      case "alive" -> new Halt.Survived();
-      default -> new Halt.Unanswered();
-    };
   }
 
   /**
@@ -747,9 +715,11 @@ public final class AgentSession {
    * runId} carried in as {@code SAIL_RUN_ID} and the agent's stdout/stderr redirected to the
    * run-scoped {@code logPath}, so a foreground session's recorded log address names a file that
    * actually holds its output and its terminal hook events can address the exact run. The wrapper
-   * writes its own pid to the run's pid file and {@code exec}s into the agent, so a foreground
+   * records its own start beside the run's pid file ({@link AgentUnit#startPath}), then writes its
+   * pid there and {@code exec}s into the agent, a step that fails starting nothing, so a foreground
    * session — which owns no systemd unit — is still probeable and stoppable through the same
-   * run-scoped identity as a background one.
+   * run-scoped identity as a background one, and its halt can tell it from a later process given
+   * its pid.
    */
   public static List<String> buildForegroundTaskCommand(
       String containerName,
@@ -809,9 +779,9 @@ public final class AgentSession {
     var effectiveAgent =
         agentType == null || agentType.isBlank() ? launching.yamlName() : agentType;
     var script =
-        "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
-            + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\" SAIL_RUN_ROLE=\"$8\""
-            + " exec bash -l -c \"$2\" > \"$5\" 2>&1";
+        "mkdir -p \"$(dirname \"$5\")\" && cat /proc/$$/stat > \"$9\" && printf '%s\\n'"
+            + " \"$$\" > \"$7\" && cd \"$1\" && SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\""
+            + " SAIL_RUN_ID=\"$6\" SAIL_RUN_ROLE=\"$8\" exec bash -l -c \"$2\" > \"$5\" 2>&1";
     return ContainerExec.asDevUser(
         containerName,
         List.of(
@@ -827,7 +797,8 @@ public final class AgentSession {
             logPath,
             runId,
             unit.pidPath(),
-            Objects.toString(role, "")));
+            Objects.toString(role, ""),
+            unit.startPath()));
   }
 
   /**
