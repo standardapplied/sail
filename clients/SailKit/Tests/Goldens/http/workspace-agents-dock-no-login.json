@@ -64,7 +64,7 @@
               "risky": false
             },
             {
-              "about": "Edits files and runs file commands without asking.",
+              "about": "Changes files without asking.",
               "label": "Accept edits",
               "mode": "acceptEdits",
               "risky": false

@@ -1047,7 +1047,7 @@ class HarnessGoldenTest {
         List.of(
             "default: Starts as Claude Code starts on its own.",
             "manual: Asks before it edits or runs a command.",
-            "acceptEdits: Edits files and runs file commands without asking.",
+            "acceptEdits: Changes files without asking.",
             "plan: Changes nothing until you approve its plan.",
             "auto: Runs without asking, but blocks risky actions.",
             "dontAsk: Runs only pre-approved actions; refuses the rest.",

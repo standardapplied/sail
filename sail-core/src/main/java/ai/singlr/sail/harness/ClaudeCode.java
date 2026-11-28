@@ -316,7 +316,7 @@ final class ClaudeCode implements Harness {
         permissionMode(
             "acceptEdits",
             "Accept edits",
-            "Edits files and runs file commands without asking.",
+            "Changes files without asking.",
             false),
         permissionMode("plan", "Plan", "Changes nothing until you approve its plan.", false),
         permissionMode("auto", "Auto", "Runs without asking, but blocks risky actions.", false),

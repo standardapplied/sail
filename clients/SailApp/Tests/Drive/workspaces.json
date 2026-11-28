@@ -424,7 +424,7 @@
   {"name": "ml-manual-said", "newSessionSays": ["Mode", "Manual", "Asks before it edits or runs a command."]},
   {"name": "ml-manual", "shotScreen": "ml-mode-manual"},
   {"name": "ml-command-m-accept-edits", "newSessionMode": "Accept edits"},
-  {"name": "ml-accept-edits-said", "newSessionSays": ["Mode", "Accept edits", "Edits files and runs file commands without asking."]},
+  {"name": "ml-accept-edits-said", "newSessionSays": ["Mode", "Accept edits", "Changes files without asking."]},
   {"name": "ml-accept-edits", "shotScreen": "ml-mode-accept-edits"},
   {"name": "ml-command-m-plan", "newSessionMode": "Plan"},
   {"name": "ml-plan", "shotScreen": "ml-mode-plan"},

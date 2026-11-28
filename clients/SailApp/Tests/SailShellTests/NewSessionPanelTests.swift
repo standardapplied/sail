@@ -1097,16 +1097,23 @@ import Testing
     }
 
     /// Where its tallest kind fits neither under its row nor over it (dock in the design's 1024 × 684
-    /// window, with the three kinds of the drive's `a1-new-session`), the panel covers the row whole,
-    /// its top at the row's top edge, so none of the row's actions shows half under it. At the least
-    /// window, where even that leaves the page, it stands as high as the page needs: over the row's
-    /// top edge, the row still whole under it.
+    /// window, with the three kinds of the drive's `a1-new-session`, Claude Code's Auto said in as
+    /// few sentences as make it too tall to hang under dock), the panel covers the row whole, its top
+    /// at the row's top edge, so none of the row's actions shows half under it. At the least window,
+    /// where even that leaves the page, it stands as high as the page needs: over the row's top
+    /// edge, the row still whole under it.
     @Test func withNoRoomUnderOrOverItsRowThePanelCoversItWhole() async throws {
         for (at, (width, height)) in Self.windows.enumerated() {
-            let (view, window) = try await Self.atTheTop(try Exchange("workspace-agents-dock"), width: width, height: height)
+            var opened: (WorkspacesView, KeyWindow, NewSessionPanel, NSRect)?
+            for sentences in 0 ... 8 where opened == nil {
+                let (view, window) = try await Self.atTheTop(sentences == 0 ? try Exchange("workspace-agents-dock") : try Self.wordy(sentences), width: width, height: height)
+                let panel = try await Self.open("dock", in: view)
+                let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) })
+                if near(panel.popover.frame.maxY, row.minY - NewSessionPanel.gap) { window.orderOut(nil) } else { opened = (view, window, panel, row) }
+            }
+            let (view, window, panel, row) = try #require(opened, "at \(width) × \(height) the panel hangs under dock however tall it is")
             defer { window.orderOut(nil) }
-            let panel = try await Self.open("dock", in: view)
-            let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) }), box = panel.popover.frame
+            let box = panel.popover.frame
             let page = Self.shown(view.project, in: window).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
             #expect(box.minY < row.minY && page.contains(box), "at \(width) × \(height) the panel \(box) hangs under dock \(row), or leaves the page \(page)")
             if at == 0 {
