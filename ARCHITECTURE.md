@@ -4462,18 +4462,22 @@ it is not ready for one, as a JSON-RPC harness before its handshake answers; the
 it ready writes them), stop its turn and change its mode. Where a turn begins and ends is the
 wire's to say: Claude Code's (`ClaudeCodeWire`, over `LiveStream`, `LiveChat` and `LiveReply`)
 begins one at each `init` and ends it at its `result`, and a host opens one as it hands a message.
-No class of the host (each `Chat*` of the api package, and the routes) depends on a class of
-Claude Code's or names a harness (`ArchitectureRulesTest.aChatsHostSpeaksAHarnessOnlyThroughItsWire`),
+No class of sail-infra but the room's live members (`LiveMembers`) depends on a class of Claude
+Code's, and no chat class of the host (each `Chat*` of the api package) names a harness
+(`ArchitectureRulesTest.aChatsHostSpeaksAHarnessOnlyThroughItsWire`),
 and `ChatRpcTest` runs a turn of a test-only JSON-RPC harness (a handshake before the first
 message, request ids, a turn its prompt's response ends) through the host as it is. Every line is
 decided under the process's monitor (an answer is logged and its request taken out before its line
 is handed) and written by the process's one writer (`ChatWriter`), on a thread of its own, in the
 order handed, never under the chat's lock or the monitor: at most 64 lines and 4 MiB wait, and a
 line past either, or after one the harness did not take, is refused at once, as a write the harness
-refuses is; a caller waits for its own line at most `ProcessEnd.Grace.afterInt`, then goes on;
-stdin is closed only after the lines handed before the close; and a line the harness has not taken
-`ChatTiming.stopBound` after it was handed ends the process, its turn cut in that line's words (an
-answer's "…did not get your answer…").
+refuses is; a line whose taking Sail cannot record (a store write that throws) is refused too, the
+first, so its process ends at once and its turn is cut saying so ("Sail could not record what it
+wrote to…"); however many lines are refused, the process is ended once; a caller waits for its own
+line at most `ProcessEnd.Grace.afterInt`, then goes on; stdin is closed only after the lines handed
+before the close; and a line the harness has not taken `ChatTiming.stopBound` after its write began
+(never counting the time it waited behind others) ends the process, its turn cut in that line's
+words (an answer's "…did not get your answer…").
 
 **One conversation, one process.** Every process of a chat writes its pid to one place, the chat's
 own folder (`AgentUnit.chat`, `~/.sail/chats/<session>/`), and the chat is marked `launched` from
