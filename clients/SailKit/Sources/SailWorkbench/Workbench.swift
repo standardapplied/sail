@@ -19,6 +19,12 @@ public struct LocalSession: Hashable, Sendable {
     }
 }
 
+/// What a new tab opens: a terminal in a place, an agent's or a shell; or a new chat.
+public enum Opening: Hashable, Sendable {
+    case terminal(Place, agent: AgentStart?)
+    case newChat(Place, agent: AgentStart)
+}
+
 /// One tab; `history` holds its panes in the order last focused, the focused one last.
 public struct Tab: Hashable, Sendable {
     public let id: TabID
@@ -29,15 +35,25 @@ public struct Tab: Hashable, Sendable {
     public internal(set) var zoomed: PaneID?
 }
 
-/// The terminals of a window as a value: tabs in order, the selected one, and every pane. Each
-/// operation returns what it opened or closed and leaves the value whole (the spec's W1).
+/// The sessions of a window as a value: tabs in order, the selected one, and every pane, terminal
+/// or chat. Each operation returns what it opened or closed and leaves the value whole (the spec's
+/// W1).
 public struct Workbench: Hashable, Sendable {
     /// What a tab is called when nobody named it and its program said nothing.
     public static let untitled = "This Mac"
+    /// What a chat is called before it has a title.
+    public static let newChat = "New chat"
 
     public private(set) var tabs: [Tab] = []
-    public private(set) var selected: TabID?
-    public private(set) var panes: [PaneID: Pane] = [:]
+    public private(set) var selected: TabID? {
+        didSet { cameToFront() }
+    }
+
+    public internal(set) var panes: [PaneID: Pane] = [:]
+    /// The place of the runner pane focused last, where a new chat with no tab opens.
+    public internal(set) var lastWorkspace: Place?
+    /// Whether the window is key: a tab is shown only while it is in front of a key window.
+    public internal(set) var windowKey = true
     private var made = 0
     /// Each unnamed tab's number among the tabs called as it is, given as it opens or its name is
     /// cleared and kept until it is named or closed: closing or moving another renumbers none.
@@ -75,11 +91,11 @@ public struct Workbench: Hashable, Sendable {
         return made
     }
 
-    private mutating func makePane(session: String, place: Place, agent: AgentStart? = nil) -> PaneID {
+    mutating func makePane(session: String, place: Place, agent: AgentStart? = nil, form: Pane.Form = .terminal) -> PaneID {
         precondition(!panes.values.contains { $0.session == session }, "the session \(session) has a pane already, and a session has one pane")
-        precondition(agent == nil || place.onRunner, "an agent runs in a workspace on the runner")
+        precondition(Pane.whole(form, place: place, agent: agent), "an agent runs in a workspace on the runner, and a chat is an agent's")
         let id = PaneID(mint())
-        panes[id] = Pane(id: id, session: session, place: place, agent: agent)
+        panes[id] = Pane(id: id, session: session, place: place, agent: agent, form: form)
         return id
     }
 
@@ -87,15 +103,25 @@ public struct Workbench: Hashable, Sendable {
         tabs[index].focused = pane
         tabs[index].history.removeAll { $0 == pane }
         tabs[index].history.append(pane)
+        cameToFront()
+    }
+
+    /// The pane in front is seen, and, on the runner, the last workspace.
+    private mutating func cameToFront() {
+        guard let pane = focusedPane else { return }
+        if pane.place.onRunner { lastWorkspace = pane.place }
+        seeFront()
     }
 
     /// The kept `node` with a new pane for each session `unheld` still names, taken from it; a
     /// split losing a side collapses to the other, and a ratio not strictly inside (0, 1) is halved.
     mutating func adopt(_ node: Arrangement.Node, from unheld: inout Set<String>) -> Layout? {
         switch node {
-        case let .pane(session, place, agent):
-            guard unheld.remove(session) != nil else { return nil }
-            return .pane(makePane(session: session, place: place, agent: agent))
+        case let .pane(session, place, agent, form, draft):
+            guard Pane.whole(form, place: place, agent: agent), unheld.remove(session) != nil else { return nil }
+            let pane = makePane(session: session, place: place, agent: agent, form: form)
+            panes[pane]?.draft = draft
+            return .pane(pane)
         case let .split(axis, ratio, first, second):
             let (one, other) = (adopt(first, from: &unheld), adopt(second, from: &unheld))
             guard let one, let other else { return one ?? other }
@@ -112,16 +138,55 @@ public struct Workbench: Hashable, Sendable {
 
     @discardableResult
     public mutating func newTab(session: String, place: Place, agent: AgentStart? = nil) -> PaneID {
-        let pane = makePane(session: session, place: place, agent: agent)
-        let tab = Tab(id: TabID(mint()), layout: .pane(pane), name: nil, focused: pane, history: [pane], zoomed: nil)
-        tabs.append(tab)
-        number(tab.id, focused: pane)
-        selected = tab.id
+        openSelected(makePane(session: session, place: place, agent: agent))
+    }
+
+    /// A new chat in workspace `place` with `agent`, as a last tab, selected: it holds no chat
+    /// until its first message opens one (``bind(_:to:)``).
+    @discardableResult
+    public mutating func newChat(in place: Place, agent: AgentStart) -> PaneID {
+        precondition(place.onRunner, "a chat is in a workspace on the runner")
+        return openSelected(makePane(session: Pane.newChats + UUID().uuidString.lowercased(), place: place, agent: agent, form: .newChat))
+    }
+
+    private mutating func openSelected(_ pane: PaneID) -> PaneID {
+        let id = adoptTab(.pane(pane), focused: pane)
+        selected = id
         return pane
     }
 
-    /// Halves the focused pane of the selected tab along `axis`, the new pane on `session` second
-    /// and focused; nil, and nothing changed, when either half would be under `minimum`.
+    /// New chat `pane` in `place` with `agent` from now on, as long as it is unbound.
+    public mutating func move(newChat pane: PaneID, to place: Place, agent: AgentStart) {
+        precondition(panes[pane]?.form == .newChat, "\(pane) is not a new chat, and only a new chat changes its place")
+        precondition(place.onRunner, "a chat is in a workspace on the runner")
+        panes[pane]?.place = place
+        panes[pane]?.agent = agent
+        if focusedPane?.id == pane { lastWorkspace = place }
+    }
+
+    /// Binds new chat `pane`, once, to `chat`, the chat its first message opened: it is that
+    /// chat's from now on, in its place for good. A pane holding `chat` already (a listing adopted
+    /// it first) is closed and answered, its state and title the bound pane's.
+    @discardableResult
+    public mutating func bind(_ pane: PaneID, to chat: String) -> Pane? {
+        precondition(panes[pane]?.form == .newChat, "\(pane) is not a new chat, and a new chat is bound once")
+        let closed = panes.values.first { $0.session == chat }.flatMap { close($0.id) }
+        panes[pane]?.session = chat
+        panes[pane]?.form = .chat
+        panes[pane]?.chatState = closed?.chatState
+        panes[pane]?.chatTitle = closed?.chatTitle
+        return closed
+    }
+
+    /// `text` as the unsent draft of chat or new chat `pane`; a terminal keeps none.
+    public mutating func setDraft(_ text: String, of pane: PaneID) {
+        guard panes[pane]?.converses == true else { return }
+        panes[pane]?.draft = text
+    }
+
+    /// Halves the focused pane of the selected tab along `axis`, the new pane a terminal on
+    /// `session` second and focused, a chat's too; nil, and nothing changed, when either half would
+    /// be under `minimum`.
     public mutating func split(_ axis: Axis, session: String, place: Place, in size: CGSize, minimum: CGSize, scale: Double) -> PaneID? {
         guard let index = selectedIndex else { return nil }
         let tab = tabs[index]
@@ -365,6 +430,29 @@ public struct Workbench: Hashable, Sendable {
     public func folderForNewPane(hostNames: Set<String>, isFolder: (String) -> Bool) -> String? {
         guard let pane = focusedPane, !pane.place.onRunner else { return nil }
         return ReportedFolder.path(pane.reportedFolder, hostNames: hostNames).flatMap { isFolder($0) ? $0 : nil } ?? pane.place.folder
+    }
+
+    /// What a split of the pane in front opens a terminal in: a runner pane's workspace, a chat's
+    /// too, else this Mac in ``folderForNewPane(hostNames:isFolder:)``, else `home`.
+    public func placeForSplit(hostNames: Set<String>, isFolder: (String) -> Bool, home: String) -> Place {
+        guard let pane = focusedPane, pane.place.onRunner else {
+            return .thisMac(folder: folderForNewPane(hostNames: hostNames, isFolder: isFolder) ?? home)
+        }
+        return pane.place
+    }
+
+    /// What ⌘T opens, a tab like the one in front: from a chat or a new chat, a new chat in its
+    /// workspace with its harness, mode and way in; from a terminal, a terminal where a split of it
+    /// opens one, running the agent it runs. With no tab, for a person who starts in Chat
+    /// (`chatFirst`), a new chat with `agent` in the last workspace; for anyone else, or with no
+    /// last workspace or agent, a shell on this Mac in `home`.
+    public func likeFront(chatFirst: Bool, agent: AgentStart?, hostNames: Set<String>, isFolder: (String) -> Bool, home: String) -> Opening {
+        guard let pane = focusedPane else {
+            guard chatFirst, let lastWorkspace, let agent else { return .terminal(.thisMac(folder: home), agent: nil) }
+            return .newChat(lastWorkspace, agent: agent)
+        }
+        if pane.converses, let agent = pane.agent { return .newChat(pane.place, agent: agent) }
+        return .terminal(placeForSplit(hostNames: hostNames, isFolder: isFolder, home: home), agent: pane.agent)
     }
 
     /// The panes and dividers of `tab` (the selected one unless named) in `size`, rounded to

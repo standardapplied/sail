@@ -45,29 +45,62 @@ extension Endpoint where Response == TerminalTicket {
     }
 }
 
-/// The caller's terminal sessions in one workspace, newest first, as its runner's host lists them:
-/// their own, or every one for an admin; live, or ended within the time the host keeps an ended one.
+/// The caller's sessions in one workspace, newest first, as the server lists them, each row by its
+/// `form`: the terminals its runner's host holds (their own, or every one for an admin) and the
+/// caller's own chats; live, or ended within the time each is kept. A row of a form this app does
+/// not know is kept apart, by its form alone.
 public struct RunnerSessions: Codable, Equatable, Sendable {
     public let sessions: [RunnerSession]
+    public let chats: [ChatRow]
+    public let otherForms: [String]
 
-    public init(sessions: [RunnerSession]) {
+    public init(sessions: [RunnerSession], chats: [ChatRow] = [], otherForms: [String] = []) {
         self.sessions = sessions
+        self.chats = chats
+        self.otherForms = otherForms
     }
 
-    /// The listing's terminal rows: a chat row (`form: "chat"`) is not a terminal, so it is left out.
-    public init(from decoder: Decoder) throws {
-        sessions = try decoder.container(keyedBy: CodingKeys.self).decode([Listed].self, forKey: .sessions).compactMap(\.terminal)
+    public init(from decoder: any Decoder) throws {
+        let rows = try decoder.container(keyedBy: CodingKeys.self).decode([Row].self, forKey: .sessions)
+        sessions = rows.compactMap { if case let .terminal(session) = $0 { session } else { nil } }
+        chats = rows.compactMap { if case let .chat(chat) = $0 { chat } else { nil } }
+        otherForms = rows.compactMap { if case let .other(form) = $0 { form } else { nil } }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessions.map(Row.terminal) + chats.map(Row.chat) + otherForms.map(Row.other), forKey: .sessions)
     }
 
     private enum CodingKeys: String, CodingKey { case sessions }
 
-    private struct Listed: Decodable {
-        let terminal: RunnerSession?
+    private enum Row: Codable {
+        case terminal(RunnerSession)
+        case chat(ChatRow)
+        case other(String)
+
         private enum Key: String, CodingKey { case form }
 
-        init(from decoder: Decoder) throws {
-            let form = try decoder.container(keyedBy: Key.self).decodeIfPresent(String.self, forKey: .form) ?? "terminal"
-            terminal = form == "terminal" ? try RunnerSession(from: decoder) : nil
+        init(from decoder: any Decoder) throws {
+            switch try decoder.container(keyedBy: Key.self).decode(String.self, forKey: .form) {
+            case "terminal": self = .terminal(try RunnerSession(from: decoder))
+            case "chat": self = .chat(try ChatRow(from: decoder))
+            case let form: self = .other(form)
+            }
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            var form = encoder.container(keyedBy: Key.self)
+            switch self {
+            case let .terminal(session):
+                try form.encode("terminal", forKey: .form)
+                try session.encode(to: encoder)
+            case let .chat(chat):
+                try form.encode("chat", forKey: .form)
+                try chat.encode(to: encoder)
+            case let .other(other):
+                try form.encode(other, forKey: .form)
+            }
         }
     }
 
@@ -133,10 +166,10 @@ public struct RunnerAgent: Codable, Equatable, Sendable {
 }
 
 extension Endpoint where Response == RunnerSessions {
-    /// The caller's terminal sessions in workspace `name` of `project`, those the runner would let
-    /// the caller attach to (none of another person's); not found when the caller may not read the
-    /// project, or the runner holds no such workspace; refused for a credential that stands for no
-    /// person, as a ticket is.
+    /// The caller's sessions in workspace `name` of `project`: the terminals the runner would let
+    /// the caller attach to (none of another person's) and the caller's chats; not found when the
+    /// caller may not read the project, or the runner holds no such workspace; refused for a
+    /// credential that stands for no person, as a ticket is.
     public static func sessions(workspace name: String, project: String) -> Self {
         Self(.get, Route.workspace(name, project: project) + ["sessions"])
     }
