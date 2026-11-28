@@ -474,7 +474,9 @@ public final class AgentAttachCommand implements Runnable {
               + " Attach again.");
     }
     var claims = (Supplier<List<String>>) () -> claimsOf(run, workspace, running(operator));
-    var yielded = RunReservation.yieldToAClaim(shell, workspace, claims);
+    var yielded =
+        RunReservation.yieldToAClaim(
+            shell, workspace, mine.get(), claims, started::destroyForcibly);
     var code = terminal.waitFor();
     if (mine.get() != null) {
       new AgentSession(shell).forgetPid(workspace.instance(), AgentUnit.TERMINAL, mine.get());

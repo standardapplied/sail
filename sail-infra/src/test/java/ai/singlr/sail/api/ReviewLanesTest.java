@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
@@ -226,7 +227,7 @@ class ReviewLanesTest {
     var reviewer = loop.onlyLive();
     loop.container.terminalOpened();
 
-    var yielded = RunReservation.yieldToAClaim(loop.container, place, () -> claimsOf(place));
+    var yielded = yieldOf(place);
 
     assertEquals(Optional.of(reviewer.id()), yielded);
     assertFalse(loop.container.terminalOpen(), "the terminal yields to the run that claimed first");
@@ -243,12 +244,46 @@ class ReviewLanesTest {
     var place = (RunPlace.SpecWorkspace) RunPlace.of(ReviewLoop.PROJECT, "auth");
     loop.container.terminalOpened();
 
-    var yielded = RunReservation.yieldToAClaim(loop.container, place, () -> claimsOf(place));
+    var yielded = yieldOf(place);
+    assertTrue(loop.container.terminalOpen(), "a terminal its pid file still names goes on");
     loop.built("auth");
 
     assertEquals(Optional.empty(), yielded);
     assertFalse(loop.container.terminalOpen(), "the claim that came second ends it");
     assertEquals("review", loop.onlyLive().role());
+  }
+
+  /**
+   * A claim's halt of a stale terminal pid file removed it just after a new terminal named itself
+   * there, so no claim can end that terminal by it: the terminal's own attach, finding its name gone
+   * once it has yielded to the claim, ends it.
+   */
+  @Test
+  void aTerminalWhoseNameAClaimsHaltTookIsEndedByItsOwnAttach() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(ReviewLoop.PROJECT, "auth");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.container.terminalOpened();
+    var mine = Integer.parseInt(loop.container.pidOf("terminal"));
+    loop.container.lost(AgentUnit.TERMINAL.pidPath());
+
+    var yielded =
+        RunReservation.yieldToAClaim(
+            loop.container, place, mine, () -> claimsOf(place), loop.container::terminalClosed);
+
+    assertEquals(Optional.of(reviewer.id()), yielded);
+    assertFalse(loop.container.terminalOpen(), "the terminal no claim could end is ended");
+  }
+
+  /** {@code place}'s open terminal yields to a claim of it, ending itself as its attach would. */
+  private Optional<String> yieldOf(RunPlace.SpecWorkspace place) {
+    return RunReservation.yieldToAClaim(
+        loop.container,
+        place,
+        Integer.parseInt(loop.container.pidOf("terminal")),
+        () -> claimsOf(place),
+        loop.container::terminalClosed);
   }
 
   /** A terminal that cannot be ended, its container's answer cut short, is said and kept. */
@@ -274,10 +309,14 @@ class ReviewLanesTest {
             return false;
           }
         };
+    var ended = new AtomicBoolean();
 
     assertEquals(
-        Optional.of("r1"), RunReservation.yieldToAClaim(interrupted, place, () -> List.of("r1")));
+        Optional.of("r1"),
+        RunReservation.yieldToAClaim(
+            interrupted, place, 4242, () -> List.of("r1"), () -> ended.set(true)));
     assertTrue(Thread.interrupted(), "the interrupt is kept for whoever waits on the thread");
+    assertFalse(ended.get(), "a name the container did not answer about ends nothing");
   }
 
   /** The runs claiming {@code place} in a lane that ends its terminal. */

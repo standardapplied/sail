@@ -219,6 +219,11 @@ final class FakeContainer implements ShellExec {
     files.put(path, content);
   }
 
+  /** Something in the container removed the file at {@code path}. */
+  void lost(String path) {
+    remove(path);
+  }
+
   /** The paths of the files the container holds under {@code folder}, in order. */
   List<String> filesUnder(String folder) {
     return files.keySet().stream().filter(path -> path.startsWith(folder + "/")).sorted().toList();

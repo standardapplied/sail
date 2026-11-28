@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -674,6 +675,96 @@ class AgentSessionTest {
     assertTrue(stubborn.waitFor(10, TimeUnit.SECONDS));
     assertEquals(137, stubborn.exitValue(), "by SIGKILL");
     assertFalse(Files.exists(dir.resolve("stubborn.pid")));
+  }
+
+  /**
+   * A halt that judged a stale pid file's process gone removes the file only while it still holds
+   * that pid: a terminal that named itself in the file meanwhile (its start, then its pid, as its
+   * wrapper writes them) keeps its name, so the claim it then yields to can end it. The new write is
+   * held here until the halt's last look at the old pid, just before its removal.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aHaltKeepsThePidFileANewProcessWroteAfterItJudgedTheOldOne(@TempDir Path dir)
+      throws Exception {
+    var old = process("sleep", "300");
+    var oldStart = startOf(old);
+    old.destroy();
+    assertTrue(old.waitFor(10, TimeUnit.SECONDS));
+    var fresh = process("sleep", "300");
+    var pid = Files.writeString(dir.resolve("terminal.pid"), old.pid() + "\n");
+    var record = Files.writeString(dir.resolve("terminal.pid.start"), oldStart);
+    var bin = Files.createDirectories(dir.resolve("bin"));
+    var held = dir.resolve("held");
+    var sed =
+        Files.writeString(
+            bin.resolve("sed"),
+            """
+            #!/bin/sh
+            n=$(($(cat "$COUNT" 2>/dev/null || echo 0) + 1))
+            echo "$n" > "$COUNT"
+            if [ "$n" = 3 ]; then
+              cat "/proc/$FRESH/stat" > "$RECORD" && echo "$FRESH" > "$PID" && : > "$HELD"
+            fi
+            PATH=${PATH#*:} exec sed "$@"
+            """);
+    Files.setPosixFilePermissions(sed, PosixFilePermissions.fromString("rwx------"));
+    var halt =
+        new ProcessBuilder(
+            "sh",
+            "-c",
+            AgentSession.KILL_STARTED_SCRIPT,
+            "sh",
+            pid.toString(),
+            record.toString(),
+            "0",
+            "0");
+    var env = halt.environment();
+    env.put("PATH", bin + ":" + env.get("PATH"));
+    env.put("COUNT", dir.resolve("count").toString());
+    env.put("FRESH", String.valueOf(fresh.pid()));
+    env.put("RECORD", record.toString());
+    env.put("PID", pid.toString());
+    env.put("HELD", held.toString());
+
+    var ran = Child.run(halt);
+
+    assertTrue(Files.exists(held), "the new name was written during the halt's last judgement");
+    assertEquals("gone", ran.stdout(), ran.stderr());
+    assertEquals(fresh.pid() + "\n", Files.readString(pid), "the new process keeps its name");
+    assertTrue(fresh.isAlive(), "and is not signalled");
+  }
+
+  /**
+   * A process may name itself with a newline, which splits its stat line in two: its start is still
+   * read from the last {@code ") "} on, field 22 and no other. One at the pid whose start is not the
+   * recorded one is never signalled, though every other field of the two matches; the one recorded
+   * is.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aProcessWhoseNameHoldsANewlineIsTheRecordedOneByItsStartAlone(@TempDir Path dir)
+      throws Exception {
+    var sleep =
+        Stream.of("/usr/bin/sleep", "/bin/sleep").map(Path::of).filter(Files::exists).findFirst();
+    var named = Files.createSymbolicLink(dir.resolve("x\ny) z"), sleep.orElseThrow());
+    var odd = process(named.toString(), "300");
+    var stat = startOf(odd);
+    assertTrue(stat.contains("(x\ny) z)"), "the name splits the stat line: " + stat);
+    var close = stat.lastIndexOf(") ") + 2;
+    var fields = stat.substring(close).split(" ", -1);
+    fields[19] = String.valueOf(Long.parseLong(fields[19]) + 1);
+    var otherStart = stat.substring(0, close) + String.join(" ", fields);
+
+    var otherSaid = halted(dir, "other", odd, otherStart);
+    assertTrue(odd.isAlive(), "a process at the pid that started at another time is not signalled");
+    var recordedSaid = halted(dir, "odd", odd, stat);
+
+    assertEquals(List.of("gone", "gone"), List.of(otherSaid, recordedSaid));
+    assertTrue(odd.waitFor(10, TimeUnit.SECONDS));
+    assertEquals(143, odd.exitValue(), "by SIGTERM: it was the process recorded");
   }
 
   private final List<Process> started = new ArrayList<>();

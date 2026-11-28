@@ -455,7 +455,11 @@ public final class RunReservation {
    * to.
    */
   public static Optional<String> yieldToAClaim(
-      ShellExec shell, RunPlace.SpecWorkspace place, Supplier<List<String>> claims) {
+      ShellExec shell,
+      RunPlace.SpecWorkspace place,
+      int mine,
+      Supplier<List<String>> claims,
+      Runnable end) {
     var claim = claims.get().stream().findFirst();
     claim.ifPresent(run -> endTerminal(shell, place));
     return claim;
