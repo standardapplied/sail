@@ -440,7 +440,7 @@ import Testing
         defer { shell.window.orderOut(nil) }
         try Self.open(shell)
         let wash = try #require(shell.rail.wash(.account))
-        #expect(wash.layer?.borderWidth == 1 && wash.layer?.borderColor == NSColor(look.textSecondary).cgColor && near(wash.bounds.width, Rail.item))
+        #expect(wash.layer?.borderWidth == 1 && wash.layer?.borderColor == NSColor(look.textSecondary).cgColor && near(wash.bounds.width, Rail.wash))
         shell.userMenu.close()
         #expect(wash.layer?.borderWidth == 0 && !shell.rail.menuOpen)
     }

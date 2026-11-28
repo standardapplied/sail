@@ -28,7 +28,7 @@ import Testing
     /// once more moves no view.
     @Test func aChangeOfLookLaysNothingOut() throws {
         let shell = try WorkbenchLookTests.shell(.light)
-        shell.select(.terminals)
+        shell.select(.sessions)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let bench = shell.thisMac
@@ -91,7 +91,7 @@ import Testing
     /// again, it paints once, in the look now.
     @Test func aHiddenPanePaintsNothingAtASwitchAndOnceWhenShownInTheLookNow() throws {
         let shell = try WorkbenchLookTests.shell(.light)
-        shell.select(.terminals)
+        shell.select(.sessions)
         #expect(shell.account.isHidden && shell.workspaces.isHidden && shell.welcome.isHidden)
         let account = shell.account.lookPaints, workspaces = shell.workspaces.lookPaints, welcome = shell.welcome.lookPaints
         for look in [Look.dark, .light, .dark, .light, .dark] {

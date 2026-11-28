@@ -40,7 +40,7 @@ import Testing
         #expect(selected.label.textColor == NSColor(look.text))
         #expect(selected.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .semibold), "\(name): the selected title is not semibold")
         #expect(other.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .regular))
-        strip.frame = NSRect(x: 0, y: 0, width: 600, height: ShellApp.bandHeight)
+        strip.frame = NSRect(x: 0, y: 0, width: 600, height: ShellApp.titleRow)
         strip.layoutSubtreeIfNeeded()
         selected.layoutSubtreeIfNeeded()
         #expect(strip.isFlipped && !selected.isFlipped, "\(name): the tab's own y no longer runs up from its bottom edge")
@@ -124,13 +124,13 @@ import Testing
         let window = shell.window
         window.orderFront(nil)
         defer { window.orderOut(nil) }
-        for pane in [Rail.Item.terminals, .account] {
+        for pane in [Rail.Item.sessions, .account] {
             shell.select(pane)
             for full in [false, true] {
                 shell.placeTheStrip(fullScreen: full)
                 window.layoutIfNeeded()
                 let root = try #require(window.contentView)
-                let band = full ? ShellApp.bandHeight : Double(root.bounds.height - window.contentLayoutRect.maxY)
+                let band = full ? ShellApp.titleRow : Double(root.bounds.height - window.contentLayoutRect.maxY)
                 let context = try #require(Self.drawn(root))
                 let pixels = try #require(context.data).bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
                 func isChrome(_ x: Double, _ y: Double, _ chrome: RGB) -> Bool {
@@ -141,12 +141,15 @@ import Testing
                 for x in [40.0, Double(root.bounds.width) / 2, Double(root.bounds.width) - 6] {
                     #expect(isChrome(x, band / 2, look.chrome), "\(name) \(pane) full \(full): the band at x \(x) is not the chrome")
                 }
-                #expect(isChrome(Rail.width / 2, band + 4, look.chrome), "\(name) \(pane) full \(full): the rail under the band is not the chrome")
+                #expect(isChrome(Rail.width / 2, ShellApp.bandHeight + 4, look.chrome) && isChrome(Rail.width / 2, ShellApp.bandHeight - 2, look.chrome),
+                        "\(name) \(pane) full \(full): the band's foot or the rail under it is not the chrome")
                 #expect(isChrome(4, Double(root.bounds.height) - 4, look.chrome), "\(name) \(pane) full \(full): the chrome at the bottom is not the band's one fill")
                 let railTop = Double(root.bounds.height - shell.rail.frame.maxY)
-                #expect(abs(railTop - band) < 0.5, "\(name) \(pane) full \(full): the rail starts at \(railTop), the band ends at \(band)")
-                #expect(window.toolbarStyle == .unifiedCompact && abs(band - ShellApp.bandHeight) < 0.5,
-                        "\(name) full \(full): the band is \(band) pt, the one full screen draws \(ShellApp.bandHeight)")
+                #expect(abs(railTop - ShellApp.bandHeight) < 0.5, "\(name) \(pane) full \(full): the rail starts at \(railTop), the band ends at \(ShellApp.bandHeight)")
+                #expect(window.toolbarStyle == .unifiedCompact && abs(band - ShellApp.titleRow) < 0.5,
+                        "\(name) full \(full): the title row is \(band) pt, the one full screen draws \(ShellApp.titleRow)")
+                let cardTop = Double(root.bounds.height) - Double(try #require(shell.thisMac.superview).frame.maxY)
+                #expect(abs(cardTop - ShellApp.bandHeight) < 0.5, "\(name) \(pane) full \(full): the card starts \(cardTop) pt down, not under the \(ShellApp.bandHeight) pt band")
                 guard !full else {
                     #expect(shell.thisMac.strip.leading == ShellApp.fullScreenInset)
                     continue
@@ -165,7 +168,7 @@ import Testing
                 let strip = shell.thisMac.strip
                 strip.show(Self.items(), selected: TabID(1))
                 strip.layoutSubtreeIfNeeded()
-                if pane == .terminals {
+                if pane == .sessions {
                     let firstTab = try #require(strip.tabs.first)
                     let tab = firstTab.convert(firstTab.bounds, to: nil), gap = Double(tab.minX) - buttonsEnd
                     #expect(abs(gap - 16) < 0.5, "\(name): the first tab starts \(gap) pt after the window buttons, which end at \(buttonsEnd)")
@@ -201,7 +204,7 @@ import Testing
     @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func theRenameFieldIsTheLooks(_ name: String, _ look: Look) throws {
         let shell = try Self.shell(look)
-        shell.select(.terminals)
+        shell.select(.sessions)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let strip = shell.thisMac.strip
@@ -225,7 +228,7 @@ import Testing
     /// point in y, and both are centred in the tab.
     @Test func theRenameFieldsTextIsWhereTheTitleWas() throws {
         let shell = try Self.shell(.light)
-        shell.select(.terminals)
+        shell.select(.sessions)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let strip = shell.thisMac.strip
@@ -248,7 +251,7 @@ import Testing
     /// restores the name; the keys taken by another view, the name typed is kept.
     @Test func aRenameOutlivesLosingTheKeysToNothingAndEscapeRestoresTheName() async throws {
         let shell = try Self.shell(.light)
-        shell.select(.terminals)
+        shell.select(.sessions)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let strip = shell.thisMac.strip
@@ -291,7 +294,7 @@ import Testing
     /// and Escape then keeps nothing; another tab chosen ends it with the name typed.
     @Test func aBackgroundTabsRenameOutlivesRedrawsThatChooseNoTab() async throws {
         let shell = try Self.shell(.light)
-        shell.select(.terminals)
+        shell.select(.sessions)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let bench = shell.thisMac
@@ -386,7 +389,7 @@ import Testing
         let window = shell.window
         let content = try #require(window.contentView)
         let sections: [(String, NSView)] = [
-            ("the rail", shell.rail), ("Terminals", shell.thisMac), ("Workspaces", shell.workspaces), ("the welcome", shell.welcome), ("Account", shell.account),
+            ("the rail", shell.rail), ("Sessions", shell.thisMac), ("Workspaces", shell.workspaces), ("the welcome", shell.welcome), ("Account", shell.account),
         ]
         let least = Double(ShellApp.leastFrame.height)
         window.setFrame(NSRect(x: 0, y: 0, width: 1024, height: 100), display: false)
@@ -513,7 +516,7 @@ import Testing
             UnicodeScalar(UInt16(key)).map { String(Character($0)) } ?? ""
         }
         let command: NSEvent.ModifierFlags = .command
-        var table: [(String, String, NSEvent.ModifierFlags)] = [
+        let table: [(String, String, NSEvent.ModifierFlags)] = [
             ("New Tab", "t", command), ("Split Right", "d", command), ("Split Down", "D", [.command, .shift]), ("Close", "w", command),
             ("Close Tab", "w", [.command, .option]), ("Close Window", "W", [.command, .shift]), ("Cut", "x", command), ("Copy", "c", command),
             ("Paste", "v", command), ("Select All", "a", command), ("Bigger", "+", command), ("Smaller", "-", command), ("Actual Size", "0", command),
@@ -524,18 +527,16 @@ import Testing
             ("Equalize Splits", "=", [.command, .control]), ("Move Divider Up", arrow(NSUpArrowFunctionKey), [.command, .control]),
             ("Move Divider Down", arrow(NSDownArrowFunctionKey), [.command, .control]), ("Move Divider Left", arrow(NSLeftArrowFunctionKey), [.command, .control]),
             ("Move Divider Right", arrow(NSRightArrowFunctionKey), [.command, .control]), ("Show Previous Tab", "{", [.command, .shift]),
-            ("Show Next Tab", "}", [.command, .shift]), ("Select Last Tab", "9", command), ("Account", ",", command),
+            ("Show Next Tab", "}", [.command, .shift]), ("Account", ",", command),
             ("New File", "n", [.option, .command]), ("New Folder", "N", [.command, .shift]), ("Rename", FilesPanel.renameKey, []), ("Delete", "\u{8}", command),
         ]
-        for number in 1 ... 8 {
-            table.append(("Select Tab \(number)", "\(number)", command))
-        }
         for (title, key, modifiers) in table {
             let found = all.filter { $0.title == title }
             #expect(found.contains { $0.keyEquivalent == key && $0.keyEquivalentModifierMask == modifiers }, "\(title) is not in the menu with its key")
         }
         #expect(!all.contains { $0.title.hasSuffix("…") || $0.title.hasSuffix("...") }, "a menu item ends in an ellipsis")
         #expect(!all.contains { $0.title == "Close" && $0.keyEquivalent == "w" && $0.action == #selector(NSWindow.performClose(_:)) }, "⌘W still closes the window")
+        #expect(!all.contains { $0.title.hasPrefix("Select Tab") || $0.title == "Select Last Tab" }, "a hidden Select Tab item is still in the menu")
     }
 
     /// P1: each command a context menu offers is a menu bar item with the same action and target,
@@ -564,7 +565,7 @@ import Testing
 
     /// The workbench takes its own keys before the menu bar: each finds its menu item, shifted
     /// keys by what the keyboard sends (`charactersIgnoringModifiers` "D", "{"), arrows by their
-    /// function-key characters; a key of no workbench item finds none.
+    /// function-key characters; a key of no workbench item finds none, ⌘9 among them while no tab is open.
     @Test func eachShortcutFindsItsMenuItem() throws {
         let shell = try Self.shell(.dark)
         let menu = shell.menu()
@@ -581,7 +582,7 @@ import Testing
             (try key(left, [.command, .option, .function, .numericPad]), #selector(WorkbenchView.selectSplit(_:))),
             (try key("\r", [.command, .shift]), #selector(WorkbenchView.zoomSplit(_:))),
             (try key("{", [.command, .shift]), #selector(WorkbenchView.showPreviousTab(_:))),
-            (try key("9", .command), #selector(WorkbenchView.selectTab(_:))),
+            (try key("9", .command), nil),
             (try key("c", .command), nil),
             (try key("d", [.command, .option]), nil),
         ]
@@ -597,7 +598,7 @@ import Testing
     @Test func aDisabledShortcutDoesNothingAndAnUnownedKeyPassesOn() throws {
         let shell = try Self.shell(.dark)
         NSApp.mainMenu = shell.menu()
-        shell.select(.terminals)
+        shell.select(.sessions)
         func key(_ characters: String, _ flags: NSEvent.ModifierFlags) throws -> NSEvent {
             try #require(NSEvent.keyEvent(
                 with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: characters,

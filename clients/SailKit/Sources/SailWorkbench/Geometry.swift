@@ -134,27 +134,108 @@ extension Layout {
     }
 }
 
-/// How a strip of `width` shares its room: equal tabs from ``widest`` to ``narrowest``, `+` and a
-/// stretch to drag the window by always kept; past that, the run of tabs around the selected one.
+/// How a strip of `width` shares its room: equal tabs from ``widest`` to ``narrowest`` and `+` and
+/// a stretch to drag the window by always kept; past that, tabs at ``narrowest`` run from `first`,
+/// the count kept at the strip's end, and an edge with tabs past it keeps ``fade`` for the part of
+/// the next tab it shows under its fade.
 public struct TabRow: Equatable, Sendable {
-    public static let narrowest = 120.0
+    public static let narrowest = 124.0
     public static let widest = 240.0
     public static let gap = 4.0
     public static let addSide = 24.0
     public static let stretch = 40.0
+    /// The count's room at the strip's end, its box and the space after it: three digits fit.
+    public static let countSide = 48.0
+    public static let fade = 60.0
 
+    public let tabs: Int
     public let width: Double
+    /// The first tab shown whole, and how many are.
     public let first: Int
     public let shown: Int
+    /// The room the tabs are drawn in, from the strip's leading edge: the `+` follows it.
+    public let room: Double
+    /// Where the first tab shown whole starts in that room: the room left before it, for the tab
+    /// before it under the fade.
+    public let inset: Double
+    private let strip: Double
 
-    public init(tabs: Int, selected: Int?, width strip: Double) {
-        let room = strip - Self.addSide - Self.gap - Self.stretch
-        shown = min(tabs, max(1, Int((room + Self.gap) / (Self.narrowest + Self.gap))))
-        width = shown == 0 ? Self.widest : min(Self.widest, max(Self.narrowest, (room - Self.gap * Double(shown - 1)) / Double(shown)))
-        first = min(max(0, (selected ?? 0) - (shown - 1) / 2), max(0, tabs - shown))
+    /// The row of `tabs` in a strip `strip` wide, run from `first` as far as the strip lets.
+    public init(tabs: Int, width strip: Double, first wanted: Int) {
+        self.tabs = tabs
+        self.strip = strip
+        let free = strip - Self.addSide - Self.gap - Self.stretch
+        guard Self.fitting(free) < tabs else {
+            shown = tabs
+            first = 0
+            inset = 0
+            width = tabs == 0 ? Self.widest : min(Self.widest, max(Self.narrowest, (free - Self.gap * Double(tabs - 1)) / Double(tabs)))
+            room = tabs == 0 ? 0 : Double(tabs) * width + Self.gap * Double(tabs - 1)
+            return
+        }
+        width = Self.narrowest
+        room = free - Self.countSide - Self.gap
+        let edge = Self.fitting(room - Self.fade), middle = Self.fitting(room - 2 * Self.fade)
+        if wanted <= 0 {
+            (first, shown, inset) = (0, edge, 0)
+        } else if wanted >= tabs - edge {
+            (first, shown) = (tabs - edge, edge)
+            inset = room - Self.run(edge)
+        } else {
+            (first, shown) = (wanted, middle)
+            inset = ((room - Self.run(middle)) / 2).rounded(.down)
+        }
+    }
+
+    /// How many tabs at ``narrowest`` fit in `room`, one at the least.
+    private static func fitting(_ room: Double) -> Int {
+        max(1, Int((room + gap) / (narrowest + gap)))
+    }
+
+    /// The width of `count` tabs at ``narrowest`` side by side.
+    private static func run(_ count: Int) -> Double {
+        Double(count) * narrowest + gap * Double(count - 1)
+    }
+
+    /// Whether some tab is not shown whole: the strip scrolls and the count shows.
+    public var scrolls: Bool {
+        shown < tabs
+    }
+
+    /// Whether tabs lie past the leading edge, and past the trailing one: those edges fade.
+    public var fadesBefore: Bool {
+        first > 0
+    }
+
+    public var fadesAfter: Bool {
+        first + shown < tabs
+    }
+
+    /// The room past the tabs shown whole at the leading edge and at the trailing one: where the
+    /// tab past a fading edge shows, under its fade.
+    public var margins: (before: Double, after: Double) {
+        (inset, shown == 0 ? 0 : max(0, room - inset - Double(shown) * width - Self.gap * Double(shown - 1)))
+    }
+
+    /// Where `+` starts, from the strip's leading edge.
+    public var add: Double {
+        tabs == 0 ? 0 : room + Self.gap
     }
 
     public func shows(_ index: Int) -> Bool {
         (first ..< first + shown).contains(index)
+    }
+
+    /// Where tab `index` starts in ``room``, nil when no part of it is in the room.
+    public func start(of index: Int) -> Double? {
+        let start = inset + Double(index - first) * (width + Self.gap)
+        return start + width > 0 && start < room ? start : nil
+    }
+
+    /// The same row moved the least so tab `index` is shown whole.
+    public func revealing(_ index: Int?) -> TabRow {
+        guard let index, scrolls, !shows(index) else { return self }
+        let middle = Self.fitting(room - 2 * Self.fade)
+        return TabRow(tabs: tabs, width: strip, first: index < first ? index : index - middle + 1)
     }
 }

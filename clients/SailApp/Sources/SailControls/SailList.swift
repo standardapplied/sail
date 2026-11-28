@@ -1346,7 +1346,7 @@ package final class MenuOpener: NSObject {
 
     /// Where the menu's first item goes: under the box's leading corner, so that the menu's edge is
     /// 2 pt under the box.
-    static func corner(under button: NSView) -> NSPoint {
+    package static func corner(under button: NSView) -> NSPoint {
         let box = button.bounds, insets = button.alignmentRectInsets, below = 2 + menuPadding
         let bottom = button.isFlipped ? Double(box.maxY) - Double(insets.bottom) + below : Double(box.minY) + Double(insets.bottom) - below
         let leading = button.userInterfaceLayoutDirection == .rightToLeft ? Double(box.maxX) - Double(insets.right) : Double(box.minX) + Double(insets.left)

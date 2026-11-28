@@ -1,4 +1,5 @@
 import AppKit
+import SailControls
 import SailLook
 import SailTerminalView
 import SailWorkbench
@@ -7,6 +8,8 @@ import SailWorkbench
 /// strip's empty part takes no mouse event of its own, so in the title bar's accessory the title
 /// bar's own view gets it: dragging, and the double-click System Settings names. With the tabs not
 /// shown (another pane selected) the strip stays, empty and clear, so the row stays the title bar's.
+/// Past what fits, a sideways scroll moves the tabs a tab a step, an edge with tabs past it fades
+/// over the next tab, and the count at the strip's end lists every tab.
 @MainActor
 public final class TabStrip: NSView {
     public struct Item: Equatable, Sendable {
@@ -25,6 +28,8 @@ public final class TabStrip: NSView {
     var onMove: @MainActor (TabID, Int) -> Void = { _, _ in }
     /// A tab's context menu, for the tab it names.
     var onMenu: @MainActor (TabID) -> NSMenu? = { _ in nil }
+    /// The menu the count opens: every tab.
+    package var onCount: @MainActor () -> NSMenu = { NSMenu() }
 
     var look: Look {
         didSet { paint() }
@@ -32,6 +37,12 @@ public final class TabStrip: NSView {
 
     public private(set) var tabs: [TabButton] = []
     public let add: RingedButton
+    /// The number of tabs and a chevron, shown while not every tab is.
+    public let count: RingedButton
+    /// The room the tabs are drawn in, which cuts the tab past a fading edge.
+    let lane = NSView()
+    let fades = (before: StripFade(), after: StripFade())
+    private let mono: LabelFont
 
     var showsTabs = true {
         didSet {
@@ -44,14 +55,23 @@ public final class TabStrip: NSView {
         tabs.contains { $0.field != nil }
     }
 
-    init(look: Look) {
+    init(look: Look, mono: LabelFont) {
         self.look = look
+        self.mono = mono
         add = RingedButton(symbol: "plus", tip: "New Tab", look: look)
+        count = RingedButton(symbol: "chevron.down", tip: "All Tabs", look: look)
         super.init(frame: NSRect(x: 0, y: 0, width: 600, height: Self.tabHeight))
         wantsLayer = true
+        lane.wantsLayer = true
+        lane.layer?.masksToBounds = true
         add.target = self
         add.action = #selector(addTab)
-        addSubview(add)
+        count.target = self
+        count.action = #selector(openCount)
+        count.imagePosition = .imageTrailing
+        for view in [lane, fades.before, fades.after, add, count] as [NSView] {
+            addSubview(view)
+        }
         setAccessibilityElement(true)
         setAccessibilityRole(.tabGroup)
         setAccessibilityLabel("Tabs")
@@ -71,14 +91,21 @@ public final class TabStrip: NSView {
         didSet { if userInterfaceLayoutDirection != oldValue { needsLayout = true } }
     }
 
-    /// The left edge of a frame `width` wide whose leading edge is `x` from the strip's: right to
-    /// left the tabs run from the strip's right edge, next to the window buttons AppKit put there.
-    private func placed(_ x: Double, width: Double) -> Double {
-        userInterfaceLayoutDirection == .rightToLeft ? Double(bounds.width) - x - width : x
+    private var rightToLeft: Bool {
+        userInterfaceLayoutDirection == .rightToLeft
+    }
+
+    /// The left edge of a frame `width` wide whose leading edge is `x` from the leading edge of a
+    /// room `room` wide: right to left the tabs run from the strip's right edge, next to the window
+    /// buttons AppKit put there.
+    private func placed(_ x: Double, width: Double, in room: Double? = nil) -> Double {
+        rightToLeft ? (room ?? Double(bounds.width)) - x - width : x
     }
 
     func show(_ items: [Item], selected: TabID?) {
         let held = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
+        let index = items.firstIndex { $0.id == selected }
+        if selected != selectedID || index != selectedIndex || items.count != tabs.count { revealing = true }
         tabs = items.map { item in
             let tab = held[item.id] ?? makeTab(item.id)
             tab.show(item, selected: item.id == selected, look: look)
@@ -87,12 +114,22 @@ public final class TabStrip: NSView {
         for (id, tab) in held where !items.contains(where: { $0.id == id }) {
             tab.removeFromSuperview()
         }
-        selectedIndex = items.firstIndex { $0.id == selected }
+        selectedID = selected
+        selectedIndex = index
+        count.attributedTitle = countTitle
         setAccessibilityChildren(tabs)
         needsLayout = true
     }
 
+    private var selectedID: TabID?
     private var selectedIndex: Int?
+    /// The first tab asked to be shown whole: where a scroll left the strip.
+    private var scrolled = 0
+    /// The selection, the tabs or the width changed since the last layout: the selected tab is
+    /// brought into view, the strip moved the least.
+    private var revealing = true
+    /// A trackpad's travel since its last step.
+    private var travelled = 0.0
 
     /// The strip's own empty space before the first tab, the title bar's to drag and double-click:
     /// what the room after the window buttons leaves of it; none right to left, where the strip
@@ -104,23 +141,61 @@ public final class TabStrip: NSView {
     /// A tab's height, centred in the band.
     static let tabHeight = 26.0
 
-    private var row: TabRow {
-        TabRow(tabs: tabs.count, selected: selectedIndex, width: Double(bounds.width) - leading)
+    package var row: TabRow {
+        TabRow(tabs: tabs.count, width: Double(bounds.width) - leading, first: scrolled)
+    }
+
+    override public func setFrameSize(_ size: NSSize) {
+        if size.width != frame.width { revealing = true }
+        super.setFrameSize(size)
     }
 
     override public func layout() {
         super.layout()
-        let row = self.row
-        var x = leading
-        for (index, tab) in tabs.enumerated() {
-            tab.isHidden = !showsTabs || !row.shows(index)
-            guard !tab.isHidden else { continue }
-            let height = min(Self.tabHeight, max(0, Double(bounds.height) - 8))
-            if !tab.dragging { tab.frame = CGRect(x: placed(x, width: row.width), y: (Double(bounds.height) - height) / 2, width: row.width, height: height) }
-            x += row.width + TabRow.gap
+        if revealing {
+            scrolled = row.revealing(selectedIndex).first
+            revealing = false
         }
-        add.frame = CGRect(x: placed(x, width: TabRow.addSide), y: (Double(bounds.height) - TabRow.addSide) / 2, width: TabRow.addSide, height: TabRow.addSide)
+        let row = self.row, height = Double(bounds.height)
+        lane.frame = CGRect(x: placed(leading, width: row.room), y: 0, width: row.room, height: height)
+        for (index, tab) in tabs.enumerated() {
+            let start = row.start(of: index)
+            tab.isHidden = !showsTabs || start == nil
+            guard let start, !tab.isHidden, !tab.dragging else { continue }
+            let tall = min(Self.tabHeight, max(0, height - 8))
+            tab.frame = CGRect(x: placed(start, width: row.width, in: row.room), y: (height - tall) / 2, width: row.width, height: tall)
+        }
+        add.frame = CGRect(x: placed(leading + row.add, width: TabRow.addSide), y: (height - TabRow.addSide) / 2, width: TabRow.addSide, height: TabRow.addSide)
         add.isHidden = !showsTabs
+        let countWidth = TabRow.countSide - Look.Space.s
+        count.frame = CGRect(x: placed(Double(bounds.width) - TabRow.countSide, width: countWidth), y: (height - TabRow.addSide) / 2, width: countWidth, height: TabRow.addSide)
+        count.isHidden = !showsTabs || !row.scrolls
+        let margins = row.margins
+        fades.before.frame = CGRect(x: placed(leading, width: margins.before), y: 0, width: margins.before, height: height)
+        fades.after.frame = CGRect(x: placed(leading + row.room - margins.after, width: margins.after), y: 0, width: margins.after, height: height)
+        fades.before.isHidden = !showsTabs || !row.fadesBefore
+        fades.after.isHidden = !showsTabs || !row.fadesAfter
+        fades.before.solidOnTheLeft = !rightToLeft
+        fades.after.solidOnTheLeft = rightToLeft
+    }
+
+    /// A sideways scroll, a trackpad's or a mouse's with Shift, moves the tabs a tab a step and
+    /// selects none: a mouse's wheel a step a notch, a trackpad a step a tab's width of travel.
+    override public func scrollWheel(with event: NSEvent) {
+        let row = self.row, along = Double(event.scrollingDeltaX)
+        guard showsTabs, row.scrolls, abs(along) > abs(Double(event.scrollingDeltaY)) else { return super.scrollWheel(with: event) }
+        let steps: Int
+        if event.hasPreciseScrollingDeltas {
+            if event.phase == .began { travelled = 0 }
+            travelled += along
+            steps = Int(travelled / (row.width + TabRow.gap))
+            travelled -= Double(steps) * (row.width + TabRow.gap)
+        } else {
+            steps = along > 0 ? 1 : -1
+        }
+        guard steps != 0 else { return }
+        scrolled = row.first + (rightToLeft ? steps : -steps)
+        needsLayout = true
     }
 
     private func makeTab(_ id: TabID) -> TabButton {
@@ -130,15 +205,15 @@ public final class TabStrip: NSView {
         tab.onRename = { [weak self] name in self?.onRename(id, name) }
         tab.onDrop = { [weak self] tab in self?.drop(tab) }
         tab.onMenu = { [weak self] in self?.onMenu(id) }
-        addSubview(tab)
+        lane.addSubview(tab)
         return tab
     }
 
-    /// A dragged tab let go: its place is where its middle is, from the strip's leading edge.
+    /// A dragged tab let go: its place is where its middle is among the tabs shown whole.
     private func drop(_ tab: TabButton) {
         let row = self.row
-        let middle = placed(Double(tab.frame.midX), width: 0)
-        let place = Int(((middle - leading) / (row.width + TabRow.gap)).rounded(.down))
+        let middle = placed(Double(tab.frame.midX), width: 0, in: row.room)
+        let place = Int(((middle - row.inset) / (row.width + TabRow.gap)).rounded(.down))
         tab.dragging = false
         onMove(tab.id, row.first + min(max(0, place), row.shown - 1))
         needsLayout = true
@@ -148,10 +223,106 @@ public final class TabStrip: NSView {
         onNew()
     }
 
+    /// The count's menu, hung from the count's trailing corner 2 pt under it, the count washed
+    /// while it is open.
+    @objc private func openCount() {
+        let menu = onCount()
+        menu.userInterfaceLayoutDirection = userInterfaceLayoutDirection
+        let box = count.bounds, width = Double(menu.size.width)
+        let x = rightToLeft ? Double(box.minX) + width : Double(box.maxX) - width
+        count.layer?.backgroundColor = NSColor(Tint(look.chromeWash)).cgColor
+        menu.popUp(positioning: nil, at: NSPoint(x: x, y: Double(MenuOpener.corner(under: count).y)), in: count)
+        count.layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    /// The number of tabs, in the strip's mono label.
+    private var countTitle: NSAttributedString {
+        NSAttributedString(string: String(tabs.count), attributes: [.font: mono.font(Look.Step.micro.points) as NSFont, .foregroundColor: NSColor(look.textSecondary)])
+    }
+
     private func paint() {
         layer?.backgroundColor = showsTabs ? NSColor(look.chrome).cgColor : NSColor.clear.cgColor
         add.paint(look)
+        count.paint(look)
+        count.attributedTitle = countTitle
+        fades.before.chrome = look.chrome
+        fades.after.chrome = look.chrome
         tabs.forEach { $0.look = look }
+    }
+}
+
+/// The fade over an edge of the strip with tabs past it, over all the room the tab past it shows
+/// in: the chrome, solid at the edge and gone at its inner side. It takes no click: one on it
+/// reaches the tab under it.
+@MainActor
+final class StripFade: NSView {
+    private let gradient = CAGradientLayer()
+
+    var chrome = Look.light.chrome {
+        didSet { draw() }
+    }
+
+    var solidOnTheLeft = true {
+        didSet { if solidOnTheLeft != oldValue { draw() } }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        layer = gradient
+        wantsLayer = true
+        gradient.locations = [0, 0.4, 1]
+        draw()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
+    }
+
+    /// Its colour at its left edge and at its right: what the tests read.
+    var solid: (left: CGColor?, right: CGColor?) {
+        let colours = gradient.colors as? [CGColor] ?? []
+        let left = solidOnTheLeft ? colours.first : colours.last
+        let right = solidOnTheLeft ? colours.last : colours.first
+        return (left, right)
+    }
+
+    private func draw() {
+        let solid = NSColor(chrome).cgColor, clear = NSColor(chrome).withAlphaComponent(0).cgColor
+        gradient.colors = [solid, solid, clear]
+        gradient.startPoint = CGPoint(x: solidOnTheLeft ? 0 : 1, y: 0.5)
+        gradient.endPoint = CGPoint(x: solidOnTheLeft ? 1 : 0, y: 0.5)
+    }
+}
+
+/// A tab's mark as its menu items draw it: a 10 pt slot for its state's mark, empty for now, then
+/// its form's icon, one template image AppKit inks as the menu's text, drawn when it is made.
+@MainActor
+enum TabMark {
+    static let slot = 10.0
+    static let terminal = listed("terminal")
+
+    private static func listed(_ symbol: String) -> NSImage {
+        let configuration = NSImage.SymbolConfiguration(pointSize: Look.Step.callout.points, weight: .regular)
+        let icon = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(configuration) ?? NSImage()
+        let size = NSSize(width: slot + Look.Space.s + Double(icon.size.width), height: max(Double(icon.size.height), slot))
+        let image = NSImage(size: size)
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int((Double(size.width) * 2).rounded(.up)), pixelsHigh: Int((Double(size.height) * 2).rounded(.up)),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return image }
+        bitmap.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        icon.draw(in: NSRect(x: slot + Look.Space.s, y: (Double(size.height) - Double(icon.size.height)) / 2, width: Double(icon.size.width), height: Double(icon.size.height)))
+        NSGraphicsContext.restoreGraphicsState()
+        image.addRepresentation(bitmap)
+        image.isTemplate = true
+        return image
     }
 }
 

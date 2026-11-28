@@ -3,7 +3,7 @@
   {"name": "still-signed-in", "signed": true, "pane": "Uday\n@uday · Admin", "seconds": 20},
   {"name": "still-signed-in-the-control-plane", "signed": true, "pane": "127.0.0.1:7979 · Connected\nSigned in until "},
   {"name": "no-ceremony", "asked": 0},
-  {"name": "terminals", "select": "terminals"},
+  {"name": "sessions", "select": "sessions"},
   {"name": "s27-the-window-as-it-was", "resize": [920, 720]},
   {"name": "s27-the-same-tabs-names-ratios-and-focus", "arrangement": {"tabs": [1, 2, 1], "selected": 1, "focus": 0, "titles": ["This Mac", "api", "This Mac 2"], "frames": [[0, 0, 0.5, 1, 0, 0, 201, 0], [0.5, 0, 0.5, 1, 202, 0, -202, 0]]}, "seconds": 30},
   {"name": "s27-reattached-earlier-output", "line": "kept-8", "seconds": 30},

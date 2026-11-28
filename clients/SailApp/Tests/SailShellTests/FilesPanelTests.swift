@@ -71,7 +71,7 @@ import Testing
     @Test func theViewItemSaysWhatItWillDoInEachPlace() throws {
         let door = try FakeRunnerDoor(person: "uday")
         let (shell, bench) = try Self.shell(door)
-        shell.select(.terminals)
+        shell.select(.sessions)
         #expect(Self.command(shell) == ("Show Files", true, nil))
         shell.toggleSidebar(nil)
         #expect(Self.command(shell) == ("Hide Files", true, nil), "the item does not say it will hide the files")

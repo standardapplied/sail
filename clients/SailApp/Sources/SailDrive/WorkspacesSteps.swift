@@ -577,7 +577,7 @@ extension Driver {
             pane.layoutSubtreeIfNeeded()
             let now = shell.window.frame.size, reached = abs(Double(now.width) - size[0]) < 0.5 && abs(Double(now.height) - size[1]) < 0.5
             let sections: [(String, NSView)] = [
-                ("the rail", shell.rail as NSView), ("Terminals", shell.thisMac as NSView), ("Workspaces", pane as NSView), ("the welcome", shell.welcome as NSView),
+                ("the rail", shell.rail as NSView), ("Sessions", shell.thisMac as NSView), ("Workspaces", pane as NSView), ("the welcome", shell.welcome as NSView),
                 ("Account", shell.account as NSView),
             ]
             let least = sections.map { "\($0.0) \($0.1.fittingSize.width) × \($0.1.fittingSize.height)" }.joined(separator: ", ")
@@ -623,7 +623,7 @@ extension Driver {
             guard await chooseSession(title), let enter = Keys.named("enter", modifiers: []) else { return (false, "This Mac lists no session \(title) to open") }
             send(enter)
             let bench = shell.thisMac
-            let opened = await waitUntil(step.seconds ?? 5) { self.shell.rail.selected == .terminals && bench.model.selectedTab.map { bench.model.title(of: $0.id) } == title }
+            let opened = await waitUntil(step.seconds ?? 5) { self.shell.rail.selected == .sessions && bench.model.selectedTab.map { bench.model.title(of: $0.id) } == title }
             return (opened, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"); \(arrangementSaid)")
         }
         if step.nothingNamesThisMac == true {
@@ -645,7 +645,7 @@ extension Driver {
             guard pane.project.list.chosen == name, let enter = Keys.named("enter", modifiers: []) else { return (false, "no row \(name)") }
             shell.window.makeFirstResponder(pane.project.list)
             send(enter)
-            return (shell.rail.selected == .terminals, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"); \(arrangementSaid)")
+            return (shell.rail.selected == .sessions, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"); \(arrangementSaid)")
         }
         if let shown = step.skeletons {
             let visible = { Self.found(Skeleton.self, in: pane).filter { !$0.isHiddenOrHasHiddenAncestor } }

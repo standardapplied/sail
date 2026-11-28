@@ -1,5 +1,5 @@
 {"steps": [
-  {"name": "terminals-signed-out", "select": "terminals"},
+  {"name": "sessions-signed-out", "select": "sessions"},
   {"name": "this-mac-attached", "attached": true, "seconds": 30},
   {"name": "what-the-system-reports-of-the-app", "machineState": true},
   {"name": "title-bar-over-this-mac", "titleBar": true},
