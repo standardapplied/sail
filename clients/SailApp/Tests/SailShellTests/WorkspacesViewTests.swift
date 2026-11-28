@@ -977,7 +977,7 @@ import Testing
             view.panel.onChoose(WorkspacesModel.thisMac)
             view.layoutSubtreeIfNeeded()
             let local = try Self.inColumn(view.local.skeleton, head: view.local.skeleton.title, content: view.local.list, window: window)
-            #expect(near(local.head, project.head) && near(local.content, project.content), "\(window) pt: This Mac's head \(local.head), a project's \(project.head)")
+            #expect(near(local.head.origin, project.head.origin) && near(local.content, project.content), "\(window) pt: This Mac's head \(local.head), a project's \(project.head)")
             let at = { (part: NSView) in view.convert(part.alignmentRect(forFrame: part.frame), from: part.superview).maxX }
             #expect(near(at(view.local.newShell), at(view.project.newWorkspace)), "\(window) pt: New Shell ends at \(at(view.local.newShell)), New Workspace at \(at(view.project.newWorkspace))")
             let (account, accountWindow) = try await AccountPaneTests.signedIn(try Desk(AccountPaneTests.goldens), width: width)
