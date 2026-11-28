@@ -245,7 +245,8 @@ class AccessDoorsBaselineTest {
       doors.add(new Door("stop " + which, ops -> ops.stopWorkspace("acme", name)));
       doors.add(new Door("delete " + which, ops -> ops.deleteWorkspace("acme", name, false)));
       doors.add(
-          new Door("ask what can start in " + which, ops -> ops.workspaceAgents("acme", name)));
+          new Door(
+              "ask what can start in " + which, ops -> ops.workspaceAgents("acme", name, true)));
     }
   }
 
@@ -296,7 +297,7 @@ class AccessDoorsBaselineTest {
       doors.add(
           new Door(
               "ask what can start in " + which,
-              ops -> node.workspaceAgents("acme", name),
+              ops -> node.workspaceAgents("acme", name, true),
               theNodes));
       doors.add(
           new Door(

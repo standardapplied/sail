@@ -109,7 +109,9 @@ class ChatHostTest {
               () ->
                   as(
                       who,
-                      () -> bench.host.open(project, workspace, "claude-code", "default", false)));
+                      () ->
+                          bench.host.open(
+                              project, workspace, "claude-code", "default", false, true)));
       var pty =
           assertThrows(
               Remedied.Io.class,
@@ -133,7 +135,8 @@ class ChatHostTest {
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aPersonWhoSignsInInsideOpensAChatWithNoStoredLogin() {
     var session =
-        as("tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true)).session();
+        as("tom", () -> bench.host.open("acme", "tom", "claude-code", "default", true, true))
+            .session();
 
     assertTrue(bench.store.find(session).orElseThrow().inside());
   }
@@ -144,7 +147,10 @@ class ChatHostTest {
     var codex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> as("sam", () -> bench.host.open("acme", "try", "codex", "full-access", false)));
+            () ->
+                as(
+                    "sam",
+                    () -> bench.host.open("acme", "try", "codex", "full-access", false, true)));
     var risky =
         assertThrows(
             IllegalArgumentException.class,
@@ -152,7 +158,8 @@ class ChatHostTest {
                 as(
                     "sam",
                     () ->
-                        bench.host.open("acme", "try", "claude-code", "bypassPermissions", false)));
+                        bench.host.open(
+                            "acme", "try", "claude-code", "bypassPermissions", false, true)));
 
     assertEquals("Codex CLI has no chat form; start it in a terminal.", codex.getMessage());
     assertEquals(
@@ -689,7 +696,7 @@ class ChatHostTest {
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void aModeSaidThatALaunchMayNotPassOnResumesInTheFirstChatMode() {
     var session =
-        as("sam", () -> bench.host.open("acme", "try", "claude-code", "acceptEdits", false))
+        as("sam", () -> bench.host.open("acme", "try", "claude-code", "acceptEdits", false, true))
             .session();
     bench.send(session, "hi");
     var fake =
