@@ -388,7 +388,8 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<AgentOffersResponse> workspaceAgents(String project, String name) {
+  public Result<AgentOffersResponse> workspaceAgents(
+      String project, String name, boolean terminal) {
     return Result.failure(ErrorCode.NOT_FOUND, "no workspaces here");
   }
 

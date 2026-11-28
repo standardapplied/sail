@@ -326,7 +326,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             enterWorkspace,
             call ->
                 ApiResponse.from(
-                    operations.workspaceAgents(call.project(), call.param("workspace")))),
+                    operations.workspaceAgents(
+                        call.project(), call.param("workspace"), terminal.isPresent()))),
         route(
             POST,
             PROJECT + "/workspaces/{workspace}/stop",
@@ -888,11 +889,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
 
   /** This runner's terminal door, refused on a runner that offers none over the network. */
   private TerminalTickets offered() {
-    return terminal.orElseThrow(
-        () ->
-            new ApiException(
-                ErrorCode.TERMINAL_NOT_OFFERED,
-                "This runner offers no terminal over the network; ask an admin."));
+    return terminal.orElseThrow(TerminalTickets::notOffered);
   }
 
   private ApiResponse dispatch(Call call) throws IOException {

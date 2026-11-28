@@ -69,6 +69,7 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "workspace-agents-dock-no-login": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "workspace-agents-dock-not-installed": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "workspace-agents-pier-owner-gone": { _ = try await $0.send(.agents(workspace: "pier", project: "harbor")) },
+    "workspace-agents-dock-no-terminal-door": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "refusal-forbidden-not-assignee-agents": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "logins": { _ = try await $0.send(.logins) },
     "logins-no-default": { _ = try await $0.send(.logins) },
@@ -262,6 +263,17 @@ func answer<Response>(
         #expect(theirs.refusal?.code == .known(.notYourWorkspace) && theirs.offered.isEmpty && theirs.owner == "uday")
         let gone = try agents("workspace-agents-owner-gone", "wreck")
         #expect(gone.refusal?.code == .known(.ownerGone) && gone.offered.isEmpty && gone.owner == nil)
+    }
+
+    /// On a box with no terminal door the server offers Claude Code alone, for a chat, and the app
+    /// reads that offer as it reads it beside a door: it decodes no form and holds no rule of doors.
+    @Test func whatCanStartOnABoxWithNoTerminalDoorIsReadAsAnswered() throws {
+        let agents = Endpoint.agents(workspace: "dock", project: "harbor")
+        let doorless = try agents.decode(response(try Exchange("workspace-agents-dock-no-terminal-door")))
+        let withDoor = try agents.decode(response(try Exchange("workspace-agents-dock")))
+        #expect(doorless.refusal == nil && doorless.offered.map(\.harness) == ["claude-code"])
+        #expect(withDoor.offered.map(\.harness) == ["claude-code", "codex"])
+        #expect(doorless.offered.first == withDoor.offered.first)
     }
 
     /// A running workspace, a stopped one and another person's, as the server lists them and as

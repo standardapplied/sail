@@ -62,6 +62,16 @@ public final class TerminalTickets {
   }
 
   /**
+   * Why no terminal opens on a runner that has no door: the ticket route's refusal, and the agents
+   * route's when that leaves nothing to start.
+   */
+  static ApiException notOffered() {
+    return new ApiException(
+        ErrorCode.TERMINAL_NOT_OFFERED,
+        "This runner offers no terminal over the network; ask an admin.");
+  }
+
+  /**
    * The ticket {@code request} asks for, {@code {"action": "open", "project": ..., "workspace":
    * ...}} ({@code workspace} absent, blank or {@code main} for the project's own container), {@code
    * {"action": "attach", "session": ...}}, or {@code {"action": "files", "project": ...,

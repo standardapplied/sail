@@ -305,10 +305,12 @@ public final class WorkspaceDoors {
    * Sail knows, with its person's default key from {@code fdes}, if any, and why one the project
    * does not install does not start. The same decisions a terminal Create of an agent makes ({@link
    * AgentStarts}). Whether a running workspace holds each installed harness's own sign-in is read
-   * in it ({@link WorkspaceSignIns}); a stopped one is not started to read it.
+   * in it ({@link WorkspaceSignIns}); a stopped one is not started to read it. Each offer holds the
+   * forms this runner opens, a terminal only with its door ({@code terminal}), as {@link
+   * AgentOffersResponse#opening} keeps them.
    */
-  public AgentOffersResponse agents(ProjectDefinition config, String name, FdeStore fdes)
-      throws Exception {
+  public AgentOffersResponse agents(
+      ProjectDefinition config, String name, FdeStore fdes, boolean terminal) throws Exception {
     var project = config.name();
     var found = workspaces.find(project, name).orElseThrow(() -> Workspaces.absent(project, name));
     decide(project, name, found, AGENT);
@@ -336,14 +338,15 @@ public final class WorkspaceDoors {
     var offered = new ArrayList<AgentOffer>();
     for (var harness : Harnesses.all()) {
       if (notInstalled.containsKey(harness)) {
-        offered.add(new AgentOffer(harness, null, false, null, notInstalled.get(harness)));
+        offered.add(
+            new AgentOffer(harness, null, false, null, notInstalled.get(harness), terminal));
         continue;
       }
       var signedIn = held.map(files -> files.contains(harness.signIn().file())).orElse(null);
       var key = fdes.logins().defaultFor(fdeId, harness).map(LoginStore.Login::row).orElse(null);
-      offered.add(new AgentOffer(harness, key, true, signedIn, null));
+      offered.add(new AgentOffer(harness, key, true, signedIn, null, terminal));
     }
-    return new AgentOffersResponse(project, name, person, running, null, offered);
+    return AgentOffersResponse.opening(project, name, person, running, offered);
   }
 
   /** What a door does, as its refusal says it is not done. */

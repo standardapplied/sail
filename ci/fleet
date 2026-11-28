@@ -899,9 +899,9 @@ echo "CHAT WALKED"'
 # read to its permission, lists it needs_you; ended, it is listed ended and not live. Another member
 # listing the workspace sees no such chat while the opener still does. Her preference reads chat, is
 # set to terminal and read back, the other member's still reads chat, and a word no preference
-# takes is refused. Claude Code offers a chat in its three chat modes, Codex only a terminal. The
-# chat is ended, the preference put back, the login removed, the key file and both tokens gone,
-# whatever failed.
+# takes is refused. With no terminal door Claude Code offers a chat alone, in its three chat modes,
+# and Codex, left with no form, is not offered. The chat is ended, the preference put back, the
+# login removed, the key file and both tokens gone, whatever failed.
 readonly CHAT_LIST='set -u
 handle=$1 project=$2 workspace=$3 other=$4
 api=http://127.0.0.1:7070
@@ -991,10 +991,10 @@ status=$(call "$token" GET "$place/agents")
 python3 -I -c "
 import json, sys
 offers = {o[\"harness\"]: o for o in json.load(open(\"/tmp/list.json\"))[\"offered\"]}
-claude, codex = offers[\"claude-code\"], offers[\"codex\"]
-print(\"claude-code forms %s, %d chat modes; codex forms %s\" % (claude[\"forms\"], len(claude[\"chat\"][\"modes\"]), codex[\"forms\"]))
-sys.exit(0 if \"chat\" in claude[\"forms\"] and len(claude[\"chat\"][\"modes\"]) == 3 and codex[\"forms\"] == [\"terminal\"] and \"chat\" not in codex else 1)
-" || fail "the agents route says another form"
+claude = offers[\"claude-code\"]
+print(\"offered %s; claude-code forms %s, %d chat modes\" % (sorted(offers), claude[\"forms\"], len(claude[\"chat\"][\"modes\"])))
+sys.exit(0 if sorted(offers) == [\"claude-code\"] and claude[\"forms\"] == [\"chat\"] and len(claude[\"chat\"][\"modes\"]) == 3 else 1)
+" || fail "the agents route offers a form this box does not open"
 echo "CHAT LISTED"'
 
 # The in-container credential asking the socket it holds for the caller's passkeys, its status line
@@ -2789,7 +2789,7 @@ storage() {
     chat_answers "$run" main eng acme eng-own client
   check "$run" "main holds the fleet's Claude Code key again where only root reads it, for eng's listed chat" \
     place_secret "$run" main fleet-anthropic-key anthropic
-  check "$run" "eng's chat in eng-own is listed through a real turn on main's API while main offers no terminal door, so the listing is her chats alone and not refused: idle when opened, your_turn once pong's turn ended, needs_you while Claude Code asks before printf x > listed.txt, ended and not live once she ends it; client lists none of it; eng's preference reads chat, is set to terminal and read back, client's still reads chat, and tab is refused; Claude Code offers a chat in three modes and Codex only a terminal; the chat ended, the preference put back, the key, the login and the tokens removed after" \
+  check "$run" "eng's chat in eng-own is listed through a real turn on main's API while main offers no terminal door, so the listing is her chats alone and not refused: idle when opened, your_turn once pong's turn ended, needs_you while Claude Code asks before printf x > listed.txt, ended and not live once she ends it; client lists none of it; eng's preference reads chat, is set to terminal and read back, client's still reads chat, and tab is refused; with no terminal door Claude Code offers a chat alone, in three modes, and Codex is not offered; the chat ended, the preference put back, the key, the login and the tokens removed after" \
     chat_lists "$run" main eng acme eng-own client
   check "$run" "eng's workspace commits as eng" commits_as "$run" main acme-eng-own eng@fleet.example
   check "$run" "eng's workspace holds none of main's person's forge token" holds_no_forge_token "$run" main acme-eng-own

@@ -109,9 +109,10 @@ public interface Operations extends LocalLaneOperations {
   /**
    * What can start in workspace {@code name} of {@code project} for the caller, who may enter it as
    * {@link #startWorkspace} may: each harness, its modes and the login it starts signed in with, or
-   * why it does not start.
+   * why it does not start, in the forms this runner opens, a terminal only with its door ({@code
+   * terminal}).
    */
-  Result<AgentOffersResponse> workspaceAgents(String project, String name);
+  Result<AgentOffersResponse> workspaceAgents(String project, String name, boolean terminal);
 
   /** Stops workspace {@code name} of {@code project}, as {@link #startWorkspace} may. */
   Result<WorkspaceChangeResponse> stopWorkspace(String project, String name);
