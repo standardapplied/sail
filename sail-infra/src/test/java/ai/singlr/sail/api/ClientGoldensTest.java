@@ -27,9 +27,12 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ChatItem;
+import ai.singlr.sail.engine.ChatWire;
 import ai.singlr.sail.engine.ContainerConfig;
 import ai.singlr.sail.engine.HeldLocks;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.LiveReply;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.Recorded;
 import ai.singlr.sail.engine.SailPaths;
@@ -530,6 +533,13 @@ class ClientGoldensTest {
             .map(code -> Map.of("code", code.code(), "status", code.httpCode()))
             .toList());
     vocabulary.put("change_types", ChangeFeed.TYPES);
+    vocabulary.put(
+        "chat_item_types",
+        Stream.concat(kinds(ChatWire.Own.class), kinds(ChatItem.class)).toList());
+    vocabulary.put("chat_detail_types", kinds(ChatItem.Detail.class).toList());
+    vocabulary.put("chat_tool_kinds", lowered(ChatItem.ToolKind.values()));
+    vocabulary.put("chat_change_kinds", lowered(ChatItem.ChangeKind.values()));
+    vocabulary.put("chat_decisions", lowered(LiveReply.Decision.values()));
     vocabulary.put("event_types", List.copyOf(wellKnownTypes()));
     vocabulary.put(
         "member_modes", Arrays.stream(EngagementMode.values()).map(EngagementMode::wire).toList());
@@ -690,6 +700,23 @@ class ClientGoldensTest {
   /** An event with no data: the envelope every event has, as the box itself publishes one. */
   private static Event envelope(String spec, String type) {
     return Event.of(PROJECT, spec, type, Event.SAIL_AGENT, "box");
+  }
+
+  /**
+   * The kinds of the records {@code sealed} permits, in the order it declares them, a sealed
+   * interface it permits standing for its own.
+   */
+  private static Stream<String> kinds(Class<?> sealed) {
+    return Arrays.stream(sealed.getPermittedSubclasses())
+        .flatMap(
+            type ->
+                type.isSealed()
+                    ? kinds(type)
+                    : Stream.of(ChatWire.kind(type.asSubclass(Record.class))));
+  }
+
+  private static List<String> lowered(Enum<?>... values) {
+    return Arrays.stream(values).map(value -> value.name().toLowerCase(Locale.ROOT)).toList();
   }
 
   private static Set<String> wellKnownTypes() {

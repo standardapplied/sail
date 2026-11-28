@@ -5,9 +5,10 @@ public struct Endpoint<Response: Decodable & Sendable>: Sendable {
     public let request: HTTPRequest
 
     package init(
-        _ method: HTTPMethod, _ segments: [String], query: [(String, String?)] = [], headers: [String: String] = [:], body: Data? = nil
+        _ method: HTTPMethod, _ segments: [String], action: String? = nil, query: [(String, String?)] = [], headers: [String: String] = [:],
+        body: Data? = nil
     ) {
-        var request = HTTPRequest(method, segments, query: query, body: body)
+        var request = HTTPRequest(method, segments, action: action, query: query, body: body)
         request.headers.merge(headers) { _, given in given }
         self.request = request
     }
@@ -136,18 +137,10 @@ package enum SailJSON {
     }
 
     private static func undecodable(_ error: any Error, route: String) -> Undecodable {
-        switch error {
-        case let DecodingError.keyNotFound(key, context):
-            Undecodable(route: route, field: field(context.codingPath + [key]), reason: "it is missing")
-        case let DecodingError.valueNotFound(_, context):
-            Undecodable(route: route, field: field(context.codingPath), reason: "it is null")
-        case let DecodingError.typeMismatch(type, context):
-            Undecodable(route: route, field: field(context.codingPath), reason: "it is not \(type)")
-        case let DecodingError.dataCorrupted(context):
-            Undecodable(route: route, field: field(context.codingPath), reason: context.debugDescription)
-        default:
-            Undecodable(route: route, field: "(body)", reason: "\(error)")
+        guard let said = (error as? DecodingError)?.said else {
+            return Undecodable(route: route, field: "(body)", reason: "\(error)")
         }
+        return Undecodable(route: route, field: field(said.path), reason: said.reason)
     }
 
     /// `path` as the server spells it: `rooms[0].created_at`.
@@ -159,6 +152,19 @@ package enum SailJSON {
             } else {
                 field += (field.isEmpty ? "" : ".") + key.stringValue
             }
+        }
+    }
+}
+
+extension DecodingError {
+    /// Where the error is in the body and why, in the words an ``Undecodable`` says.
+    package var said: (path: [any CodingKey], reason: String)? {
+        switch self {
+        case let .keyNotFound(key, context): (context.codingPath + [key], "it is missing")
+        case let .valueNotFound(_, context): (context.codingPath, "it is null")
+        case let .typeMismatch(type, context): (context.codingPath, "it is not \(type)")
+        case let .dataCorrupted(context): (context.codingPath, context.debugDescription)
+        @unknown default: nil
         }
     }
 }

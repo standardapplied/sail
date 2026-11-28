@@ -12,6 +12,60 @@
     "room",
     "message"
   ],
+  "chat_change_kinds": [
+    "change",
+    "add",
+    "delete",
+    "move"
+  ],
+  "chat_decisions": [
+    "allow",
+    "allow_always",
+    "deny",
+    "answer"
+  ],
+  "chat_detail_types": [
+    "command",
+    "edit",
+    "read",
+    "search",
+    "fetch",
+    "other"
+  ],
+  "chat_item_types": [
+    "message",
+    "delivered",
+    "told",
+    "answered",
+    "mode_set",
+    "session",
+    "mode_changed",
+    "text",
+    "tool",
+    "tool_done",
+    "permission",
+    "question",
+    "plan",
+    "withdrawn",
+    "retrying",
+    "compacted",
+    "interrupted",
+    "refused",
+    "unreadable",
+    "self_started",
+    "failed",
+    "turn_ended"
+  ],
+  "chat_tool_kinds": [
+    "command",
+    "edit",
+    "read",
+    "search",
+    "web",
+    "mcp",
+    "agent",
+    "other"
+  ],
   "error_codes": [
     {
       "code": "bad_request",

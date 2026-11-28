@@ -3,24 +3,32 @@ import SailAPI
 import SailTerminalWire
 
 /// A harness a person starts in a workspace: by the runner's name for it and in one of its modes,
-/// with the display name its tab is titled by, and whether it signs in inside instead of with the
-/// person's stored login. The host composes the command; nothing here names one.
+/// with the display name its tab is titled by, whether it signs in inside instead of with the
+/// person's stored login, and the form it opens in. The host composes the command; nothing here
+/// names one.
 public struct AgentStart: Hashable, Codable, Sendable {
     public let harness: String
     public let display: String
     public let mode: String
     public let inside: Bool
+    public let form: SessionForm
 
-    public init(harness: String, display: String, mode: String, inside: Bool = false) {
+    public init(harness: String, display: String, mode: String, inside: Bool = false, form: SessionForm = .terminal) {
         self.harness = harness
         self.display = display
         self.mode = mode
         self.inside = inside
+        self.form = form
     }
 
     /// What a `Create` carries for it.
     public var wire: SessionAgent {
         SessionAgent(harness: harness, mode: mode, inside: inside)
+    }
+
+    /// What opening a chat of it asks for.
+    public var chat: ChatAgent {
+        ChatAgent(harness: harness, mode: mode, inside: inside)
     }
 }
 
@@ -37,20 +45,25 @@ public enum Way: String, Codable, Hashable, Sendable {
     case signIn, key
 }
 
-/// What a person last started, per harness the mode and the way in, the last start whole, which
-/// the row's menu names and starts again, and whether the kind opened last was the Shell. Kept by
-/// the app between launches.
+/// What a person last started, per harness the mode, the way in and the form chosen, the last
+/// start whole, which the row's menu names and starts again, and whether the kind opened last was
+/// the Shell. Kept by the app between launches.
 public struct ModeMemory: Codable, Equatable, Sendable {
     public private(set) var modes: [String: String]
     public private(set) var ways: [String: Way]
     public private(set) var last: AgentStart?
     public private(set) var shellLast: Bool
+    public private(set) var forms: [String: SessionForm]
 
-    public init(modes: [String: String] = [:], ways: [String: Way] = [:], last: AgentStart? = nil, shellLast: Bool = false) {
+    public init(
+        modes: [String: String] = [:], ways: [String: Way] = [:], last: AgentStart? = nil, shellLast: Bool = false,
+        forms: [String: SessionForm] = [:]
+    ) {
         self.modes = modes
         self.ways = ways
         self.last = last
         self.shellLast = shellLast
+        self.forms = forms
     }
 
     public mutating func remember(_ start: AgentStart) {
@@ -67,20 +80,28 @@ public struct ModeMemory: Codable, Equatable, Sendable {
     /// These starts with the last harness as the kind last opened: what the row's quick item, which
     /// names that harness, opens at.
     public var atLastHarness: ModeMemory {
-        ModeMemory(modes: modes, ways: ways, last: last)
+        ModeMemory(modes: modes, ways: ways, last: last, forms: forms)
     }
 
     /// `way` chosen for `harness` without a start: storing a key chooses it.
     public mutating func choose(_ way: Way, for harness: String) {
         ways[harness] = way
     }
+
+    /// `form` chosen for `harness`, where a person chooses one.
+    public mutating func choose(_ form: SessionForm, for harness: String) {
+        forms[harness] = form
+    }
 }
 
-/// The New Session panel's model for one workspace, from what its agents route answered: the
-/// harnesses it offers in its order and a Shell after them, narrowed past seven by what is typed,
-/// the one chosen (the kind opened last while it is offered), its mode and its way in (each the
-/// person's last for that harness while it is offered, else the harness's own default mode and its
-/// own sign-in), and what a start would do.
+/// The New Session panel's model for one workspace, from what its agents route answered and the
+/// forms the person works in (`preference`): the harnesses it offers in its order that open in one
+/// of those forms, and a Shell after them unless the person works in chats alone, narrowed past
+/// seven by what is typed; the one chosen (the kind opened last while it is offered); its form
+/// (the form preferred, or, preferring both, the person's last for that harness while it is
+/// offered, else the first the harness opens in), its mode and its way in, each of that form (the
+/// person's last for that harness while it is offered, else the form's own default mode and its own
+/// sign-in, a chat's where it signs in inside, else the key); and what a start would do.
 /// Every sentence is the server's; no harness's, mode's or kind's name is branched on.
 public struct NewSession: Equatable, Sendable {
     public enum Choice: Hashable, Sendable {
@@ -88,17 +109,20 @@ public struct NewSession: Equatable, Sendable {
         case shell
     }
 
-    /// What Start does for the choice: start it, in its way in; nothing, said why; or open a shell.
+    /// What Start does for the choice: start it, in its form and way in; nothing, said why; open a
+    /// shell; or nothing at all, since nothing is offered to choose.
     public enum Readiness: Equatable, Sendable {
         case start(AgentStart)
         case refused(Refusal)
         case shell
+        case nothing
     }
 
     /// The most rows shown whole; past them typing narrows the rows.
     public static let unnarrowed = 7
 
     public let agents: WorkspaceAgents
+    public let preference: FormPreference
     public private(set) var chosen: Choice
     public private(set) var memory: ModeMemory
     /// What typing narrowed the rows to: the start of their names; empty, every row.
@@ -107,26 +131,48 @@ public struct NewSession: Equatable, Sendable {
     private var unfiltered: Choice?
     private var modes: [String: String]
     private var ways: [String: Way]
+    private var forms: [String: SessionForm]
 
-    public init(_ agents: WorkspaceAgents, memory: ModeMemory) {
+    public init(_ agents: WorkspaceAgents, memory: ModeMemory, preference: FormPreference = .terminal) {
         self.agents = agents
         self.memory = memory
-        modes = [:]
-        ways = [:]
-        let lastOffered = memory.last.flatMap { last in agents.offered.first { $0.harness == last.harness } }
-        chosen = memory.shellLast ? .shell : (lastOffered ?? agents.offered.first).map { .harness($0.harness) } ?? .shell
-        for offer in agents.offered {
-            let remembered = memory.modes[offer.harness]
-            modes[offer.harness] = offer.modes.contains { $0.mode == remembered } ? remembered : offer.modeDefault
-            let way = memory.ways[offer.harness] ?? .signIn
-            ways[offer.harness] = Self.offered(way, by: offer) ? way : .signIn
+        self.preference = preference
+        modes = memory.modes
+        ways = memory.ways
+        forms = memory.forms
+        chosen = .shell
+        let listed = agents.offered.filter { !forms(of: $0).isEmpty }
+        let lastListed = memory.last.flatMap { last in listed.first { $0.harness == last.harness } }
+        let first = (lastListed ?? listed.first).map { Choice.harness($0.harness) }
+        chosen = memory.shellLast && shells ? .shell : first ?? .shell
+    }
+
+    /// Whether the Shell is a row: unless the person works in chats alone.
+    private var shells: Bool {
+        preference != .chat
+    }
+
+    /// The forms `offer` opens in that the person works in, in the server's order; a chat only
+    /// where it says how the harness chats.
+    private func forms(of offer: AgentOffer) -> [SessionForm] {
+        offer.forms.compactMap { form -> SessionForm? in
+            guard case let .known(known) = form, known != .chat || offer.chat != nil else { return nil }
+            switch preference {
+            case .both: return known
+            case .chat: return known == .chat ? known : nil
+            case .terminal: return known == .terminal ? known : nil
+            }
         }
     }
 
-    /// Whether `offer` starts in `way`: its own sign-in always, a key where one is its default.
-    /// An offer the server says does not start inside does not start at all (its `refusal`).
-    private static func offered(_ way: Way, by offer: AgentOffer) -> Bool {
-        way == .signIn || offer.login != nil
+    /// Whether `offer` starts in `way` as `form`: a terminal by its own sign-in always, a chat by it
+    /// where it chats so, and either by a key where one is its default. An offer the server says
+    /// does not start inside does not start at all (its `refusal`).
+    private static func offered(_ way: Way, by offer: AgentOffer, as form: SessionForm) -> Bool {
+        switch way {
+        case .key: offer.login != nil
+        case .signIn: form == .terminal || offer.chat?.inside == true
+        }
     }
 
     /// Why nothing starts in the workspace at all, its person's or gone; nil when its harnesses list.
@@ -141,7 +187,7 @@ public struct NewSession: Equatable, Sendable {
     }
 
     private var every: [Choice] {
-        agents.offered.map { .harness($0.harness) } + [.shell]
+        agents.offered.filter { !forms(of: $0).isEmpty }.map { .harness($0.harness) } + (shells ? [.shell] : [])
     }
 
     /// Whether typing narrows the rows: there are more than ``unnarrowed``.
@@ -174,14 +220,37 @@ public struct NewSession: Equatable, Sendable {
         agents.offered.first { $0.harness == harness }
     }
 
+    /// The forms `harness` may be chosen to open in: one, unless the person works in both.
+    public func forms(of harness: String) -> [SessionForm] {
+        offer(harness).map(forms(of:)) ?? []
+    }
+
+    /// The form `harness` opens in; nil where it is not offered.
+    public func form(of harness: String) -> SessionForm? {
+        let offered = forms(of: harness)
+        return forms[harness].flatMap { offered.contains($0) ? $0 : nil } ?? offered.first
+    }
+
+    /// The modes `harness` starts in, as its form has them.
+    public func modes(of harness: String) -> [AgentMode] {
+        guard let offer = offer(harness), let form = form(of: harness) else { return [] }
+        return form == .chat ? offer.chat?.modes ?? [] : offer.modes
+    }
+
     /// The chosen harness's mode, as a start asks for it.
     public func mode(of harness: String) -> String? {
-        modes[harness]
+        guard let offer = offer(harness), let form = form(of: harness) else { return nil }
+        let offered = modes(of: harness)
+        return modes[harness].flatMap { mode in offered.contains { $0.mode == mode } ? mode : nil }
+            ?? (form == .chat ? offer.chat?.modeDefault : offer.modeDefault)
     }
 
     /// How `harness` starts: its own sign-in, or the key.
     public func way(of harness: String) -> Way? {
-        ways[harness]
+        guard let offer = offer(harness), let form = form(of: harness) else { return nil }
+        let way = ways[harness] ?? .signIn
+        if Self.offered(way, by: offer, as: form) { return way }
+        return Self.offered(.signIn, by: offer, as: form) ? .signIn : .key
     }
 
     public mutating func choose(_ choice: Choice) {
@@ -196,53 +265,64 @@ public struct NewSession: Equatable, Sendable {
         chosen = all[max(0, min(all.count - 1, at + step))]
     }
 
-    /// Chooses `mode` for the chosen harness when that harness offers it; anything else is ignored.
+    /// Chooses `form` for the chosen harness when it may be chosen; anything else is ignored.
+    public mutating func choose(form: SessionForm) {
+        guard case let .harness(harness) = chosen, forms(of: harness).contains(form) else { return }
+        forms[harness] = form
+    }
+
+    /// Chooses `mode` for the chosen harness when its form offers it; anything else is ignored.
     public mutating func choose(mode: String) {
-        guard case let .harness(harness) = chosen, offer(harness)?.modes.contains(where: { $0.mode == mode }) == true else { return }
+        guard case let .harness(harness) = chosen, modes(of: harness).contains(where: { $0.mode == mode }) else { return }
         modes[harness] = mode
     }
 
     /// Chooses `way` for the chosen harness when it starts so; anything else is ignored.
     public mutating func choose(way: Way) {
-        guard case let .harness(harness) = chosen, let offer = offer(harness), Self.offered(way, by: offer) else { return }
+        guard case let .harness(harness) = chosen, let offer = offer(harness), let form = form(of: harness),
+              Self.offered(way, by: offer, as: form)
+        else { return }
         ways[harness] = way
     }
 
     /// Whether the chosen harness's chosen mode skips its own permission checks, as the server says.
     public var risky: Bool {
-        guard case let .harness(harness) = chosen, let mode = modes[harness] else { return false }
-        return offer(harness)?.modes.first { $0.mode == mode }?.risky == true
+        guard case let .harness(harness) = chosen, let mode = mode(of: harness) else { return false }
+        return modes(of: harness).first { $0.mode == mode }?.risky == true
     }
 
     /// Whether the row's quick item starts the last start's harness again at once, in the way in
     /// and mode the person chose for it: it is chosen, its mode and way still offered (a key
     /// chosen is still stored), and it starts. Otherwise the panel opens at that harness.
     public var startsAgain: Bool {
-        guard let last = memory.last, chosen == .harness(last.harness), offer(last.harness)?.modes.contains(where: { $0.mode == last.mode }) == true,
-              ways[last.harness] == memory.ways[last.harness] ?? .signIn
+        guard let last = memory.last, chosen == .harness(last.harness), form(of: last.harness) == last.form,
+              modes(of: last.harness).contains(where: { $0.mode == last.mode }), way(of: last.harness) == memory.ways[last.harness] ?? .signIn
         else { return false }
         if case .start = readiness { return true }
         return false
     }
 
     public var readiness: Readiness {
-        guard case let .harness(harness) = chosen, let offer = offer(harness), let mode = modes[harness] else { return .shell }
+        guard case let .harness(harness) = chosen, let offer = offer(harness), let form = form(of: harness), let mode = mode(of: harness) else {
+            return every.contains(chosen) ? .shell : .nothing
+        }
         if let refusal = offer.refusal { return .refused(refusal) }
-        return .start(AgentStart(harness: harness, display: offer.display, mode: mode, inside: ways[harness] != .key))
+        return .start(AgentStart(harness: harness, display: offer.display, mode: mode, inside: way(of: harness) != .key, form: form))
     }
 
     /// The start Start makes now, nil when it makes none or opens a shell; the memory then holds
-    /// its mode and way for its harness and it as the last start, or the Shell as the kind opened
-    /// last.
+    /// its mode and way for its harness, its form where the person chose one, and it as the last
+    /// start, or the Shell as the kind opened last.
     public mutating func start() -> AgentStart? {
         switch readiness {
         case let .start(start):
             memory.remember(start)
+            if preference == .both { memory.choose(start.form, for: start.harness) }
             return start
         case .shell:
             memory.rememberShell()
             return nil
-        case .refused:
+        case .refused, .nothing:
             return nil
         }
     }
@@ -375,7 +455,7 @@ public enum NewSessionWords {
     public static func primary(_ readiness: NewSession.Readiness) -> String? {
         switch readiness {
         case let .start(start): "Start \(start.display)"
-        case .refused: nil
+        case .refused, .nothing: nil
         case .shell: openShell
         }
     }
